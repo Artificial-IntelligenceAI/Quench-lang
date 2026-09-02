@@ -33,9 +33,10 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
+| **Interpreter** (`quench-interp`) | **Working** — QIR run directly, the engine that does the least |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
-| Program generator, oracle | Not started |
+| Program generator, oracle | **First one runs** — 500 generated programs, interpreter against Dev JIT. `quench-gen` proper not started |
 
 ## Decisions made
 
