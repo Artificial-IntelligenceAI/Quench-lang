@@ -4,11 +4,20 @@ A top-level declaration — a function, a type, a constant — says who may name
 There are three answers, because Quench has three boundaries a name can be on the
 far side of.
 
-| level | who may name it |
+| word | who may name it |
 | --- | --- |
-| **file-private** | only code in this file |
-| **program-wide** | anything compiled together |
-| **exported** | code that imports this as a library |
+| `file` | only code in this file |
+| `program` | anything compiled together |
+| `export` | code that imports this as a library |
+
+Words, not initials. `fp` / `pw` / `ex` were considered and dropped: the reason to
+abbreviate is volume, and the volume is already gone — a visibility word appears on
+top-level declarations only, so a file carries a dozen rather than one per counter.
+That leaves initials saving a few characters at the cost of the thing `START` was
+named for, since a reader who has not met `fp` cannot recover it from the letters.
+All three also land on something else first: `fp` on floating point (free here, as
+Quench's floats are `b` and `d`, but the habit arrives with the reader), `pw` on
+password, `ex` on extern.
 
 Variables do not appear here. They live inside functions, where nothing outside can
 name them however much it would like to, so there is nothing to permit or deny. See

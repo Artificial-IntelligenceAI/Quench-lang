@@ -36,9 +36,10 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   types, constants — and they are order-free, because none of them execute.
   Execution begins in `START` and nowhere else. See
   [notes/the-top-level-does-not-run.md](notes/the-top-level-does-not-run.md).
-- **Three visibilities**, on top-level declarations only: file-private,
-  program-wide, and exported. Variables never carry one, because nothing outside
-  a function can name them anyway. See
+- **Three visibilities**, on top-level declarations only: `file`, `program` and
+  `export`. Words rather than initials, since the volume that would justify
+  abbreviating is already gone. Variables never carry one, because nothing
+  outside a function can name them anyway. See
   [notes/three-lines-a-name-can-cross.md](notes/three-lines-a-name-can-cross.md).
 - **Constants outside, variables inside.** A constant is a value the compiler can
   work out; anything needing code to run to produce it would need that code to run
