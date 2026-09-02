@@ -29,6 +29,10 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 
 ## Decisions made
 
+- **A program starts at `start`.** Named for what it does, rather than by
+  convention. Nothing marks it and nothing is special about it otherwise: the
+  compiler builds every function, then looks for that name.
+
 - **Memory is owned.** Ownership and moves, with a borrow checker. Not refcounting,
   not a collector.
 - **Two host languages.** Rust for the frontend and the Cranelift Dev JIT; C++ for

@@ -18,7 +18,7 @@ fn just(f: quench_qir::Function) -> Module {
 
 #[test]
 fn an_entry_can_return_a_constant() {
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let n = b.const_i64(42);
     b.ret(n);
 
@@ -28,7 +28,7 @@ fn an_entry_can_return_a_constant() {
 #[test]
 fn arithmetic_arrives_intact() {
     // (7 + 5) * 3 - 16 / 4 % 3  ==  36 - 1  ==  35
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let seven = b.const_i64(7);
     let five = b.const_i64(5);
     let three = b.const_i64(3);
@@ -49,7 +49,7 @@ fn arithmetic_arrives_intact() {
 fn negative_division_truncates_towards_zero() {
     // The one arithmetic answer the three engines could plausibly differ on, so it is
     // pinned here from the start rather than discovered later by the oracle.
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let minus_seven = b.const_i64(-7);
     let two = b.const_i64(2);
     let q = b.div(minus_seven, two);
@@ -66,7 +66,7 @@ fn negative_division_truncates_towards_zero() {
 #[test]
 fn a_loop_carries_its_values_in_block_parameters() {
     // acc = 0; for i in 1..=10 { acc += i }  ->  55
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let head = b.block(&[Ty::I64, Ty::I64]);
     let body = b.block(&[Ty::I64, Ty::I64]);
     let done = b.block(&[Ty::I64]);
@@ -122,7 +122,7 @@ fn a_function_can_call_itself() {
     let factorial = m.add(b.finish());
     assert_eq!(factorial, me, "next_id promised the id the function actually got");
 
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let ten = b.const_i64(10);
     let answer = b.call(factorial, &[ten], Ty::I64);
     b.ret(answer);
@@ -134,7 +134,7 @@ fn a_function_can_call_itself() {
 
 #[test]
 fn booleans_survive_being_negated() {
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let yes = b.block(&[]);
     let no = b.block(&[]);
 
@@ -167,7 +167,7 @@ fn every_comparison_means_what_it_says() {
         (CmpOp::Ge, 5, 5, 1),
     ];
     for (op, lhs, rhs, want) in cases {
-        let mut b = Builder::new("main", &[], Ty::I64);
+        let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
         let t = b.block(&[]);
         let f = b.block(&[]);
         let l = b.const_i64(lhs);
@@ -187,7 +187,7 @@ fn every_comparison_means_what_it_says() {
 
 #[test]
 fn an_entry_that_takes_arguments_is_refused() {
-    let mut b = Builder::new("main", &[Ty::I64], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[Ty::I64], Ty::I64);
     let n = b.param(0);
     b.ret(n);
 
@@ -211,7 +211,7 @@ fn a_module_with_no_entry_says_so() {
 fn ill_typed_ir_is_stopped_before_cranelift_sees_it() {
     // Adding a bool to an i64. Nothing in the frontend should produce this; if something
     // does, it is caught here rather than becoming three different wrong answers.
-    let mut b = Builder::new("main", &[], Ty::I64);
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
     let one = b.const_i64(1);
     let two = b.const_i64(2);
     let flag = b.cmp(CmpOp::Lt, one, two);
@@ -222,4 +222,36 @@ fn ill_typed_ir_is_stopped_before_cranelift_sees_it() {
     let text = err.to_string();
     assert!(text.contains("not well formed"), "{text}");
     assert!(text.contains("wants i64"), "{text}");
+}
+
+#[test]
+fn the_entry_is_the_function_called_start() {
+    // Nothing marks it. A frontend compiles every function, then asks for that name.
+    let mut m = Module::new();
+
+    let mut b = Builder::new("helper", &[], Ty::I64);
+    let n = b.const_i64(1);
+    b.ret(n);
+    m.add(b.finish());
+
+    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
+    let n = b.const_i64(7);
+    b.ret(n);
+    m.add(b.finish());
+
+    let found = m.set_entry_to_start().expect("a module with a `start` has an entry");
+    assert_eq!(m.func(found).name, "start");
+    assert_eq!(compile(&m).unwrap().run(), 7);
+}
+
+#[test]
+fn a_module_with_no_start_has_nothing_to_point_at() {
+    let mut m = Module::new();
+    let mut b = Builder::new("helper", &[], Ty::I64);
+    let n = b.const_i64(1);
+    b.ret(n);
+    m.add(b.finish());
+
+    assert!(m.set_entry_to_start().is_none());
+    assert!(compile(&m).unwrap_err().to_string().contains("names no entry"));
 }

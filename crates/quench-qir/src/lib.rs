@@ -36,6 +36,19 @@
 /// guess at it. Bump this whenever the meaning of anything below changes.
 pub const VERSION: u32 = 0;
 
+/// The name of the function a program starts at.
+///
+/// `start`, because that is what it does. `main` is a convention rather than a
+/// description — it says a function is important without saying why, and a reader who
+/// has not met it before cannot work out what it means from the word. Quench does not
+/// have C's split between `_start` (the real entry, which sets a runtime up) and `main`
+/// (the one you write), so there is no second thing the name has to stay clear of.
+///
+/// A backend never uses this: it takes [`Module::entry`], which is an id, because that
+/// is what a call needs. The name is how the *frontend* finds the function in the first
+/// place.
+pub const ENTRY: &str = "start";
+
 /// The type of a value. Every value has exactly one, and it never changes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ty {
@@ -177,6 +190,21 @@ impl Module {
     /// The id the next function added will be given, for a body that has to name itself.
     pub fn next_id(&self) -> FuncId {
         FuncId(self.functions.len() as u32)
+    }
+
+    /// Find a function by name.
+    pub fn find(&self, name: &str) -> Option<FuncId> {
+        self.functions.iter().position(|f| f.name == name).map(|i| FuncId(i as u32))
+    }
+
+    /// Point the module at the function called [`ENTRY`], if it has one.
+    ///
+    /// This is what a frontend calls once it has compiled a whole program: the entry is
+    /// not marked by anything, it is simply the function with that name.
+    pub fn set_entry_to_start(&mut self) -> Option<FuncId> {
+        let id = self.find(ENTRY)?;
+        self.entry = Some(id);
+        Some(id)
     }
 
     pub fn func(&self, id: FuncId) -> &Function {
