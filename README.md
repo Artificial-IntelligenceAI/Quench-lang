@@ -35,7 +35,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   the LLVM Hot JIT and AOT native backend. They meet at a versioned, serialised IR
   rather than a shared header. See [notes/architecture.md](notes/architecture.md).
 - **The error format comes from [Luarust](https://github.com/Artificial-IntelligenceAI/Luarust)**,
-  unchanged in shape. Same author, same copyright holder, and it was already right.
+  unchanged in shape. Same author, same copyright holder, and it was already
+  right. See [Credit](#credit).
 
 ## Decisions not made yet
 
@@ -127,8 +128,27 @@ be dual licensed as above, without any additional terms or conditions.
 
 ### Provenance
 
-`quench-diag` is derived from `luarust-diag` in
-[Luarust](https://github.com/Artificial-IntelligenceAI/Luarust), which is MIT
-and copyright the same author. Relicensing it under the dual licence here is
-the copyright holder's to do. Quench has no third-party code and, at present,
-no third-party dependencies at all.
+`quench-diag` is derived from `luarust-diag` in Luarust, which is MIT and
+copyright the same author. Relicensing it under the dual licence here is the
+copyright holder's to do. Quench has no third-party code and, at present, no
+third-party dependencies at all.
+
+## Credit
+
+Quench stands on [**Luarust**](https://github.com/Artificial-IntelligenceAI/Luarust),
+the author's earlier language, now abandoned.
+
+The licence permits reuse without acknowledgement. This is here anyway, because
+the reuse is not incidental:
+
+- **The error format is Luarust's**, and is carried over unchanged in shape —
+  the greeting, the rule, the tip, the fix last, the primary and secondary
+  labels, and the insistence on reporting a position three ways at once because
+  a reader, a `grep` and a caret each need a different number. `quench-diag` is
+  `luarust-diag` with the names changed.
+- **The oracle is Luarust's idea too.** Generating programs from the types
+  outward so that every one of them compiles, then insisting that every way of
+  running a program agrees — including on how it *stops* — is the standard
+  Quench inherited, along with the 200,000-program bar it has to clear.
+
+Luarust is not maintained. Quench is where the work continued.
