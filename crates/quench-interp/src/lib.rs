@@ -84,9 +84,23 @@ pub const DEPTH: usize = 10_000;
 
 /// Run a module from its entry.
 pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
-    qir::verify(module).map_err(Error::Invalid)?;
-
     let id = module.entry.ok_or(Error::NoEntry)?;
+    run_id(module, id)
+}
+
+/// Run one named function that takes nothing and returns an i64.
+///
+/// The oracle's other door: a module holds many generated programs, and this runs one
+/// of them without the module having to name it as the entry.
+pub fn run_named(module: &qir::Module, name: &str) -> Result<Outcome, Error> {
+    let id = module
+        .find(name)
+        .ok_or_else(|| Error::Entry(format!("there is no function called `{name}`")))?;
+    run_id(module, id)
+}
+
+fn run_id(module: &qir::Module, id: qir::FuncId) -> Result<Outcome, Error> {
+    qir::verify(module).map_err(Error::Invalid)?;
     let entry = module.func(id);
     if !entry.params.is_empty() {
         return Err(Error::Entry(format!(

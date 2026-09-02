@@ -71,9 +71,26 @@ pub struct Compiled {
     /// Held so the code it owns outlives every pointer taken from it.
     _jit: JITModule,
     entry: *const u8,
+    /// Every function that takes nothing and returns an i64, by name.
+    ///
+    /// The oracle needs this: compiling costs a few hundred times what running costs, so
+    /// it puts many generated programs in one module and calls them one at a time rather
+    /// than compiling each on its own.
+    callable: Vec<(String, *const u8)>,
 }
 
 impl Compiled {
+    /// Run one named function that takes nothing and returns an i64.
+    ///
+    /// `None` if there is no such function, or if it takes arguments.
+    pub fn call(&self, name: &str) -> Option<i64> {
+        let (_, code) = self.callable.iter().find(|(known, _)| known == name)?;
+        // Safe for the same reasons `run` is: the signature was checked at compile time
+        // and the code is kept alive by `_jit` for as long as `self` exists.
+        let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(*code) };
+        Some(f())
+    }
+
     /// Run the entry and hand back what it returned.
     pub fn run(&self) -> i64 {
         // Safe because `compile` checked the entry takes nothing and returns i64, and the
@@ -170,7 +187,14 @@ pub fn compile(module: &qir::Module) -> Result<Compiled, Error> {
 
     jit.finalize_definitions().map_err(|e| Error::Backend(e.to_string()))?;
     let entry = jit.get_finalized_function(declared[entry_id.0 as usize].0);
-    Ok(Compiled { _jit: jit, entry })
+    let callable = module
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.params.is_empty() && f.ret == qir::Ty::I64)
+        .map(|(i, f)| (f.name.clone(), jit.get_finalized_function(declared[i].0)))
+        .collect();
+    Ok(Compiled { _jit: jit, entry, callable })
 }
 
 /// Lower one QIR function into one Cranelift function.

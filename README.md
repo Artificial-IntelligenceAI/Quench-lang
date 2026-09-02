@@ -36,7 +36,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | **Interpreter** (`quench-interp`) | **Working** — QIR run directly, the engine that does the least |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
-| Program generator, oracle | **First one runs** — 500 generated programs, interpreter against Dev JIT. `quench-gen` proper not started |
+| **Generator + oracle** (`quench-gen`) | **Working** — 200,000 programs checked across two engines in 5.5s, all cores |
 
 ## Decisions made
 
@@ -193,7 +193,14 @@ So the methods are not trusted, they are tested against each other:
   answers must match — including the way a program *stops*, since stopping in the
   same place for the same reason is as much an agreement as printing the same number;
 - the generator is built to **saturate the machine it runs on** rather than testing
-  one program at a time.
+  one program at a time. Batching first — compiling a program costs about 352× what
+  running it costs, so many programs go in one module and one compilation covers all
+  of them — and then batches are *claimed* from a shared counter rather than dealt
+  out, because this machine has fast cores and slow ones and a fixed share leaves the
+  fast ones waiting.
+
+Where it stands: **200,000 programs across two engines in 5.5 seconds**, 36,000 a
+second, on ten cores. One worker manages 8,000, so the cores are worth 4.6×.
 
 Any disagreement is a bug in at least one engine, and the seed that produced it is
 kept so it can be replayed.

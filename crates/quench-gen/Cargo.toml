@@ -1,0 +1,13 @@
+[package]
+name = "quench-gen"
+description = "Writing Quench programs, so that the ways of running one can be made to disagree."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-qir = { path = "../quench-qir" }
+quench-interp = { path = "../quench-interp" }
+quench-dev = { path = "../quench-dev" }
