@@ -44,6 +44,28 @@ pub enum Division {
     Floored,
 }
 
+/// How hard the optimiser tries.
+///
+/// **Delivery**, but a special sort of it. It cannot change what a program answers —
+/// every level must give the same result, and that is exactly what the oracle checks.
+/// What it changes is *what the compiler does*, so unlike `embed-source` it is worth
+/// sweeping: a bug that only appears at one level is a real bug, found only if
+/// something compiled at that level.
+///
+/// The Dev JIT ignores this and stays at [`Optimise::None`]. That is not an oversight —
+/// being the engine that did the least is what makes it the reference the others are
+/// measured against, and a setting that could change it would take that away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Optimise {
+    /// Compile fast and transform nothing.
+    #[default]
+    None,
+    /// Make it fast.
+    Speed,
+    /// Make it fast, and prefer the smaller of two ways of doing that.
+    SpeedAndSize,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -62,6 +84,8 @@ pub struct Settings {
     pub division: Division,
     /// `[run] engine`
     pub engine: Engine,
+    /// `[build] optimise`
+    pub optimise: Optimise,
 }
 
 /// Read a `QNL-Config.toml`, reporting everything wrong with it rather than the first
@@ -93,11 +117,11 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
 
         if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             let name = name.trim();
-            if !matches!(name, "defaults" | "run") {
+            if !matches!(name, "defaults" | "run" | "build") {
                 errors.push(
                     Diagnostic::new("E0701", format!("`[{name}]` is not a section this reads."))
                         .primary(span_of(trimmed), "here")
-                        .rule("the sections are `[defaults]`, for what a program means, and `[run]`, for how it runs")
+                        .rule("the sections are `[defaults]` for what a program means, `[build]` for what gets delivered, and `[run]` for how it runs")
                         .fix("remove it, or move its settings into a section that exists"),
                 );
             }
@@ -124,6 +148,17 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 "floored" => settings.division = Division::Floored,
                 _ => errors.push(bad_value(span_of(value), key, value, &["truncated", "floored"])),
             },
+            ("build", "optimise") => match value {
+                "none" => settings.optimise = Optimise::None,
+                "speed" => settings.optimise = Optimise::Speed,
+                "speed-and-size" => settings.optimise = Optimise::SpeedAndSize,
+                _ => errors.push(bad_value(
+                    span_of(value),
+                    key,
+                    value,
+                    &["none", "speed", "speed-and-size"],
+                )),
+            },
             ("run", "engine") => match value {
                 "dev-jit" => settings.engine = Engine::DevJit,
                 "interpreter" => settings.engine = Engine::Interpreter,
@@ -141,6 +176,7 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                     .rule("a setting that is not understood is refused rather than ignored, since a project that set it meant something by it")
                     .tip(match section {
                         "defaults" => "`[defaults]` holds `division`.",
+                        "build" => "`[build]` holds `optimise`.",
                         "run" => "`[run]` holds `engine`.",
                         _ => "that section holds nothing yet.",
                     })

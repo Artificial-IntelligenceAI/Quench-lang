@@ -182,13 +182,19 @@ of them is cheap:
   does — multiply the oracle, because three engines have to agree under *each*
   setting, not once overall.
 
+There is a third case in between, which the note describes: `[build] optimise` cannot
+change what a program answers — every level must agree, and that is precisely what is
+checked — but it does change what the *compiler* does, so sweeping it is free coverage
+rather than a cost.
+
 So the first kind can grow freely and the second is argued one knob at a time.
 
 The first semantic one is here: `[defaults] division`, truncated or floored. It is
 threaded all the way through — the generator picks a configuration per seed, both
 engines carry it as **separate QIR instructions** rather than a mode they interpret,
 and a disagreement names the settings it happened under. The oracle now proves two
-languages instead of one, and still finishes 200,000 programs in 5.3 seconds. See
+languages instead of one — and three ways of running each, since the oracle sweeps
+optimisation levels too. 200,000 programs, 600,000 comparisons, 8.3 seconds. See
 [notes/every-knob-is-a-multiplier.md](notes/every-knob-is-a-multiplier.md).
 
 ## The oracle

@@ -9,7 +9,7 @@ fn main() {
     let workers = quench_gen::cores();
 
     let seeds: Vec<u64> = (1..=programs).collect();
-    println!("{programs} programs, {per_batch} per batch, {workers} workers");
+    println!("{programs} programs, {per_batch} per batch, {workers} workers, 3 ways each");
 
     let report = quench_gen::check(&seeds, per_batch, workers);
 
@@ -21,7 +21,10 @@ fn main() {
     } else {
         println!("DISAGREED on {}:", report.disagreements.len());
         for d in report.disagreements.iter().take(10) {
-            println!("  seed {}: interpreter {:?}, Dev JIT {:?}", d.seed, d.interpreted, d.compiled);
+            println!("  seed {} under {:?}:", d.seed, d.settings);
+            for (way, told) in &d.answers {
+                println!("      {way:<16} {told:?}");
+            }
         }
     }
 }

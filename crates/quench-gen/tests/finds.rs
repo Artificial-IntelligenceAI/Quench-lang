@@ -55,6 +55,26 @@ fn the_oracle_agrees_across_the_engines_it_has() {
 }
 
 #[test]
+fn every_optimisation_level_answers_the_same() {
+    // An optimisation level is not a different language, so this is a claim rather than
+    // a configuration: whatever Cranelift does at `speed`, it must arrive at the same
+    // number it arrives at doing nothing.
+    use quench_conf::Optimise;
+    let seeds: Vec<u64> = (1..=200).collect();
+    let module = batch(&seeds);
+    let plain = quench_dev::compile_with(&module, Optimise::None).expect("it compiles");
+    let quick = quench_dev::compile_with(&module, Optimise::Speed).expect("it compiles");
+    let small = quench_dev::compile_with(&module, Optimise::SpeedAndSize).expect("it compiles");
+
+    for seed in seeds {
+        let name = name_of(seed);
+        let (a, b, c) = (plain.call(&name), quick.call(&name), small.call(&name));
+        assert_eq!(a, b, "seed {seed}: none and speed differ");
+        assert_eq!(a, c, "seed {seed}: none and speed-and-size differ");
+    }
+}
+
+#[test]
 fn the_oracle_notices_when_two_engines_differ() {
     // The test the oracle needs most: proof it can fail. A module is built where the
     // interpreter and the Dev JIT are asked about *different* functions under the same

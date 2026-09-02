@@ -20,6 +20,7 @@ use cranelift_codegen::settings::{self, Configurable as _};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Linkage, Module as _};
+use quench_conf::Optimise;
 use quench_qir as qir;
 
 /// Why a module could not be compiled.
@@ -141,8 +142,18 @@ fn cond(op: qir::CmpOp) -> IntCC {
     }
 }
 
-/// Compile a whole module. The IR is verified first, so lowering can assume it is sound.
+/// Compile a whole module at [`Optimise::None`], which is what the Dev JIT is.
 pub fn compile(module: &qir::Module) -> Result<Compiled, Error> {
+    compile_with(module, Optimise::None)
+}
+
+/// Compile at a chosen level.
+///
+/// The Dev JIT itself never uses anything but [`Optimise::None`] — see the module docs
+/// for why that is the point rather than a limitation. This exists for the oracle, which
+/// checks that every level answers the same, and for which a level that is never
+/// compiled at is a level never tested.
+pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled, Error> {
     qir::verify(module).map_err(Error::Invalid)?;
 
     let entry_id = module.entry.ok_or(Error::NoEntry)?;
@@ -163,8 +174,12 @@ pub fn compile(module: &qir::Module) -> Result<Compiled, Error> {
     }
 
     let mut flags = settings::builder();
-    // See the module docs: this is the reference engine, so it stays out of the way.
-    flags.set("opt_level", "none").map_err(|e| Error::Backend(e.to_string()))?;
+    let level = match optimise {
+        Optimise::None => "none",
+        Optimise::Speed => "speed",
+        Optimise::SpeedAndSize => "speed_and_size",
+    };
+    flags.set("opt_level", level).map_err(|e| Error::Backend(e.to_string()))?;
     let isa = cranelift_native::builder()
         .map_err(|e| Error::Backend(e.to_string()))?
         .finish(settings::Flags::new(flags))

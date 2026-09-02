@@ -14,7 +14,22 @@ all cost the same**, and the expensive ones are not the ones that look expensive
 | | changes what a program answers? | what it costs |
 | --- | --- | --- |
 | `division`, `overflow`, float printing | **yes** | multiplies the oracle |
+| `optimise` | no — every level must answer the same | free, and worth sweeping anyway |
 | `embed-source`, `target-cpu`, gc mode, which engine runs it | no — same answer, different artefact | covered once |
+
+The middle row is a refinement this note did not have at first, and it came from
+watching an optimiser delete a loop. `optimise` does not change what a program *means*
+— every level must produce the same number, and that requirement is the whole point of
+it. But it does change **what the compiler does**, so a bug that only appears at one
+level exists and is only found if something compiled at that level.
+
+So the pile splits by a different question than the one it looked like:
+
+- **Does it multiply the specification?** `division` does: each value is a different
+  language, and each has to be proven separately. That is what costs confidence.
+- **Does it multiply the code path?** `optimise` does: same specification, different
+  route through the backend. That costs only time, and buys real coverage.
+- **Neither?** `embed-source` produces identical machine code either way. Test it once.
 
 The second pile can grow as large as it likes. A program built with its source
 embedded and one built without give the same answer; only the file differs. Testing

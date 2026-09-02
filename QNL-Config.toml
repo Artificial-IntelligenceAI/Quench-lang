@@ -11,6 +11,15 @@
 # means and what makes `x % n` always land in `0..n`.
 division = "truncated"
 
+[build]
+# Changes what gets delivered, never what a program answers -- every level has to
+# produce the same number, which is what the oracle checks. `none`, `speed`, or
+# `speed-and-size`.
+#
+# The Dev JIT ignores this and stays at `none`. Being the engine that did the least is
+# what makes it the one to believe when the others disagree.
+optimise = "speed"
+
 [run]
 # Changes only how a program runs, never what it says.
 engine = "dev-jit"

@@ -19,7 +19,7 @@
 //! third-party dependencies at all.
 
 use crate::write::{batch, name_of, settings_for};
-use quench_conf::Settings;
+use quench_conf::{Optimise, Settings};
 use quench_interp::Outcome;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -33,8 +33,9 @@ pub struct Disagreement {
     /// cannot be reproduced, because the same seed is a different language under
     /// different settings.
     pub settings: Settings,
-    pub interpreted: Told,
-    pub compiled: Told,
+    /// What each way of running it said, named. A list rather than a pair, because a
+    /// third engine and further optimisation levels join this rather than replace it.
+    pub answers: Vec<(String, Told)>,
 }
 
 /// What an engine said.
@@ -72,6 +73,21 @@ pub fn cores() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
+/// Every way a program is run and compared.
+///
+/// The interpreter is first because it is the reference: it generates no code and
+/// transforms nothing, so when these disagree it is the one to believe.
+///
+/// The two Cranelift levels are both here even though neither may change an answer —
+/// that is exactly the claim being checked. An optimisation level is not a different
+/// language, so it multiplies nothing that has to be *proven*; it is a different path
+/// through the backend, so it multiplies what is worth *testing*, and it is free.
+const WAYS: [(&str, Option<Optimise>); 3] = [
+    ("interpreter", None),
+    ("dev-jit", Some(Optimise::None)),
+    ("dev-jit @ speed", Some(Optimise::Speed)),
+];
+
 /// Check every seed in `seeds`, in batches, across `workers` threads.
 pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
     let batches: Vec<&[u64]> = seeds.chunks(per_batch.max(1)).collect();
@@ -89,39 +105,56 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                     let Some(seeds) = batches.get(mine) else { return };
 
                     let module = batch(seeds);
-                    // One compilation, however many programs are in it.
-                    let compiled = match quench_dev::compile(&module) {
-                        Ok(compiled) => compiled,
-                        Err(why) => {
-                            let mut found = found.lock().expect("no worker panics holding this");
-                            found.push(Disagreement {
-                                seed: seeds[0],
-                                settings: settings_for(seeds[0]),
-                                interpreted: Told::Refused("(not reached)".into()),
-                                compiled: Told::Refused(why.to_string()),
-                            });
-                            continue;
+
+                    // One compilation per level, however many programs are in the batch.
+                    let mut compiled = Vec::new();
+                    let mut refused = None;
+                    for (name, level) in WAYS {
+                        let Some(level) = level else { continue };
+                        match quench_dev::compile_with(&module, level) {
+                            Ok(built) => compiled.push((name, built)),
+                            Err(why) => refused = Some((name, why.to_string())),
                         }
-                    };
+                    }
+                    if let Some((name, why)) = refused {
+                        let mut found = found.lock().expect("no worker panics holding this");
+                        found.push(Disagreement {
+                            seed: seeds[0],
+                            settings: settings_for(seeds[0]),
+                            answers: vec![(name.to_string(), Told::Refused(why))],
+                        });
+                        continue;
+                    }
 
                     let mut disagreed = Vec::new();
                     for &seed in seeds.iter() {
                         let name = name_of(seed);
-                        let walked = match quench_interp::run_named(&module, &name) {
-                            Ok(Outcome::Returned(v)) => Told::Answered(v),
-                            Ok(Outcome::Trapped(t)) => Told::Stopped(format!("{t:?}")),
-                            Err(why) => Told::Refused(why.to_string()),
-                        };
-                        let ran = match compiled.call(&name) {
-                            Some(v) => Told::Answered(v),
-                            None => Told::Refused("no such function once compiled".into()),
-                        };
-                        if walked != ran {
+                        let mut answers: Vec<(String, Told)> = Vec::new();
+
+                        answers.push((
+                            "interpreter".to_string(),
+                            match quench_interp::run_named(&module, &name) {
+                                Ok(Outcome::Returned(v)) => Told::Answered(v),
+                                Ok(Outcome::Trapped(t)) => Told::Stopped(format!("{t:?}")),
+                                Err(why) => Told::Refused(why.to_string()),
+                            },
+                        ));
+                        for (way, built) in &compiled {
+                            answers.push((
+                                (*way).to_string(),
+                                match built.call(&name) {
+                                    Some(v) => Told::Answered(v),
+                                    None => Told::Refused("no such function once compiled".into()),
+                                },
+                            ));
+                        }
+
+                        // Every way must say the same thing as the first.
+                        if answers.iter().any(|(_, told)| *told != answers[0].1) {
                             disagreed.push(Disagreement {
                                 seed,
                                 settings: settings_for(seed),
-                                interpreted: walked,
-                                compiled: ran,
+                                answers,
                             });
                         }
                     }

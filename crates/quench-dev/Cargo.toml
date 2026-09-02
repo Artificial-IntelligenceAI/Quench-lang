@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+quench-conf = { path = "../quench-conf" }
 quench-qir = { path = "../quench-qir" }
 cranelift-codegen = "0.135"
 cranelift-frontend = "0.135"
