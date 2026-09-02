@@ -157,3 +157,53 @@ fn a_program_that_does_not_check_out_is_not_lowered() {
     assert!(out.module.is_none());
     assert!(!out.errors.is_empty());
 }
+
+#[test]
+fn arithmetic_comes_out_the_same_in_both_engines() {
+    assert_eq!(said("START { var.i64 ['n'] = [*7* + *3*]; print['n']; }"), "10");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* - *3*]; print['n']; }"), "4");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* x *3*]; print['n']; }"), "21");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* / *3*]; print['n']; }"), "2");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* mod *3*]; print['n']; }"), "1");
+}
+
+#[test]
+fn precedence_shows_up_in_the_answer() {
+    assert_eq!(said("START { var.i64 ['n'] = [*1* + *2* x *3*]; print['n']; }"), "7");
+    assert_eq!(said("START { var.i64 ['n'] = [(*1* + *2*) x *3*]; print['n']; }"), "9");
+    // Equal tiers go left to right, which is what everybody expects of subtraction.
+    assert_eq!(said("START { var.i64 ['n'] = [*10* - *3* - *2*]; print['n']; }"), "5");
+}
+
+#[test]
+fn a_comparison_prints_as_a_word() {
+    assert_eq!(said("START { var.bool ['b'] = [*7* > *3*]; print['b']; }"), "true");
+    assert_eq!(said("START { var.bool ['b'] = [*7* < *3*]; print['b']; }"), "false");
+    assert_eq!(said("START { var.bool ['b'] = [*7* == *7*]; print['b']; }"), "true");
+}
+
+#[test]
+fn the_division_setting_reaches_the_answer() {
+    use quench_conf::{Division, Settings};
+    let source = "START { var.i64 ['n'] = [*0* - *7*]; var.i64 ['q'] = ['n' / *2*]; print['q']; }";
+
+    let truncated = quench_lower::lower_under(source, Settings::default());
+    let floored = quench_lower::lower_under(
+        source,
+        Settings { division: Division::Floored, ..Settings::default() },
+    );
+
+    let ran = |lowered: quench_lower::Lowered| {
+        let module = lowered.module.expect("a program");
+        let (_, said) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+        let mut walked = Vec::new();
+        quench_interp::run_writing(&module, &mut walked).expect("it runs");
+        assert_eq!(said, String::from_utf8(walked).expect("text"), "the engines disagree");
+        said
+    };
+
+    // The same source, two different programs. Which is the whole reason a semantic
+    // setting multiplies what the oracle has to prove.
+    assert_eq!(ran(truncated), "-3", "toward zero");
+    assert_eq!(ran(floored), "-4", "toward negative infinity");
+}

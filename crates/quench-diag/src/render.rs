@@ -118,6 +118,11 @@ fn write_field(out: &mut String, label: &str, values: &[String]) {
 }
 
 /// The source lines an error points at, each with its carets underneath.
+///
+/// A line is shown **once**, however many labels land on it, with their carets stacked
+/// beneath. The first version printed the line again for every label, which is fine when
+/// they are on different lines and absurd when they are not — an error about two
+/// operators on one line said the same line three times.
 fn snippet(source: &SourceFile, diag: &Diagnostic) -> String {
     let mut labels: Vec<_> = diag.labels.iter().collect();
     labels.sort_by_key(|l| l.span.start);
@@ -130,15 +135,20 @@ fn snippet(source: &SourceFile, diag: &Diagnostic) -> String {
         .unwrap_or(1);
 
     let mut out = String::new();
+    let mut showing = None;
     for label in labels {
         let line = source.line_of(label.span.start);
+        if showing != Some(line) {
+            let _ =
+                writeln!(out, "{:>widest$} | {}", line, source.line_text(line), widest = widest + 2);
+            showing = Some(line);
+        }
+
         let (indent, under) = source.caret_layout(label.span);
         let mark = match label.style {
             LabelStyle::Primary => '^',
             LabelStyle::Secondary => '~',
         };
-
-        let _ = writeln!(out, "{:>widest$} | {}", line, source.line_text(line), widest = widest + 2);
         let _ = writeln!(
             out,
             "{:>widest$} | {}{} {}",

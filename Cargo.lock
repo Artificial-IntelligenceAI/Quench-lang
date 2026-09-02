@@ -322,6 +322,7 @@ dependencies = [
 name = "quench-cli"
 version = "0.0.0"
 dependencies = [
+ "quench-conf",
  "quench-dev",
  "quench-diag",
  "quench-interp",
@@ -382,6 +383,7 @@ name = "quench-lower"
 version = "0.0.0"
 dependencies = [
  "quench-check",
+ "quench-conf",
  "quench-dev",
  "quench-diag",
  "quench-interp",

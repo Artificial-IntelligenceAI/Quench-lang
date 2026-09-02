@@ -94,6 +94,9 @@ Both print the same thing, which is not a coincidence — it is
   both produced famous traps: the lesson is not that C chose wrong but that there was
   nothing to choose. See
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
+- **Arithmetic works.** `+ - x / mod` and the comparisons, with the precedence
+  mathematics settled applied and everything else refused. `1 + 2 x 3` is 7;
+  `10 mod 3 + 1` is an error offering both readings.
 - **The operators**: `+` `-`, `x`/`×` for multiply (never `*`, which is the
   written-value mark), `/`/`÷`, `mod`, `^`/`xx` for an exponent, and `<` `>` `</=`
   `>/=` `==` `!=`. Two spellings were not available rather than not chosen: `**`

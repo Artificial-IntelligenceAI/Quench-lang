@@ -14,7 +14,7 @@
 
 pub mod ast;
 
-pub use ast::{Piece, Print, Program, Start, Stmt, Value, Var};
+pub use ast::{OpKind, Operator, Piece, Print, Program, Start, Stmt, Term, Value, Var};
 
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
@@ -246,17 +246,13 @@ impl<'a> Parser<'a> {
 
         self.expect(Kind::Equals, "a declaration")?;
 
-        // The values, each of them as many pieces as it likes.
+        // The values. Each one is a flat run of terms with whatever was written
+        // between them; what binds to what is decided later, by something that can
+        // explain itself when the answer is not settled.
         let values_start = self.expect(Kind::OpenList, "a declaration")?;
         let mut values = Vec::new();
         loop {
-            let from = self.peek().span;
-            let mut pieces = Vec::new();
-            while !matches!(self.peek().kind, Kind::Comma | Kind::CloseList | Kind::End) {
-                pieces.push(self.piece(false)?);
-            }
-            let to = pieces.last().map(|p| p.span()).unwrap_or(from);
-            values.push(Value { pieces, span: from.to(to) });
+            values.push(self.value()?);
             if self.eat(Kind::Comma).is_none() {
                 break;
             }
@@ -291,6 +287,79 @@ impl<'a> Parser<'a> {
         }
 
         Some(Var { chain, names, values, span: start.to(end) })
+    }
+
+    /// One value: terms, and whatever sits between them.
+    fn value(&mut self) -> Option<ast::Value> {
+        let from = self.peek().span;
+        let mut terms = Vec::new();
+        let mut between = Vec::new();
+
+        while !matches!(self.peek().kind, Kind::Comma | Kind::CloseList | Kind::CloseGroup | Kind::End)
+        {
+            if !terms.is_empty() {
+                // Either an operator, or nothing at all — and nothing at all is
+                // juxtaposition, which is how a list of pieces builds text.
+                between.push(self.operator());
+            }
+            terms.push(self.term()?);
+        }
+
+        let to = terms.last().map(ast::Term::span).unwrap_or(from);
+        Some(ast::Value { terms, between, span: from.to(to) })
+    }
+
+    /// An operator, if one is written here. Words are operators too, and cost nothing,
+    /// because Quench reserves none of them.
+    fn operator(&mut self) -> Option<ast::Operator> {
+        use ast::OpKind::*;
+        let token = self.peek();
+        let kind = match token.kind {
+            Kind::Plus => Add,
+            Kind::Minus => Sub,
+            Kind::Times => Mul,
+            Kind::Slash => Div,
+            Kind::Power => Pow,
+            Kind::Less => Lt,
+            Kind::Greater => Gt,
+            Kind::LessEqual => Le,
+            Kind::GreaterEqual => Ge,
+            Kind::EqualTo => Eq,
+            Kind::NotEqual => Ne,
+            // A word is an operator only when it is not a type in front of a value:
+            // `str:*x*` starts a term, `x` between two of them multiplies.
+            Kind::Word if self.tokens.get(self.at + 1).map(|t| t.kind) != Some(Kind::Colon) => {
+                match self.text(token.span) {
+                    "x" => Mul,
+                    "xx" => Pow,
+                    "mod" => Mod,
+                    "and" => And,
+                    "or" => Or,
+                    "eq-to" => Eq,
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        self.bump();
+        Some(ast::Operator { kind, span: token.span })
+    }
+
+    /// One operand: a piece, a bracketed value, or `not` in front of one.
+    fn term(&mut self) -> Option<ast::Term> {
+        let token = self.peek();
+        if token.kind == Kind::OpenGroup {
+            let open = self.bump().span;
+            let value = self.value()?;
+            let close = self.expect(Kind::CloseGroup, "a bracketed value")?;
+            return Some(ast::Term::Group { open, value: Box::new(value), close });
+        }
+        if token.kind == Kind::Word && self.text(token.span) == "not" {
+            let word = self.bump().span;
+            let of = self.term()?;
+            return Some(ast::Term::Not { word, of: Box::new(of) });
+        }
+        self.piece(false).map(ast::Term::Piece)
     }
 
     /// One piece of a list. `typed` says whether a written value may carry a type: it

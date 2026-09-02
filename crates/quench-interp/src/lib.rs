@@ -257,6 +257,10 @@ fn evaluate(
         qir::Inst::ConstText(at) => i64::from(*at),
         qir::Inst::CallHost { host, args } => {
             match host {
+                qir::Host::PrintBool => {
+                    let yes = slots[args[0].0 as usize] != 0;
+                    let _ = write!(out, "{}", if yes { "true" } else { "false" });
+                }
                 qir::Host::PrintI64 => {
                     let _ = write!(out, "{}", slots[args[0].0 as usize]);
                 }

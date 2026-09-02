@@ -10,9 +10,11 @@ repository.workspace = true
 [dependencies]
 quench-diag = { path = "../quench-diag" }
 quench-check = { path = "../quench-check" }
+quench-conf = { path = "../quench-conf" }
 quench-qir = { path = "../quench-qir" }
 
 [dev-dependencies]
 quench-interp = { path = "../quench-interp" }
 quench-dev = { path = "../quench-dev" }
 quench-check = { path = "../quench-check" }
+quench-conf = { path = "../quench-conf" }

@@ -149,6 +149,8 @@ pub enum Host {
     PrintText,
     /// Write a number. Takes one [`Ty::I64`].
     PrintI64,
+    /// Write `true` or `false`. Takes one [`Ty::Bool`].
+    PrintBool,
 }
 
 impl Host {
@@ -156,6 +158,7 @@ impl Host {
         match self {
             Host::PrintText => "print-text",
             Host::PrintI64 => "print-i64",
+            Host::PrintBool => "print-bool",
         }
     }
 
@@ -164,6 +167,7 @@ impl Host {
         match self {
             Host::PrintText => &[Ty::Text],
             Host::PrintI64 => &[Ty::I64],
+            Host::PrintBool => &[Ty::Bool],
         }
     }
 }

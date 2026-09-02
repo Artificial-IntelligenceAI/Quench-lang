@@ -22,6 +22,7 @@ use std::collections::HashMap;
 pub enum Ty {
     I64,
     Str,
+    Bool,
 }
 
 impl Ty {
@@ -29,6 +30,7 @@ impl Ty {
         match self {
             Ty::I64 => "i64",
             Ty::Str => "str",
+            Ty::Bool => "bool",
         }
     }
 
@@ -36,6 +38,7 @@ impl Ty {
         match word {
             "i64" => Some(Ty::I64),
             "str" => Some(Ty::Str),
+            "bool" => Some(Ty::Bool),
             _ => None,
         }
     }
@@ -64,14 +67,42 @@ pub struct Local {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct LocalId(pub u32);
 
-/// A value, with the syntax taken off it.
+/// A value, with the syntax taken off it and the tree built.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Value {
     /// Text, with every piece already joined and every escape already meant.
     Text(String),
     Number(i64),
+    Bool(bool),
     /// The value another variable holds.
     Copy(LocalId),
+    Binary { op: OpKind, lhs: Box<Value>, rhs: Box<Value> },
+}
+
+pub use quench_parse::OpKind;
+
+/// How tightly an operator binds — but only where mathematics settled it.
+///
+/// A smaller number binds tighter. `None` means nobody ever agreed, so it never binds
+/// against anything: brackets say what was meant instead. See
+/// `notes/precedence-stops-where-maths-stopped.md`.
+fn tier(op: OpKind) -> Option<u8> {
+    match op {
+        OpKind::Pow => Some(1),
+        OpKind::Mul | OpKind::Div => Some(2),
+        OpKind::Add | OpKind::Sub => Some(3),
+        // Comparison looser than all arithmetic, which is settled. Two comparisons
+        // against each other is not, and is caught separately.
+        OpKind::Lt | OpKind::Gt | OpKind::Le | OpKind::Ge | OpKind::Eq | OpKind::Ne => Some(4),
+        // `mod` written infix, and the logical operators, were invented rather than
+        // derived. C and Python chose opposite orders for `&` and both produced famous
+        // traps; there was never a right answer to inherit.
+        OpKind::Mod | OpKind::And | OpKind::Or => None,
+    }
+}
+
+fn is_comparison(op: OpKind) -> bool {
+    tier(op) == Some(4)
 }
 
 /// One thing to print.
@@ -264,8 +295,43 @@ impl<'a> Checker<'a> {
     // --- values ---------------------------------------------------------------------
 
     fn value(&mut self, value: &ast::Value, ty: Ty, ty_span: Span) -> Option<Value> {
+        // No operators written: the pieces sit side by side, which builds text.
+        if !value.has_operators() {
+            return self.juxtaposed(value, ty, ty_span);
+        }
+
+        // Operators were written, so this is arithmetic and juxtaposition has no meaning
+        // in it. Saying which of the two was probably meant is more use than "wrong".
+        if value.between.iter().any(Option::is_none) {
+            self.errors.push(
+                Diagnostic::new("E0414", "some of these are joined and some are added.")
+                    .primary(value.span, "here")
+                    .rule("pieces side by side build text; an operator between them works something out")
+                    .tip("a value does one or the other, not both.")
+                    .fix("put an operator between all of them, or none of them"),
+            );
+            return None;
+        }
+
+        let built = self.tree(value)?;
+        let found = self.type_of(&built, value.span)?;
+        if found != ty {
+            self.errors.push(
+                Diagnostic::new("E0406", format!("this works out to `{}`, and it is being given to a `{}`.", found.name(), ty.name()))
+                    .primary(value.span, format!("a `{}`", found.name()))
+                    .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                    .rule("nothing converts on its own — two types meet only where something says they should")
+                    .fix("declare it the same type"),
+            );
+            return None;
+        }
+        Some(built)
+    }
+
+    /// Pieces side by side, which is how text is built.
+    fn juxtaposed(&mut self, value: &ast::Value, ty: Ty, ty_span: Span) -> Option<Value> {
         // A value that is one name is that variable's value, whatever the type.
-        if let [ast::Piece::Name(span)] = value.pieces.as_slice() {
+        if let [ast::Term::Piece(ast::Piece::Name(span))] = value.terms.as_slice() {
             let local = self.lookup(*span)?;
             let held = self.locals[local.0 as usize].ty;
             if held != ty {
@@ -280,20 +346,56 @@ impl<'a> Checker<'a> {
             }
             return Some(Value::Copy(local));
         }
+        // A single bracketed value is just that value.
+        if let [ast::Term::Group { value: inner, .. }] = value.terms.as_slice() {
+            return self.value(inner, ty, ty_span);
+        }
 
         match ty {
-            // Text is a list: every piece in order, joined now because they are all
-            // known now. Joining later would mean allocating at run time to build
-            // something that was never going to change.
             Ty::Str => {
                 let mut out = String::new();
-                for piece in &value.pieces {
+                for term in &value.terms {
+                    let ast::Term::Piece(piece) = term else {
+                        self.errors.push(
+                            Diagnostic::new("E0415", "brackets group something to work out, and text is not worked out.")
+                                .primary(term.span(), "here")
+                                .rule("text is a list of pieces, written side by side")
+                                .fix("remove the brackets"),
+                        );
+                        return None;
+                    };
                     out.push_str(&self.literal(piece)?);
                 }
                 Some(Value::Text(out))
             }
-            Ty::I64 => match value.pieces.as_slice() {
-                [ast::Piece::Written { ty: None, mark }] => {
+            Ty::Bool => match value.terms.as_slice() {
+                [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
+                    match unmarked(self.text(*mark)).as_str() {
+                        "true" => Some(Value::Bool(true)),
+                        "false" => Some(Value::Bool(false)),
+                        other => {
+                            self.errors.push(
+                                Diagnostic::new("E0416", format!("`{other}` is not true or false."))
+                                    .primary(*mark, "here")
+                                    .rule("a `bool` is written `*true*` or `*false*`, and nothing is truthy")
+                                    .fix("`*true*` or `*false*`, or a comparison"),
+                            );
+                            None
+                        }
+                    }
+                }
+                _ => {
+                    self.errors.push(
+                        Diagnostic::new("E0417", "a `bool` is one thing, not several.")
+                            .primary(value.span, "here")
+                            .rule("`*true*`, `*false*`, or something that compares two values")
+                            .fix("write one of those"),
+                    );
+                    None
+                }
+            },
+            Ty::I64 => match value.terms.as_slice() {
+                [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
                     let digits = unmarked(self.text(*mark));
                     match digits.parse::<i64>() {
                         Ok(n) => Some(Value::Number(n)),
@@ -310,22 +412,201 @@ impl<'a> Checker<'a> {
                     }
                 }
                 [] => None,
-                pieces => {
-                    // Juxtaposition builds text. It has no meaning for a number, and
-                    // saying so is more use than a general "wrong shape".
-                    let all = pieces[0].span().to(pieces[pieces.len() - 1].span());
+                terms => {
+                    let all = terms[0].span().to(terms[terms.len() - 1].span());
                     self.errors.push(
                         Diagnostic::new("E0408", "a number is one written value, not several.")
-                            .primary(all, format!("{} pieces here", pieces.len()))
+                            .primary(all, format!("{} pieces here", terms.len()))
                             .secondary(ty_span, "declared `i64` here")
                             .rule("pieces side by side build text; a number is written once")
                             .tip("`str` is the type where a value is a list of pieces.")
-                            .fix("write it as one value, or add them with `+` once arithmetic is built"),
+                            .fix("write it as one value, or put `+` between them"),
                     );
                     None
                 }
             },
         }
+    }
+
+    /// Fold a flat run into a tree, or refuse and say why.
+    ///
+    /// This is where the rule lives: the precedence mathematics settled is applied, and
+    /// anything mathematics left open is not guessed at.
+    fn tree(&mut self, value: &ast::Value) -> Option<Value> {
+        let ops: Vec<ast::Operator> = value.between.iter().flatten().copied().collect();
+
+        // Anything unsettled, next to anything else at all, is two readings and no rule.
+        if ops.len() > 1 {
+            let unsettled = ops.iter().find(|o| tier(o.kind).is_none());
+            let comparisons = ops.iter().filter(|o| is_comparison(o.kind)).count();
+            if let Some(bad) = unsettled {
+                let other = ops.iter().find(|o| o.span != bad.span).expect("more than one");
+                self.ambiguous(value, *bad, *other);
+                return None;
+            }
+            if comparisons > 1 {
+                let mut two = ops.iter().filter(|o| is_comparison(o.kind));
+                let (a, b) = (*two.next().expect("two"), *two.next().expect("two"));
+                self.ambiguous(value, a, b);
+                return None;
+            }
+        }
+
+        // Every operator here has a settled tier. Fold the loosest first, rightmost, so
+        // that what is left binds tighter and equal tiers end up left-associative.
+        self.fold(&value.terms, &value.between)
+    }
+
+    fn fold(&mut self, terms: &[ast::Term], between: &[Option<ast::Operator>]) -> Option<Value> {
+        if terms.len() == 1 {
+            return self.term(&terms[0]);
+        }
+        let mut split = 0;
+        let mut loosest = 0u8;
+        for (i, op) in between.iter().enumerate() {
+            // An unsettled operator counts as the loosest there is. It only ever gets
+            // here alone -- two of anything with one of these among them was refused
+            // above -- so where it would sit against something else never comes up.
+            let t = tier(op.expect("juxtaposition was refused above").kind).unwrap_or(u8::MAX);
+            if t >= loosest {
+                loosest = t;
+                split = i;
+            }
+        }
+        let op = between[split].expect("juxtaposition was refused above");
+        let lhs = self.fold(&terms[..=split], &between[..split])?;
+        let rhs = self.fold(&terms[split + 1..], &between[split + 1..])?;
+        Some(Value::Binary { op: op.kind, lhs: Box::new(lhs), rhs: Box::new(rhs) })
+    }
+
+    fn term(&mut self, term: &ast::Term) -> Option<Value> {
+        match term {
+            ast::Term::Group { value, .. } => self.tree_or_leaf(value),
+            ast::Term::Not { word, .. } => {
+                self.errors.push(
+                    Diagnostic::new("E0418", "`not` is not built yet.")
+                        .primary(*word, "here")
+                        .rule("the parts of Quench arrive one at a time, and this one has not")
+                        .fix("compare with `==` or `!=` for now"),
+                );
+                None
+            }
+            ast::Term::Piece(ast::Piece::Name(span)) => {
+                let local = self.lookup(*span)?;
+                Some(Value::Copy(local))
+            }
+            ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
+                let digits = unmarked(self.text(*mark));
+                match digits.parse::<i64>() {
+                    Ok(n) => Some(Value::Number(n)),
+                    Err(_) => match digits.as_str() {
+                        "true" => Some(Value::Bool(true)),
+                        "false" => Some(Value::Bool(false)),
+                        _ => {
+                            self.errors.push(
+                                Diagnostic::new("E0407", format!("`{digits}` is not a whole number."))
+                                    .primary(*mark, "here")
+                                    .rule("a written value in a sum is read as a number")
+                                    .fix("write a whole number"),
+                            );
+                            None
+                        }
+                    },
+                }
+            }
+            ast::Term::Piece(ast::Piece::Written { ty: Some(span), .. }) => {
+                self.errors.push(
+                    Diagnostic::new("E0409", "this value says its type twice.")
+                        .primary(*span, "said here")
+                        .rule("a declaration's chain already says the type, so its values do not repeat it")
+                        .fix("remove it"),
+                );
+                None
+            }
+            ast::Term::Piece(ast::Piece::Escape(span)) => {
+                self.errors.push(
+                    Diagnostic::new("E0419", "an escape is part of text, not of a sum.")
+                        .primary(*span, "here")
+                        .rule("escapes stand beside text, and there is nothing to escape in a number")
+                        .fix("remove it"),
+                );
+                None
+            }
+        }
+    }
+
+    fn tree_or_leaf(&mut self, value: &ast::Value) -> Option<Value> {
+        if value.has_operators() {
+            self.tree(value)
+        } else if let [one] = value.terms.as_slice() {
+            self.term(one)
+        } else {
+            self.errors.push(
+                Diagnostic::new("E0415", "brackets group something to work out, and this is not worked out.")
+                    .primary(value.span, "here")
+                    .rule("what is inside brackets is a sum, a comparison, or one value")
+                    .fix("remove the brackets"),
+            );
+            None
+        }
+    }
+
+    /// What a built tree comes out as.
+    fn type_of(&mut self, value: &Value, span: Span) -> Option<Ty> {
+        match value {
+            Value::Text(_) => Some(Ty::Str),
+            Value::Number(_) => Some(Ty::I64),
+            Value::Bool(_) => Some(Ty::Bool),
+            Value::Copy(local) => Some(self.locals[local.0 as usize].ty),
+            Value::Binary { op, lhs, rhs } => {
+                if matches!(op, OpKind::Pow | OpKind::And | OpKind::Or) {
+                    self.errors.push(
+                        Diagnostic::new("E0422", format!("`{}` is not built yet.", op.written()))
+                            .primary(span, "here")
+                            .rule("the parts of Quench arrive one at a time, and this one has not")
+                            .tip("`+`, `-`, `x`, `/`, `mod` and the comparisons work.")
+                            .fix("use one of those for now"),
+                    );
+                    return None;
+                }
+                let (l, r) = (self.type_of(lhs, span)?, self.type_of(rhs, span)?);
+                if l != Ty::I64 || r != Ty::I64 {
+                    self.errors.push(
+                        Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
+                            .primary(span, format!("a `{}` and a `{}`", l.name(), r.name()))
+                            .rule("arithmetic and comparison are for numbers, and nothing converts on its own")
+                            .fix("use numbers on both sides"),
+                    );
+                    return None;
+                }
+                Some(if is_comparison(*op) { Ty::Bool } else { Ty::I64 })
+            }
+        }
+    }
+
+    /// Two operators with no agreed order between them.
+    fn ambiguous(&mut self, value: &ast::Value, first: ast::Operator, second: ast::Operator) {
+        let (a, b) = if first.span.start <= second.span.start {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        self.errors.push(
+            Diagnostic::new(
+                "E0421",
+                format!(
+                    "`{}` and `{}` have no agreed order, so this could be read two ways.",
+                    a.kind.written(),
+                    b.kind.written()
+                ),
+            )
+            .primary(value.span, "which of these first?")
+            .secondary(a.span, "this one")
+            .secondary(b.span, "or this one")
+            .rule("Quench keeps the precedence mathematics settled and invents none of its own")
+            .tip("`x`, `/`, `+`, `-` and comparison need no brackets. Everything else does.")
+            .fix("put brackets round whichever should happen first"),
+        );
     }
 
     /// One piece that has to be known now: text or an escape, but not a name.
@@ -386,6 +667,17 @@ impl<'a> Checker<'a> {
                     let word = self.text(*span);
                     match Ty::of(word) {
                         Some(Ty::Str) => pieces.push(Printed::Text(unmarked(self.text(*mark)))),
+                        Some(Ty::Bool) => match unmarked(self.text(*mark)).as_str() {
+                            "true" | "false" => {
+                                pieces.push(Printed::Text(unmarked(self.text(*mark))))
+                            }
+                            other => self.errors.push(
+                                Diagnostic::new("E0416", format!("`{other}` is not true or false."))
+                                    .primary(*mark, "here")
+                                    .rule("a `bool` is written `*true*` or `*false*`, and nothing is truthy")
+                                    .fix("`*true*` or `*false*`"),
+                            ),
+                        },
                         Some(Ty::I64) => {
                             let digits = unmarked(self.text(*mark));
                             match digits.parse::<i64>() {

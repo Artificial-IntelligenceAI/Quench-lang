@@ -5,7 +5,8 @@
 //! what is left is a transliteration, and that is the point of doing the checking first.
 //! Anything in this file that started to look like a judgement would belong further up.
 
-use quench_check::{Checked, Printed, Stmt, Ty, Value};
+use quench_check::{Checked, OpKind, Printed, Stmt, Ty, Value};
+use quench_conf::{Division, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
 
@@ -22,8 +23,20 @@ impl Lowered {
     }
 }
 
-/// Read a whole file and turn it into something that can run.
+/// Read a whole file and turn it into something that can run, under the project's
+/// default settings.
 pub fn lower(source: &str) -> Lowered {
+    lower_under(source, Settings::default())
+}
+
+/// The same, under settings of your choosing.
+///
+/// Which matters for exactly one thing so far, and it is the thing the two-piles note
+/// warned about: `[defaults] division` decides whether `/` and `mod` round toward zero
+/// or toward negative infinity, so the same source is two different programs under the
+/// two settings. The choice is made here and written into the IR as an instruction, so
+/// nothing below this has to know a setting existed.
+pub fn lower_under(source: &str, settings: Settings) -> Lowered {
     let mut checked = quench_check::check(source);
 
     if !checked.has_start {
@@ -44,10 +57,10 @@ pub fn lower(source: &str) -> Lowered {
         return Lowered { module: None, errors: checked.errors };
     }
 
-    Lowered { module: Some(build(&checked)), errors: checked.errors }
+    Lowered { module: Some(build(&checked, settings)), errors: checked.errors }
 }
 
-fn build(checked: &Checked) -> qir::Module {
+fn build(checked: &Checked, settings: Settings) -> qir::Module {
     let mut module = qir::Module::new();
     let mut b = qir::Builder::new(qir::ENTRY, &[], qir::Ty::I64);
 
@@ -57,16 +70,7 @@ fn build(checked: &Checked) -> qir::Module {
     for stmt in &checked.body {
         match stmt {
             Stmt::Declare { local, value } => {
-                let value = match value {
-                    Value::Text(text) => {
-                        let at = module.intern(text);
-                        b.const_text(at)
-                    }
-                    Value::Number(n) => b.const_i64(*n),
-                    // Values do not change, so copying one is naming the same value
-                    // again rather than doing anything.
-                    Value::Copy(from) => held[from.0 as usize].expect("declared before used"),
-                };
+                let value = emit(&mut b, &mut module, value, &held, settings);
                 held[local.0 as usize] = Some(value);
             }
             Stmt::Print(pieces) => {
@@ -82,6 +86,7 @@ fn build(checked: &Checked) -> qir::Module {
                             let host = match ty {
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::I64 => qir::Host::PrintI64,
+                                Ty::Bool => qir::Host::PrintBool,
                             };
                             b.call_host(host, &[value]);
                         }
@@ -98,4 +103,52 @@ fn build(checked: &Checked) -> qir::Module {
     let id = module.add(b.finish());
     module.set_entry(id);
     module
+}
+
+/// One value, put into the IR.
+fn emit(
+    b: &mut qir::Builder,
+    module: &mut qir::Module,
+    value: &Value,
+    held: &[Option<qir::Value>],
+    settings: Settings,
+) -> qir::Value {
+    match value {
+        Value::Text(text) => {
+            let at = module.intern(text);
+            b.const_text(at)
+        }
+        Value::Number(n) => b.const_i64(*n),
+        Value::Bool(yes) => b.const_bool(*yes),
+        // Values do not change, so copying one is naming the same value again rather
+        // than doing anything.
+        Value::Copy(from) => held[from.0 as usize].expect("declared before used"),
+        Value::Binary { op, lhs, rhs } => {
+            let l = emit(b, module, lhs, held, settings);
+            let r = emit(b, module, rhs, held, settings);
+            let floored = settings.division == Division::Floored;
+            match op {
+                OpKind::Add => b.add(l, r),
+                OpKind::Sub => b.sub(l, r),
+                OpKind::Mul => b.mul(l, r),
+                // The project's decision, written down here as an instruction so that no
+                // backend has to know a setting was ever involved.
+                OpKind::Div => {
+                    if floored { b.div_floored(l, r) } else { b.div(l, r) }
+                }
+                OpKind::Mod => {
+                    if floored { b.rem_floored(l, r) } else { b.rem(l, r) }
+                }
+                OpKind::Lt => b.cmp(qir::CmpOp::Lt, l, r),
+                OpKind::Gt => b.cmp(qir::CmpOp::Gt, l, r),
+                OpKind::Le => b.cmp(qir::CmpOp::Le, l, r),
+                OpKind::Ge => b.cmp(qir::CmpOp::Ge, l, r),
+                OpKind::Eq => b.cmp(qir::CmpOp::Eq, l, r),
+                OpKind::Ne => b.cmp(qir::CmpOp::Ne, l, r),
+                OpKind::Pow | OpKind::And | OpKind::Or => {
+                    unreachable!("refused by the checker as not built yet")
+                }
+            }
+        }
+    }
 }

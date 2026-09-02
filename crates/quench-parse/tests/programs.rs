@@ -49,8 +49,9 @@ fn several_names_and_several_values() {
     let Stmt::Var(var) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
     assert_eq!(var.names.len(), 2);
     assert_eq!(var.values.len(), 2);
-    assert_eq!(var.values[0].pieces.len(), 3, "text, escape, text");
-    assert_eq!(var.values[1].pieces.len(), 3);
+    assert_eq!(var.values[0].terms.len(), 3, "text, escape, text");
+    assert_eq!(var.values[1].terms.len(), 3);
+    assert!(!var.values[0].has_operators(), "nothing between them but juxtaposition");
     assert_eq!(var.chain.len(), 2, "`var` and `str`");
 }
 
@@ -146,6 +147,8 @@ fn things_before_start_are_not_built_yet_and_say_so() {
 
 #[test]
 fn the_worked_error_renders_whole() {
+    // Both labels are on one line, so the line is shown once with the carets stacked --
+    // saying it twice was what the renderer used to do, and reads as a stutter.
     let source = "START {\nvar.str ['a', 'b'] = [*one*];\n}\n";
     let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
@@ -156,7 +159,6 @@ two names declared, and one value given.
 
   2 | var.str ['a', 'b'] = [*one*];
     |          ~~~~~~~~ two names
-  2 | var.str ['a', 'b'] = [*one*];
     |                       ^^^^^ one value
 
 Error code: E0105

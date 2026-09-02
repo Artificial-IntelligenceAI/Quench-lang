@@ -171,6 +171,12 @@ thread_local! {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn print_bool(_table: *const Piece, value: i64) -> i64 {
+    write_out(if value != 0 { b"true" } else { b"false" });
+    0
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn print_i64(_table: *const Piece, value: i64) -> i64 {
     write_out(value.to_string().as_bytes());
     0
@@ -253,6 +259,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     // The one symbol generated code is allowed to reach outside itself for.
     builder.symbol("quench_print_text", print_text as *const u8);
     builder.symbol("quench_print_i64", print_i64 as *const u8);
+    builder.symbol("quench_print_bool", print_bool as *const u8);
     let mut jit = JITModule::new(builder);
 
     // The text, owned here and pointed at by a table whose address the code will carry.
@@ -289,7 +296,11 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     // an answer nothing uses -- so the lowering only has to pick which.
     let mut hosts = Vec::new();
     for (host, symbol) in
-        [(qir::Host::PrintText, "quench_print_text"), (qir::Host::PrintI64, "quench_print_i64")]
+        [
+            (qir::Host::PrintText, "quench_print_text"),
+            (qir::Host::PrintI64, "quench_print_i64"),
+            (qir::Host::PrintBool, "quench_print_bool"),
+        ]
     {
         let id = jit
             .declare_function(symbol, Linkage::Import, &host_sig)
@@ -373,7 +384,16 @@ fn lower(
                     // The table's address is a constant of this compilation. QIR carried
                     // an index; the pointer is put on here and goes no further.
                     let mut given = vec![b.ins().iconst(types::I64, table)];
-                    given.extend(args.iter().map(|a| vals[a.0 as usize].unwrap()));
+                    for (arg, want) in args.iter().zip(host.params()) {
+                        let value = vals[arg.0 as usize].unwrap();
+                        // A bool lives in an i8 here and the runtime takes an i64, so it
+                        // is widened at the boundary rather than anywhere QIR can see.
+                        given.push(if *want == qir::Ty::Bool {
+                            b.ins().uextend(types::I64, value)
+                        } else {
+                            value
+                        });
+                    }
                     let call = b.ins().call(which, &given);
                     b.inst_results(call)[0]
                 }

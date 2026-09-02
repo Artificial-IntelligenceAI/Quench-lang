@@ -30,7 +30,23 @@ fn main() -> ExitCode {
         }
     };
 
-    let lowered = quench_lower::lower(&source);
+    // A `QNL-Config.toml` beside the source decides things the source does not say --
+    // how division rounds, most of all -- so it is read before anything is compiled.
+    let (settings, config_errors) = match std::fs::read_to_string("QNL-Config.toml") {
+        Ok(text) => {
+            let (settings, errors) = quench_conf::read(&text);
+            if !errors.is_empty() {
+                let file = SourceFile::new("QNL-Config.toml", &text);
+                eprint!("{}", quench_diag::report(&file, &errors));
+                return ExitCode::FAILURE;
+            }
+            (settings, errors)
+        }
+        Err(_) => (quench_conf::Settings::default(), Vec::new()),
+    };
+    let _ = config_errors;
+
+    let lowered = quench_lower::lower_under(&source, settings);
     if !lowered.ok() {
         let file = SourceFile::new(path, &source);
         eprint!("{}", quench_diag::report(&file, &lowered.errors));

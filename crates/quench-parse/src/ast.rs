@@ -61,11 +61,98 @@ pub struct Var {
     pub span: Span,
 }
 
-/// One value: as many pieces as it likes, juxtaposed.
+/// One value: operands, and whatever sits between them.
+///
+/// Deliberately **flat**. A tree would mean deciding what binds to what, and that is a
+/// question about meaning rather than about what somebody typed — Quench keeps the
+/// precedence mathematics settled and refuses the rest, and *refusing* is something only
+/// a checker can do, since it has to say what the two readings were. So the syntax tree
+/// records the sequence and the checker builds the tree, or declines to.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Value {
-    pub pieces: Vec<Piece>,
+    /// The operands, in order. Always one longer than `between`, unless empty.
+    pub terms: Vec<Term>,
+    /// What sits between each pair of terms. `None` is juxtaposition — nothing written,
+    /// which is how a list of pieces builds text.
+    pub between: Vec<Option<Operator>>,
     pub span: Span,
+}
+
+impl Value {
+    /// Whether any operator was written at all.
+    pub fn has_operators(&self) -> bool {
+        self.between.iter().any(Option::is_some)
+    }
+}
+
+/// One operand.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Term {
+    Piece(Piece),
+    /// `( … )` — which is how anything mathematics did not settle gets said.
+    Group { open: Span, value: Box<Value>, close: Span },
+    /// `not x`
+    Not { word: Span, of: Box<Term> },
+}
+
+impl Term {
+    pub fn span(&self) -> Span {
+        match self {
+            Term::Piece(p) => p.span(),
+            Term::Group { open, close, .. } => open.to(*close),
+            Term::Not { word, of } => word.to(of.span()),
+        }
+    }
+}
+
+/// An operator, and where it was written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Operator {
+    pub kind: OpKind,
+    pub span: Span,
+}
+
+/// What an operator does. Which of these bind tighter is [`quench_check`]'s business.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OpKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+    /// Remainder. Mathematics never settled where this sits, so it never binds against
+    /// anything without brackets.
+    Mod,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Eq,
+    Ne,
+    /// Invented by language designers rather than derived, so the same applies.
+    And,
+    Or,
+}
+
+impl OpKind {
+    pub fn written(self) -> &'static str {
+        match self {
+            OpKind::Add => "+",
+            OpKind::Sub => "-",
+            OpKind::Mul => "x",
+            OpKind::Div => "/",
+            OpKind::Pow => "^",
+            OpKind::Mod => "mod",
+            OpKind::Lt => "<",
+            OpKind::Gt => ">",
+            OpKind::Le => "</=",
+            OpKind::Ge => ">/=",
+            OpKind::Eq => "==",
+            OpKind::Ne => "!=",
+            OpKind::And => "and",
+            OpKind::Or => "or",
+        }
+    }
 }
 
 /// One item in a list: something written, a name, or an escape.

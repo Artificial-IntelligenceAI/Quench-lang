@@ -163,3 +163,82 @@ START {
 ";
     assert_eq!(codes(source), ["E0402", "E0407", "E0413"], "{}", errors(source));
 }
+
+// --- arithmetic ---------------------------------------------------------------------
+
+#[test]
+fn the_precedence_mathematics_settled_is_kept() {
+    // `x` before `+`, and comparison looser than both. Nobody has to be told these.
+    for source in [
+        "START { var.i64 ['n'] = [*1* + *2* x *3*]; }",
+        "START { var.i64 ['n'] = [*1* x *2* + *3*]; }",
+        "START { var.bool ['b'] = [*1* + *2* < *4*]; }",
+        "START { var.i64 ['n'] = [*10* / *2* - *1*]; }",
+    ] {
+        assert!(check(source).ok(), "{source}\n{}", errors(source));
+    }
+}
+
+#[test]
+fn what_mathematics_left_open_is_refused_with_both_readings() {
+    let source = "START { var.i64 ['n'] = [*10* mod *3* + *1*]; }";
+    let rendered = errors(source);
+    assert!(rendered.contains("`mod` and `+` have no agreed order"), "{rendered}");
+    assert!(rendered.contains("could be read two ways"), "{rendered}");
+    assert!(rendered.contains("which of these first?"), "{rendered}");
+    assert!(rendered.contains("this one"), "{rendered}");
+    assert!(rendered.contains("or this one"), "{rendered}");
+    assert!(rendered.contains("Error code: E0421"), "{rendered}");
+
+    // And brackets settle it, both ways.
+    assert!(check("START { var.i64 ['n'] = [(*10* mod *3*) + *1*]; }").ok());
+    assert!(check("START { var.i64 ['n'] = [*10* mod (*3* + *1*)]; }").ok());
+}
+
+#[test]
+fn one_unsettled_operator_on_its_own_is_fine() {
+    // There is nothing to be ambiguous *with*. The rule is about two operators, not
+    // about `mod` being suspicious.
+    assert!(check("START { var.i64 ['n'] = [*10* mod *3*]; }").ok());
+}
+
+#[test]
+fn a_chain_of_comparisons_is_not_settled_either() {
+    // Mathematics reads `a < b < c` as two comparisons joined; most languages read it
+    // as one comparison against a boolean. Nobody agreed, so nobody guesses.
+    let rendered = errors("START { var.bool ['b'] = [*1* < *2* < *3*]; }");
+    assert!(rendered.contains("have no agreed order"), "{rendered}");
+}
+
+#[test]
+fn a_line_that_both_joins_and_adds_says_which_it_meant() {
+    let rendered = errors("START { var.i64 ['n'] = [*1* *2* + *3*]; }");
+    assert!(rendered.contains("some of these are joined and some are added"), "{rendered}");
+    assert!(rendered.contains("a value does one or the other"), "{rendered}");
+}
+
+#[test]
+fn arithmetic_is_for_numbers() {
+    let rendered = errors("START { var.str ['s'] = [*a*]; var.i64 ['n'] = ['s' + *1*]; }");
+    assert!(rendered.contains("`+` works on numbers"), "{rendered}");
+    assert!(rendered.contains("nothing converts on its own"), "{rendered}");
+}
+
+#[test]
+fn a_comparison_is_a_bool_and_a_sum_is_not() {
+    assert!(check("START { var.bool ['b'] = [*1* < *2*]; }").ok());
+
+    let rendered = errors("START { var.i64 ['n'] = [*1* < *2*]; }");
+    assert!(rendered.contains("works out to `bool`"), "{rendered}");
+    assert!(rendered.contains("given to a `i64`"), "{rendered}");
+}
+
+#[test]
+fn the_operators_that_are_not_built_say_so() {
+    for (source, which) in [
+        ("START { var.i64 ['n'] = [*2* ^ *8*]; }", "`^` is not built yet"),
+        ("START { var.bool ['b'] = [*true* and *false*]; }", "`and` is not built yet"),
+    ] {
+        assert!(errors(source).contains(which), "{source}\n{}", errors(source));
+    }
+}
