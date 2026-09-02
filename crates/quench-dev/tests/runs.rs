@@ -225,7 +225,7 @@ fn ill_typed_ir_is_stopped_before_cranelift_sees_it() {
 }
 
 #[test]
-fn the_entry_is_the_function_called_start() {
+fn the_entry_is_the_function_named_start() {
     // Nothing marks it. A frontend compiles every function, then asks for that name.
     let mut m = Module::new();
 
@@ -239,13 +239,13 @@ fn the_entry_is_the_function_called_start() {
     b.ret(n);
     m.add(b.finish());
 
-    let found = m.set_entry_to_start().expect("a module with a `start` has an entry");
-    assert_eq!(m.func(found).name, "start");
+    let found = m.set_entry_to_start().expect("a module with a `START` has an entry");
+    assert_eq!(m.func(found).name, "START");
     assert_eq!(compile(&m).unwrap().run(), 7);
 }
 
 #[test]
-fn a_module_with_no_start_has_nothing_to_point_at() {
+fn a_module_without_that_function_has_nothing_to_point_at() {
     let mut m = Module::new();
     let mut b = Builder::new("helper", &[], Ty::I64);
     let n = b.const_i64(1);

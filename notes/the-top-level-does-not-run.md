@@ -1,7 +1,7 @@
 # The top level does not run
 
 A Quench file is a list of declarations. Functions, types, constants — things that
-*exist*. None of them execute. Execution begins in one place, `start`, and nowhere
+*exist*. None of them execute. Execution begins in one place, `START`, and nowhere
 else.
 
 The alternative was the one Luarust inherited from Lua, where the file is the
@@ -16,7 +16,7 @@ indication of how it goes.
 ## Declarations are order-free, and that is the point
 
 Because nothing at the top level happens, nothing at the top level has an order.
-`start` can call a function written below it. Two types can refer to each other. A
+`START` can call a function written below it. Two types can refer to each other. A
 reader can start anywhere in the file rather than at the top, because there is no
 accumulated state to have missed.
 
@@ -29,7 +29,7 @@ A variable needs an initialiser, and an initialiser has to run somewhere.
 - If its value can be computed at compile time, nothing runs: the compiler folds it
   and writes the answer down. That is a **constant**, and it is allowed.
 - If it cannot — `read_config()`, `now()`, anything reading the world — then code
-  must execute *before* `start`. Which is the model that was just rejected, arrived
+  must execute *before* `START`. Which is the model that was just rejected, arrived
   at sideways, and worse than arriving at it honestly: the order in which those
   initialisers run is now something the language has to define, the programmer
   cannot see, and a reader cannot check. C++ has a name for the bugs this produces
@@ -57,10 +57,10 @@ whole program and hoping.
 
 ## What it means for the implementation
 
-- There is **no phase before `start`**. No initialisers to sequence, no ordering
+- There is **no phase before `START`**. No initialisers to sequence, no ordering
   rule to specify, and nothing for the three execution methods to disagree about —
   which matters, because a pre-main phase is exactly the sort of thing three
   backends would sequence three ways.
 - QIR needs no init section. Constants are folded by the frontend and reach the
   backends already as values.
-- A missing `start` is a diagnostic, not a program that does nothing.
+- A missing `START` is a diagnostic, not a program that does nothing.

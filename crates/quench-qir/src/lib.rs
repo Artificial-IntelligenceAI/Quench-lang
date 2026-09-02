@@ -38,7 +38,7 @@ pub const VERSION: u32 = 0;
 
 /// The name of the function a program starts at.
 ///
-/// `start`, because that is what it does. `main` is a convention rather than a
+/// `START`, because that is what it does. `main` is a convention rather than a
 /// description — it says a function is important without saying why, and a reader who
 /// has not met it before cannot work out what it means from the word. Quench does not
 /// have C's split between `_start` (the real entry, which sets a runtime up) and `main`
@@ -47,7 +47,7 @@ pub const VERSION: u32 = 0;
 /// A backend never uses this: it takes [`Module::entry`], which is an id, because that
 /// is what a call needs. The name is how the *frontend* finds the function in the first
 /// place.
-pub const ENTRY: &str = "start";
+pub const ENTRY: &str = "START";
 
 /// The type of a value. Every value has exactly one, and it never changes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
