@@ -3,8 +3,8 @@
 Quench's compiler is written in two languages on purpose.
 
 - **Rust** — the frontend and the Dev JIT: lexer, parser, name resolution, type
-  checking, borrow checking, diagnostics, QIR, Cranelift code generation, the
-  program generator, and the oracle driver.
+  checking, diagnostics, QIR, Cranelift code generation, the program generator,
+  and the oracle driver.
 - **C++** — the LLVM half: the Hot JIT and the AOT native backend.
 
 This is not a compromise between two options. Each half is written in the language
@@ -33,9 +33,13 @@ between the engines is worth more than the convenience it costs.
   backend that meets a version it does not know refuses the module rather than
   guessing.
 - It is **fully typed and fully explicit**: no implicit conversion, no implicit
-  drop, no implicit anything. Ownership has already been resolved by the time QIR
-  exists — moves, borrows and drops are instructions, not properties to be inferred.
-  A backend never runs an analysis to find out what the frontend meant.
+  anything. Which values are references the collector must know about is written
+  down, and where the safepoints are is written down, so a backend never runs an
+  analysis to find out what the frontend meant.
+- The same seam carries **stack maps back the other way**. Cranelift and LLVM emit
+  them in their own formats; both normalise into one Quench format so the collector
+  reads a single thing. Two parsers that must agree is the shape of bug that cannot
+  be tested for.
 - It carries **spans**, so a backend that has to report something can report it in
   the same format as everything else.
 - Every change to QIR is a change in two languages. That is the price, and it is

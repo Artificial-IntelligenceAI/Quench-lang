@@ -22,7 +22,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
 | **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
 | Parser | Not started |
-| Type checker, borrow checker | Not started — waiting on the type system |
+| Type checker | Not started — waiting on the type system |
+| Collector, stack maps | Not started |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
@@ -64,10 +65,16 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **Constants outside, variables inside.** A constant is a value the compiler can
   work out; anything needing code to run to produce it would need that code to run
   before `START`, which is the model above, smuggled back in. So every variable
-  lives inside a function, where it has an owner and a lifetime the borrow checker
-  can see.
-- **Memory is owned.** Ownership and moves, with a borrow checker. Not refcounting,
-  not a collector.
+  lives inside a function.
+- **Memory is collected.** A garbage collector, not ownership and not refcounting.
+  Ownership makes the shape of your data a tree, and cycles, self-reference, caches
+  and interning are not trees; the usual escape — an arena of integer indices —
+  keeps the memory safety and loses the guarantee it was bought for. **Finalisation
+  is not observable**, which is what lets three engines collect at different moments
+  without that being a disagreement. And a collected language with no unsafe escape
+  has no undefined behaviour, so the oracle is sound by construction rather than by
+  care. Nothing ships to a program that never allocates. See
+  [notes/the-collector-earns-its-place.md](notes/the-collector-earns-its-place.md).
 - **Two host languages.** Rust for the frontend and the Cranelift Dev JIT; C++ for
   the LLVM Hot JIT and AOT native backend. They meet at a versioned, serialised IR
   rather than a shared header. See [notes/architecture.md](notes/architecture.md).
@@ -95,26 +102,25 @@ because the fix is what should still be on screen when the reader stops reading.
 ```text
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
+file: src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
 
-`greeting` was given away on line 2, so it cannot be used here.
+`'name'` is declared twice.
 
-  2 | give greeting to shout;
-    | ~~~~ given away here, and `text` is not copied
-  3 | show greeting;
-    |      ^^^^^^^^ used here, after it was given away
+  1 | var.str ['name'] = [*Tankun*];
+    |          ~~~~~~ declared here first, as `str`
+  2 | var.b16 ['name'] = [*1000*];
+    |          ^^^^^^ and declared again here, as `b16`
 
-Error code: E0301
-Rule(s) broken: a value has one owner, and giving it away ends the old owner's use of it
-Tip(s): `text` owns a buffer, so giving it moves the buffer rather than copying it.
-Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to read it
+Error code: E0201
+Rule(s) broken: a name is declared once, and keeps the type it was declared with
+Tip(s): a declaration always makes a new name. It never replaces one.
+Suggested fix(s): rename one of them
 
 1 error.
 ```
 
-The move and borrow syntax in that sample is a **placeholder** — how a value is
-given away or lent is not designed yet. The *format* is real, and is asserted
-byte for byte in `quench-diag`'s tests.
+That is real Quench, and the rendering is asserted byte for byte in
+`quench-diag`'s tests.
 
 The greeting is printed once however many errors follow, and the count once at the
 end, so a program with twelve mistakes apologises once rather than twelve times.

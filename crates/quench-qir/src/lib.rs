@@ -21,9 +21,11 @@
 //! prove it could compile and run something, and it will grow as the language does. Two
 //! absences are deliberate rather than accidental:
 //!
-//! - **Ownership** is not represented, because there is nothing to own yet. When it
-//!   arrives, moves, borrows and drops become *instructions* — resolved by the frontend
-//!   and written down — not properties for a backend to infer.
+//! - **Collection** is not represented, because nothing allocates yet. When it arrives,
+//!   which values are references the collector must know about, and where the safepoints
+//!   are, become things QIR *says* — resolved by the frontend and written down — not
+//!   properties for a backend to infer. Stack maps travel back the other way, normalised
+//!   by both backends into one format so the collector reads a single thing.
 //! - **Serialisation** is not written, because the only consumer so far is in the same
 //!   process. It arrives with the C++ side, which is the point at which a format has a
 //!   second reader and can therefore be designed against a real requirement rather than

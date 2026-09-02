@@ -38,13 +38,20 @@ A variable needs an initialiser, and an initialiser has to run somewhere.
 So: **a constant is a value the compiler can work out. A variable lives inside a
 function.**
 
-## Ownership agrees
+## This argument never depended on the memory model
 
-This falls out of the memory model as well as the execution model. A mutable global
-has no owner and no bounded lifetime, so a borrow of one could be aliased by any
-line in the program. There is nothing for a borrow checker to check. Rust reaches
-this same conclusion from the same direction and requires `unsafe` to touch
-`static mut` — the one construct its checker cannot reason about.
+An earlier draft leaned on ownership here: a mutable global has no owner and no
+bounded lifetime, so there is nothing for a borrow checker to check. Quench collects
+now, and the section survives without that, because it was never the load-bearing
+part.
+
+The reason stands on execution order alone. A top-level variable needs an initialiser
+that runs before `START`, and once initialisers run, the order they run in is
+something the language must define, the programmer cannot see, and a reader cannot
+check. A collector does not make that better.
+
+What is lost is a second, independent argument arriving at the same answer. The first
+one was always the stronger.
 
 ## What it costs
 

@@ -3,19 +3,19 @@
 //! ```text
 //! Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 //!
-//! file: /Users/ts/hello/src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
+//! file: /Users/ts/hello/src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
 //!
-//! `greeting` was given away on line 2, so it cannot be used here.
+//! `'name'` is declared twice.
 //!
-//!   2 | give greeting to shout;
-//!     | ~~~~ given away here, and `text` is not copied
-//!   3 | show greeting;
-//!     |      ^^^^^^^^ used here, after it was given away
+//!   1 | var.str ['name'] = [*Tankun*];
+//!     |          ~~~~~~ declared here first, as `str`
+//!   2 | var.b16 ['name'] = [*1000*];
+//!     |          ^^^^^^ and declared again here, as `b16`
 //!
-//! Error code: E0301
-//! Rule(s) broken: a value has one owner, and giving it away ends the old owner's use of it
-//! Tip(s): `text` owns a buffer, so giving it moves the buffer rather than copying it.
-//! Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to read it
+//! Error code: E0201
+//! Rule(s) broken: a name is declared once, and keeps the type it was declared with
+//! Tip(s): a declaration always makes a new name. It never replaces one.
+//! Suggested fix(s): rename one of them
 //!
 //! 1 error.
 //! ```
@@ -26,8 +26,7 @@
 //! The fix is last on purpose: it is what should still be on screen when the reader stops
 //! reading.
 //!
-//! The sample program above is **placeholder syntax**. Quench's surface syntax is not
-//! decided yet, and nothing in this crate depends on it: a diagnostic is spans and text,
+//! Nothing in this crate depends on Quench being Quench: a diagnostic is spans and text,
 //! and the layout below would render an error in any language at all.
 
 use crate::diag::{Diagnostic, LabelStyle};
@@ -159,52 +158,46 @@ mod tests {
     use crate::diag::Diagnostic;
     use crate::source::Span;
 
-    /// Placeholder syntax — see the module docs. What matters is that a value is given
-    /// away on one line and used on the next.
-    const PROGRAM: &str = "own greeting: text = \"hello\";\n\
-                           give greeting to shout;\n\
-                           show greeting;\n";
+    const PROGRAM: &str = "var.str ['name'] = [*Tankun*];\n\
+                           var.b16 ['name'] = [*1000*];\n";
 
     fn source() -> SourceFile {
         SourceFile::new("src/main.qnl", PROGRAM)
     }
 
     /// The worked example from the module docs, built the way the compiler will build it.
-    fn used_after_giving() -> Diagnostic {
-        // Point at `give`, which is the act that ended the ownership — not at the name,
-        // which is not the part that is wrong.
-        let given = PROGRAM.find("give").unwrap();
-        let used = PROGRAM.rfind("greeting").unwrap();
-        Diagnostic::new("E0301", "`greeting` was given away on line 2, so it cannot be used here.")
-            .secondary(
-                Span::new(given, given + "give".len()),
-                "given away here, and `text` is not copied",
-            )
-            .primary(Span::new(used, used + "greeting".len()), "used here, after it was given away")
-            .rule("a value has one owner, and giving it away ends the old owner's use of it")
-            .tip("`text` owns a buffer, so giving it moves the buffer rather than copying it.")
-            .fix("line 2 — `lend greeting to shout;`, if `shout` only needs to read it")
+    fn declared_twice() -> Diagnostic {
+        // Point at the name in each declaration, not at the whole line: the name is the
+        // part that collides, and the rest of the chain is innocent.
+        let first = PROGRAM.find("'name'").unwrap();
+        let again = PROGRAM.rfind("'name'").unwrap();
+        Diagnostic::new("E0201", "`'name'` is declared twice.")
+            .secondary(Span::new(first, first + "'name'".len()), "declared here first, as `str`")
+            .primary(Span::new(again, again + "'name'".len()), "and declared again here, as `b16`")
+            .rule("a name is declared once, and keeps the type it was declared with")
+            .tip("a declaration always makes a new name. It never replaces one.")
+            .fix("rename one of them")
     }
 
     #[test]
     fn one_error_reads_the_way_the_docs_say() {
-        let out = report(&source(), &[used_after_giving()]);
+        let out = report(&source(), &[declared_twice()]);
         let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
+file: src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
 
-`greeting` was given away on line 2, so it cannot be used here.
+`'name'` is declared twice.
 
-  2 | give greeting to shout;
-    | ~~~~ given away here, and `text` is not copied
-  3 | show greeting;
-    |      ^^^^^^^^ used here, after it was given away
+  1 | var.str ['name'] = [*Tankun*];
+    |          ~~~~~~ declared here first, as `str`
+  2 | var.b16 ['name'] = [*1000*];
+    |          ^^^^^^ and declared again here, as `b16`
 
-Error code: E0301
-Rule(s) broken: a value has one owner, and giving it away ends the old owner's use of it
-Tip(s): `text` owns a buffer, so giving it moves the buffer rather than copying it.
-Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to read it
+Error code: E0201
+Rule(s) broken: a name is declared once, and keeps the type it was declared with
+Tip(s): a declaration always makes a new name. It never replaces one.
+Suggested fix(s): rename one of them
 
 1 error.
 ";
@@ -213,9 +206,9 @@ Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to
 
     #[test]
     fn the_apology_is_made_once_however_many_errors_follow() {
-        let out = report(&source(), &[used_after_giving(), used_after_giving(), used_after_giving()]);
+        let out = report(&source(), &[declared_twice(), declared_twice(), declared_twice()]);
         assert_eq!(out.matches(GREETING).count(), 1);
-        assert_eq!(out.matches("Error code: E0301").count(), 3);
+        assert_eq!(out.matches("Error code: E0201").count(), 3);
         assert!(out.ends_with("3 errors.\n"));
     }
 
