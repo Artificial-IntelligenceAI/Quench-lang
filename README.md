@@ -43,6 +43,11 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **A Quench file is `.qnl`.** Unclaimed, and distinctive enough to search for —
   `.q`, `.qs`, `.qm` and `.qml` are all taken, and `.qn` collides with a common
   abbreviation.
+- **Three marks, three questions**: `'a name'`, `|a written value|`, `*text to
+  print*`. A mark says what a thing is by itself, so nothing depends on position.
+  Text is literal and escapes stand outside it — `\n` is an item in the list, not
+  a character hidden in the text. See
+  [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the
   declaration rather than on some innocent use of it later. Words rather than

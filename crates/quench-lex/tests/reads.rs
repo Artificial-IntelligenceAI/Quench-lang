@@ -140,3 +140,94 @@ fn recovery_keeps_what_followed_the_bad_mark() {
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert!(out.tokens.iter().any(|t| t.kind == Kind::Word), "{:?}", out.tokens);
 }
+
+/// The line the author wrote to see whether this would survive it.
+const THE_HARD_ONE: &str =
+    r"print[*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&* 'x' *🧑‍🧑‍🧒‍🧒🥹✌️* 'y' \n];";
+
+#[test]
+fn the_hard_one_comes_apart_exactly_as_written() {
+    use Kind::*;
+    let out = lex(THE_HARD_ONE);
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(
+        out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+        [Word, OpenList, Text, Name, Text, Name, Escape, CloseList, Semicolon, End]
+    );
+
+    // The pieces, checked one at a time, because the interesting claim is where each
+    // one *ends*.
+    let piece = |n: usize| {
+        let t = out.tokens[n];
+        &THE_HARD_ONE[t.span.start..t.span.end]
+    };
+    assert_eq!(piece(0), "print");
+    // The `&*` at the end is an ampersand and then the closing mark, not `&` and a star.
+    assert_eq!(piece(2), r"*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&*");
+    assert_eq!(piece(3), "'x'");
+    assert_eq!(piece(4), "*🧑‍🧑‍🧒‍🧒🥹✌️*");
+    assert_eq!(piece(5), "'y'");
+    assert_eq!(piece(6), r"\n");
+}
+
+#[test]
+fn text_holds_whatever_was_put_in_it() {
+    // Braces, punctuation, digits and a semicolon are all just characters in here. If any
+    // of them were tokens the line below would come apart into a dozen pieces.
+    let source = r"print[*{};[]|'#$%^&= 12345*];";
+    let out = lex(source);
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(out.tokens[2].kind, Kind::Text);
+    assert_eq!(&source[out.tokens[2].span.start..out.tokens[2].span.end], r"*{};[]|'#$%^&= 12345*");
+}
+
+#[test]
+fn a_star_inside_text_is_written_with_a_backslash() {
+    let out = lex(r"print[*two \* three*];");
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(out.tokens[2].kind, Kind::Text);
+}
+
+#[test]
+fn an_escape_between_the_marks_is_not_an_escape() {
+    // The whole point of putting escapes outside: what is between the marks is literal,
+    // so this is one piece of text containing a backslash and an `n`, not a newline.
+    let out = lex(r"print[*a\nb*];");
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(out.tokens.iter().filter(|t| t.kind == Kind::Escape).count(), 0);
+}
+
+#[test]
+fn the_escapes_stand_on_their_own() {
+    for e in [r"\n", r"\t", r"\r", r"\\"] {
+        let out = lex(&format!("print[{e}];"));
+        assert!(out.ok(), "{e}: {:#?}", out.errors);
+        assert_eq!(out.tokens[2].kind, Kind::Escape, "{e}");
+    }
+}
+
+#[test]
+fn an_escape_nobody_has_heard_of_lists_the_ones_that_exist() {
+    let out = lex(r"print[\q];");
+    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
+    assert_eq!(out.errors[0].code, "E0004");
+    assert!(out.errors[0].rules.join(" ").contains(r"`\n`, `\t`, `\r` and `\\`"), "{:?}", out.errors[0]);
+}
+
+#[test]
+fn unclosed_text_says_so_and_offers_the_backslash() {
+    let out = lex("print[*Hello\n];");
+    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
+    assert_eq!(out.errors[0].code, "E0002");
+    assert!(out.errors[0].tips.join(" ").contains(r"put a `\` in front"), "{:?}", out.errors[0]);
+}
+
+#[test]
+fn a_double_quote_now_offers_all_three_marks() {
+    let out = lex("print[\"Hello\"];");
+    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
+    let fix = out.errors[0].fixes.join(" ");
+    assert!(fix.contains("`'Hello'`"), "{fix}");
+    assert!(fix.contains("`|Hello|`"), "{fix}");
+    assert!(fix.contains("`*Hello*`"), "{fix}");
+}

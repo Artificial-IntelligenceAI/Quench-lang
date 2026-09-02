@@ -43,6 +43,21 @@ pub enum Kind {
     Word,
     /// `'…'` — a name. Quoted, so it can be anything you can type.
     Name,
+    /// `*…*` — text, to print. The marks do the job `"` does elsewhere.
+    ///
+    /// What is between them is **literal**: emoji, punctuation, braces, digits, all of
+    /// it, exactly as written. The only thing `\\` escapes in here is a `*`, because the
+    /// closing mark is the one character that could not otherwise be written. A `\\n`
+    /// between the marks is a backslash and an `n`; a newline is [`Kind::Escape`],
+    /// written outside.
+    Text,
+    /// `\\n` and friends, written **outside** the marks rather than inside them.
+    ///
+    /// This is why text can be literal. An escape is a thing in the list, next to the
+    /// text rather than hidden in it, so reading a piece of text never means working out
+    /// which of its characters were really instructions.
+    Escape,
+
     /// `|…|` or `` `…` `` — a written value. What it *means* is decided by the type it is
     /// given to, so the lexer does not read it: `|1000|` is a number under `b16` and text
     /// under `str`, and that is not a decision to take this early.
@@ -67,6 +82,8 @@ impl Kind {
             Kind::Word => "a word",
             Kind::Name => "a name",
             Kind::Literal => "a written value",
+            Kind::Text => "text",
+            Kind::Escape => "an escape",
             Kind::End => "the end of the file",
         }
     }
