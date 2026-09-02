@@ -321,3 +321,29 @@ fn the_type_is_a_word_like_any_other() {
         );
     }
 }
+
+#[test]
+fn grouping_has_its_own_marks() {
+    use Kind::*;
+    assert_eq!(
+        kinds("[(*1* + *2*)]"),
+        [OpenList, OpenGroup, Written, Plus, Written, CloseGroup, CloseList, End]
+    );
+}
+
+#[test]
+fn multiplication_can_be_written_either_way() {
+    use Kind::*;
+    // `*` is the mark a written value wears, so it cannot also be multiplication. The
+    // sign gets a token; the word `x` is a word, and the parser knows what it means
+    // where it stands -- which costs nothing, because Quench reserves no words.
+    assert_eq!(kinds("[*2* \u{d7} *3*]"), [OpenList, Written, Times, Written, CloseList, End]);
+    assert_eq!(kinds("[*2* x *3*]"), [OpenList, Written, Word, Written, CloseList, End]);
+}
+
+#[test]
+fn a_hyphen_is_still_part_of_a_word_when_it_is_inside_one() {
+    use Kind::*;
+    assert_eq!(kinds("no-visibility-stated"), [Word, End]);
+    assert_eq!(kinds("[*5* - *3*]"), [OpenList, Written, Minus, Written, CloseList, End]);
+}

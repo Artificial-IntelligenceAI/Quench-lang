@@ -26,6 +26,15 @@ pub enum Kind {
     OpenBlock,
     /// `}`
     CloseBlock,
+    /// `(` — grouping, and the only way to say what mathematics never settled.
+    ///
+    /// Quench keeps the precedence mathematics established — exponent, then `x` and `/`,
+    /// then `+` and `-`, with comparison looser than all of them — and refuses to invent
+    /// any beyond that. Everything programming added has no agreed order, so it is
+    /// written with these instead. See `notes/precedence-stops-where-maths-stopped.md`.
+    OpenGroup,
+    /// `)`
+    CloseGroup,
 
     /// `;` — ends a statement.
     Semicolon,
@@ -42,6 +51,18 @@ pub enum Kind {
     Colon,
     /// `=`
     Equals,
+
+    /// `+`
+    Plus,
+    /// `-`, when it stands alone. Inside a word it is part of the word, so
+    /// `no-visibility-stated` is one thing rather than three and two subtractions.
+    Minus,
+    /// `×`, the multiplication sign.
+    ///
+    /// `*` cannot be multiplication here — it is the mark a written value wears — so the
+    /// word `x` does the job as well, and arrives as a [`Kind::Word`] for the parser to
+    /// recognise. Only the real sign needs a token of its own.
+    Times,
 
     /// A bare word: a chain part, a type, or the name of a block. Never a variable's name.
     Word,
@@ -82,11 +103,16 @@ impl Kind {
             Kind::CloseList => "`]`",
             Kind::OpenBlock => "`{`",
             Kind::CloseBlock => "`}`",
+            Kind::OpenGroup => "`(`",
+            Kind::CloseGroup => "`)`",
             Kind::Semicolon => "`;`",
             Kind::Comma => "`,`",
             Kind::Dot => "`.`",
             Kind::Colon => "`:`",
             Kind::Equals => "`=`",
+            Kind::Plus => "`+`",
+            Kind::Minus => "`-`",
+            Kind::Times => "`\u{d7}`",
             Kind::Word => "a word",
             Kind::Name => "a name",
             Kind::Written => "a written value",

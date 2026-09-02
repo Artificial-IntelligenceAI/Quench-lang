@@ -57,6 +57,15 @@ impl<'a> Lexer<'a> {
                 ']' => self.single(Kind::CloseList),
                 '{' => self.single(Kind::OpenBlock),
                 '}' => self.single(Kind::CloseBlock),
+                '(' => self.single(Kind::OpenGroup),
+                ')' => self.single(Kind::CloseGroup),
+                '+' => self.single(Kind::Plus),
+                '-' => self.single(Kind::Minus),
+                '\u{d7}' => {
+                    let start = self.at;
+                    self.at += '\u{d7}'.len_utf8();
+                    self.tokens.push(Token { kind: Kind::Times, span: Span::new(start, self.at) });
+                }
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
                 '.' => self.single(Kind::Dot),

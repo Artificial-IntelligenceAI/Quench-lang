@@ -65,6 +65,13 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   chain supplies a type, the value carries it — `print[str:*Hello* 'name' \n];` —
   and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
+- **Precedence stops where mathematics stopped.** `x` binds tighter than `+`, and
+  comparison looser than both, because that was settled before computers existed.
+  Everything programming invented — `mod` infix, `and` against `or`, bitwise — has no
+  agreed order and takes brackets. C put `&` too loose and Python put it too tight, and
+  both produced famous traps: the lesson is not that C chose wrong but that there was
+  nothing to choose. See
+  [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
 - **Multiplication is `x` and `×`, never `*`**, because `*` is the written-value
   mark. Letting `*` be both would mean a lexer that reads it differently depending
   on where it is, and one unbalanced brace turning the rest of a file into nonsense.
