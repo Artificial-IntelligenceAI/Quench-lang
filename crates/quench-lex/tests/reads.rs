@@ -347,3 +347,86 @@ fn a_hyphen_is_still_part_of_a_word_when_it_is_inside_one() {
     assert_eq!(kinds("no-visibility-stated"), [Word, End]);
     assert_eq!(kinds("[*5* - *3*]"), [OpenList, Written, Minus, Written, CloseList, End]);
 }
+
+#[test]
+fn the_operators_that_need_tokens_have_them() {
+    use Kind::*;
+    let cases: [(&str, Kind); 11] = [
+        ("+", Plus),
+        ("-", Minus),
+        ("\u{d7}", Times),
+        ("/", Slash),
+        ("\u{f7}", Slash),
+        ("<", Less),
+        (">", Greater),
+        ("</=", LessEqual),
+        (">/=", GreaterEqual),
+        ("!=", NotEqual),
+        ("^", Power),
+    ];
+    for (text, want) in cases {
+        let out = lex(text);
+        assert!(out.ok(), "{text:?}: {:#?}", out.errors);
+        assert_eq!(out.tokens[0].kind, want, "{text:?}");
+        assert_eq!(out.tokens.len(), 2, "{text:?} should be one token and the end");
+    }
+    assert_eq!(kinds("\u{2260}"), [NotEqual, End]);
+}
+
+#[test]
+fn the_operators_that_are_words_need_no_tokens() {
+    use Kind::*;
+    // Quench reserves no words, so an operator spelled with letters costs nothing: the
+    // parser knows what it means where it stands, and `x` is still a name for a variable
+    // anywhere a name is wanted, because names are quoted.
+    for word in ["x", "xx", "mod", "not", "and", "or"] {
+        assert_eq!(kinds(word), [Word, End], "{word}");
+    }
+}
+
+#[test]
+fn the_slash_in_a_comparison_is_not_a_division() {
+    use Kind::*;
+    assert_eq!(
+        kinds("[*a* </= *b*]"),
+        [OpenList, Written, LessEqual, Written, CloseList, End]
+    );
+    assert_eq!(
+        kinds("[*a* < *b*]"),
+        [OpenList, Written, Less, Written, CloseList, End],
+        "and a lone `<` is still a lone `<`"
+    );
+    assert_eq!(
+        kinds("[*a* / *b*]"),
+        [OpenList, Written, Slash, Written, CloseList, End],
+        "and a lone `/` is still a division"
+    );
+}
+
+#[test]
+fn an_exponent_is_written_xx_because_the_obvious_spelling_is_impossible() {
+    use Kind::*;
+    // `*a* ** *b*` lexes that `**` as an empty written value, since the first `*` opens
+    // one and the second closes it. There is no way to have `**` mean an exponent while
+    // `*` marks a value, so the exponent is a word.
+    assert_eq!(kinds("[*2* xx *8*]"), [OpenList, Written, Word, Written, CloseList, End]);
+    assert_eq!(
+        kinds("[*2* ^ *8*]"),
+        [OpenList, Written, Power, Written, CloseList, End],
+        "and `^`, which is how mathematics writes it"
+    );
+    assert_eq!(
+        kinds("[*2* ** *8*]"),
+        [OpenList, Written, Written, Written, CloseList, End],
+        "which is why: this is three written values, not two and an exponent"
+    );
+}
+
+#[test]
+fn a_lone_bang_says_what_the_ways_to_say_not_equal_are() {
+    let out = lex("[*a* ! *b*]");
+    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
+    assert_eq!(out.errors[0].code, "E0005");
+    assert!(out.errors[0].rules.join(" ").contains("`!=`"), "{:?}", out.errors[0]);
+    assert!(out.errors[0].tips.join(" ").contains("the word `not`"), "{:?}", out.errors[0]);
+}

@@ -62,7 +62,32 @@ pub enum Kind {
     /// `*` cannot be multiplication here — it is the mark a written value wears — so the
     /// word `x` does the job as well, and arrives as a [`Kind::Word`] for the parser to
     /// recognise. Only the real sign needs a token of its own.
+    ///
+    /// The exponent is the word `xx`, multiplying twice, and it is a word for the same
+    /// reason. `**` was the obvious spelling and is impossible: `*a* ** *b*` lexes that
+    /// `**` as an *empty written value*, because the first `*` opens one and the second
+    /// closes it.
     Times,
+    /// `/` or `÷`.
+    Slash,
+    /// `^` — an exponent, as mathematics writes one. The word `xx` says the same thing.
+    ///
+    /// Most languages spend `^` on bitwise exclusive-or. Quench cannot follow them and
+    /// keep its own rule: it takes the precedence mathematics settled, and mathematics
+    /// writes an exponent with this. So if an exclusive-or ever arrives it will be
+    /// spelled some other way, and that is the price.
+    Power,
+
+    /// `<`
+    Less,
+    /// `>`
+    Greater,
+    /// `</=` — less than, or equal. The `/` is part of the operator, not a division.
+    LessEqual,
+    /// `>/=`
+    GreaterEqual,
+    /// `!=` or `≠`. Also spelled `not=`, which arrives as the word `not` and an `=`.
+    NotEqual,
 
     /// A bare word: a chain part, a type, or the name of a block. Never a variable's name.
     Word,
@@ -113,6 +138,13 @@ impl Kind {
             Kind::Plus => "`+`",
             Kind::Minus => "`-`",
             Kind::Times => "`\u{d7}`",
+            Kind::Slash => "`/`",
+            Kind::Power => "`^`",
+            Kind::Less => "`<`",
+            Kind::Greater => "`>`",
+            Kind::LessEqual => "`</=`",
+            Kind::GreaterEqual => "`>/=`",
+            Kind::NotEqual => "`!=`",
             Kind::Word => "a word",
             Kind::Name => "a name",
             Kind::Written => "a written value",

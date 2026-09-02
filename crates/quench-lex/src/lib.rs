@@ -61,11 +61,16 @@ impl<'a> Lexer<'a> {
                 ')' => self.single(Kind::CloseGroup),
                 '+' => self.single(Kind::Plus),
                 '-' => self.single(Kind::Minus),
-                '\u{d7}' => {
-                    let start = self.at;
-                    self.at += '\u{d7}'.len_utf8();
-                    self.tokens.push(Token { kind: Kind::Times, span: Span::new(start, self.at) });
-                }
+                '\u{d7}' => self.wide(Kind::Times, '\u{d7}'),
+                '/' => self.single(Kind::Slash),
+                '^' => self.single(Kind::Power),
+                '\u{f7}' => self.wide(Kind::Slash, '\u{f7}'),
+                '\u{2260}' => self.wide(Kind::NotEqual, '\u{2260}'),
+                // `</=` and `>/=` carry a `/` that is part of the operator rather than a
+                // division. Nothing else begins this way, so one look ahead settles it.
+                '<' => self.maybe_slash_equals(Kind::LessEqual, Kind::Less),
+                '>' => self.maybe_slash_equals(Kind::GreaterEqual, Kind::Greater),
+                '!' => self.bang(),
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
                 '.' => self.single(Kind::Dot),
@@ -87,6 +92,42 @@ impl<'a> Lexer<'a> {
 
     fn peek(&self) -> Option<char> {
         self.source[self.at..].chars().next()
+    }
+
+    /// A one-character token whose character is more than one byte.
+    fn wide(&mut self, kind: Kind, c: char) {
+        let start = self.at;
+        self.at += c.len_utf8();
+        self.tokens.push(Token { kind, span: Span::new(start, self.at) });
+    }
+
+    /// `<` and `>` on their own, or `</=` and `>/=` when the rest follows.
+    fn maybe_slash_equals(&mut self, both: Kind, alone: Kind) {
+        let start = self.at;
+        if self.source[self.at + 1..].starts_with("/=") {
+            self.at += 3;
+            self.tokens.push(Token { kind: both, span: Span::new(start, self.at) });
+        } else {
+            self.single(alone);
+        }
+    }
+
+    /// `!=`. A `!` on its own is not anything.
+    fn bang(&mut self) {
+        let start = self.at;
+        if self.source[self.at + 1..].starts_with('=') {
+            self.at += 2;
+            self.tokens.push(Token { kind: Kind::NotEqual, span: Span::new(start, self.at) });
+            return;
+        }
+        self.at += 1;
+        self.errors.push(
+            Diagnostic::new("E0005", "`!` on its own is not something Quench reads.")
+                .primary(Span::new(start, self.at), "here")
+                .rule("the ways to say not-equal are `!=`, `\u{2260}` and `not=`")
+                .tip("`!` never means `not` by itself here — the word `not` does that.")
+                .fix("`!=` if a comparison was meant"),
+        );
     }
 
     fn single(&mut self, kind: Kind) {
