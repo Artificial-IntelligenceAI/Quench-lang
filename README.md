@@ -35,7 +35,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   the LLVM Hot JIT and AOT native backend. They meet at a versioned, serialised IR
   rather than a shared header. See [notes/architecture.md](notes/architecture.md).
 - **The error format comes from [Luarust](https://github.com/Artificial-IntelligenceAI/Luarust)**,
-  unchanged in shape. It is the same author's, MIT, and it was already right.
+  unchanged in shape. Same author, same copyright holder, and it was already right.
 
 ## Decisions not made yet
 
@@ -105,4 +105,30 @@ The LLVM half needs LLVM 22 and is not wired up yet. `llvm-config` is expected a
 
 ## Licence
 
-MIT, © 2026 Tankun Sriket.
+Copyright © 2026 Tankun Sriket.
+
+Licensed under either of
+
+- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE), or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- **MIT license** ([LICENSE-MIT](LICENSE-MIT), or
+  <http://opensource.org/licenses/MIT>)
+
+at your option. In SPDX terms: `MIT OR Apache-2.0`.
+
+You do not have to comply with both. Pick whichever one suits you and comply
+with that one.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this work by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
+
+### Provenance
+
+`quench-diag` is derived from `luarust-diag` in
+[Luarust](https://github.com/Artificial-IntelligenceAI/Luarust), which is MIT
+and copyright the same author. Relicensing it under the dual licence here is
+the copyright holder's to do. Quench has no third-party code and, at present,
+no third-party dependencies at all.
