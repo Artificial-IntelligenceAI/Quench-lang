@@ -20,7 +20,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Part | State |
 | --- | --- |
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
-| Lexer, parser | Not started — waiting on the syntax |
+| **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
+| Parser | Not started |
 | Type checker, borrow checker | Not started — waiting on the type system |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |

@@ -1,0 +1,11 @@
+[package]
+name = "quench-lex"
+description = "Turning Quench source into tokens, and saying so when it cannot."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }
