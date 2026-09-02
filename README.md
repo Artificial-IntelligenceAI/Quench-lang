@@ -72,9 +72,11 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   both produced famous traps: the lesson is not that C chose wrong but that there was
   nothing to choose. See
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
-- **Multiplication is `x` and `×`, never `*`**, because `*` is the written-value
-  mark. Letting `*` be both would mean a lexer that reads it differently depending
-  on where it is, and one unbalanced brace turning the rest of a file into nonsense.
+- **The operators**: `+` `-`, `x`/`×` for multiply (never `*`, which is the
+  written-value mark), `/`/`÷`, `mod`, `^`/`xx` for an exponent, and `<` `>` `</=`
+  `>/=` `==` `!=`. Two spellings were not available rather than not chosen: `**`
+  lexes as an *empty written value*, and `=` would have meant a declaration outside
+  the brackets and a comparison inside them.
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the
   declaration rather than on some innocent use of it later. Words rather than

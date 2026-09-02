@@ -75,7 +75,16 @@ impl<'a> Lexer<'a> {
                 ',' => self.single(Kind::Comma),
                 '.' => self.single(Kind::Dot),
                 ':' => self.single(Kind::Colon),
-                '=' => self.single(Kind::Equals),
+                '=' => {
+                    if self.source[self.at + 1..].starts_with('=') {
+                        let start = self.at;
+                        self.at += 2;
+                        self.tokens
+                            .push(Token { kind: Kind::EqualTo, span: Span::new(start, self.at) });
+                    } else {
+                        self.single(Kind::Equals);
+                    }
+                }
                 '"' => self.double_quoted(),
                 '\\' => self.escape(),
                 '\'' => self.delimited('\'', Kind::Name, "a name"),

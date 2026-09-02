@@ -351,7 +351,7 @@ fn a_hyphen_is_still_part_of_a_word_when_it_is_inside_one() {
 #[test]
 fn the_operators_that_need_tokens_have_them() {
     use Kind::*;
-    let cases: [(&str, Kind); 11] = [
+    let cases: [(&str, Kind); 12] = [
         ("+", Plus),
         ("-", Minus),
         ("\u{d7}", Times),
@@ -363,6 +363,7 @@ fn the_operators_that_need_tokens_have_them() {
         (">/=", GreaterEqual),
         ("!=", NotEqual),
         ("^", Power),
+        ("==", EqualTo),
     ];
     for (text, want) in cases {
         let out = lex(text);
@@ -379,7 +380,7 @@ fn the_operators_that_are_words_need_no_tokens() {
     // Quench reserves no words, so an operator spelled with letters costs nothing: the
     // parser knows what it means where it stands, and `x` is still a name for a variable
     // anywhere a name is wanted, because names are quoted.
-    for word in ["x", "xx", "mod", "not", "and", "or"] {
+    for word in ["x", "xx", "mod", "not", "and", "or", "eq-to"] {
         assert_eq!(kinds(word), [Word, End], "{word}");
     }
 }
@@ -429,4 +430,24 @@ fn a_lone_bang_says_what_the_ways_to_say_not_equal_are() {
     assert_eq!(out.errors[0].code, "E0005");
     assert!(out.errors[0].rules.join(" ").contains("`!=`"), "{:?}", out.errors[0]);
     assert!(out.errors[0].tips.join(" ").contains("the word `not`"), "{:?}", out.errors[0]);
+}
+
+#[test]
+fn equality_and_declaration_are_not_the_same_symbol() {
+    use Kind::*;
+    // Luarust writes equality `=`, and can, because its arithmetic lives inside a
+    // `math { … }` block where `=` cannot be a declaration. Quench put expressions in
+    // the value list directly, so it had to fix the operator instead of the context.
+    assert_eq!(
+        kinds("var.bool ['b'] = [*1* == *2*];"),
+        [
+            Word, Dot, Word,
+            OpenList, Name, CloseList,
+            Equals,                        // the declaration's
+            OpenList, Written, EqualTo, Written, CloseList,  // and the comparison's
+            Semicolon, End,
+        ]
+    );
+    // `eq-to` is a word and needs no token, hyphen and all.
+    assert_eq!(kinds("eq-to"), [Word, End]);
 }

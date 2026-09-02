@@ -84,8 +84,42 @@ Suggested fix(s):
   - `*a* mod (*b* + *c*)`
 ```
 
-## Not decided
+## The operators
 
-Which operators exist at all. `+`, `-` and `x` are settled — with `×` for anyone whose
-keyboard has it, and never `*`, which is the mark a written value wears. Division, a
-remainder, an exponent and the comparisons are still open.
+| | written |
+| --- | --- |
+| add, subtract | `+` `-` |
+| multiply | `x` or `×` — **never `*`**, which is the mark a written value wears |
+| divide | `/` or `÷` |
+| remainder | `mod` |
+| exponent | `^` or `xx` — multiplying twice |
+| compare | `<` `>` `</=` `>/=` `==` `!=` `≠` |
+
+`x`, `xx`, `mod` and `eq-to` need no tokens at all: Quench reserves no words, so an
+operator spelled with letters costs nothing, and `x` is still available as a variable's
+name anywhere a name is wanted, because names are quoted.
+
+## Two spellings that were not available
+
+**`**` for an exponent is impossible**, not merely ugly. `*a* ** *b*` lexes that `**`
+as an *empty written value* — the first `*` opens one, the second closes it. There is no
+arrangement where `**` is an exponent while `*` marks a value. Hence `^`, which is how
+mathematics writes it anyway, and `xx`.
+
+Taking `^` costs an exclusive-or, since most languages spend `^` on that. Quench cannot
+follow them and also keep the rule at the top of this note.
+
+**`=` for equality is impossible for a subtler reason**, and the reason is a good
+illustration of how one decision reaches another.
+
+Luarust writes equality `=` and gets away with it, because its arithmetic lives inside a
+`math { … }` block. Inside that block `=` cannot possibly be a declaration, so there is
+nothing to confuse. The block was doing disambiguating work as well as grouping work.
+
+Quench put expressions in the value list directly and has no such block. So `=` would
+have meant a declaration outside the brackets and a comparison inside them, decided by
+where it sat — which is precisely what the marks exist to prevent, and would have made
+`=` the only symbol in the language that was not itself wherever you met it.
+
+So equality is `==`, or the word `eq-to`. Removing a block cost an operator, which is
+the sort of thing that is only visible once both decisions are on the table.

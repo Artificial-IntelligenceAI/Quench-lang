@@ -49,8 +49,18 @@ pub enum Kind {
     /// nothing has to be said twice. Anywhere else the value states it — `str:*hello*` —
     /// rather than being read as whatever seems likely.
     Colon,
-    /// `=`
+    /// `=` — the one in a declaration, between the names and their values.
     Equals,
+    /// `==` — equality. The word `eq-to` says the same thing.
+    ///
+    /// Luarust writes this `=`, and gets away with it because arithmetic lives inside a
+    /// `math { … }` block where `=` cannot be a declaration. Quench has no such block —
+    /// an expression sits in the value list directly — so `=` would mean assignment
+    /// outside the brackets and equality inside them, decided by where it sits.
+    ///
+    /// Which is the one thing the marks exist to prevent. `'name'` is a name wherever it
+    /// is met; `=` would have been the only symbol in the language that was not itself.
+    EqualTo,
 
     /// `+`
     Plus,
@@ -135,6 +145,7 @@ impl Kind {
             Kind::Dot => "`.`",
             Kind::Colon => "`:`",
             Kind::Equals => "`=`",
+            Kind::EqualTo => "`==`",
             Kind::Plus => "`+`",
             Kind::Minus => "`-`",
             Kind::Times => "`\u{d7}`",
