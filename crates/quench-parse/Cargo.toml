@@ -1,0 +1,12 @@
+[package]
+name = "quench-parse"
+description = "Tokens into a tree, and a great deal to say when they will not go."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }
+quench-lex = { path = "../quench-lex" }

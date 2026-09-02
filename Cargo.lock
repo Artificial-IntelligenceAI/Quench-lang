@@ -338,6 +338,14 @@ name = "quench-num"
 version = "0.0.0"
 
 [[package]]
+name = "quench-parse"
+version = "0.0.0"
+dependencies = [
+ "quench-diag",
+ "quench-lex",
+]
+
+[[package]]
 name = "quench-qir"
 version = "0.0.0"
 dependencies = [

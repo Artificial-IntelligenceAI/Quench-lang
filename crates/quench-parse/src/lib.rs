@@ -1,0 +1,326 @@
+//! Tokens into a tree, and a great deal to say when they will not go.
+//!
+//! A parser has more to say about a mistake than a lexer does, because it knows what it
+//! was expecting. That is most of the value here: the tree is a straightforward walk
+//! over a token list, and the interesting code is the part that runs when the walk fails.
+//!
+//! Two rules it follows:
+//!
+//! - **Never stop at the first mistake.** A statement that goes wrong is abandoned at the
+//!   next `;`, and parsing resumes. A file with four mistakes should report four.
+//! - **Never report the same mistake twice.** Recovery that produces a cascade of
+//!   invented errors is worse than stopping, because a reader cannot tell which of them
+//!   was real.
+
+pub mod ast;
+
+pub use ast::{Piece, Print, Program, Start, Stmt, Value, Var};
+
+use quench_diag::{Diagnostic, Span};
+use quench_lex::{Kind, Token};
+
+/// What a file turned into, and everything wrong with it.
+#[derive(Clone, Debug)]
+pub struct Parsed {
+    pub program: Program,
+    pub errors: Vec<Diagnostic>,
+}
+
+impl Parsed {
+    pub fn ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
+/// Read a whole file, lexing it on the way.
+pub fn parse(source: &str) -> Parsed {
+    let lexed = quench_lex::lex(source);
+    let mut parser =
+        Parser { source, tokens: lexed.tokens, at: 0, errors: lexed.errors };
+    let program = parser.program();
+    Parsed { program, errors: parser.errors }
+}
+
+struct Parser<'a> {
+    source: &'a str,
+    tokens: Vec<Token>,
+    at: usize,
+    errors: Vec<Diagnostic>,
+}
+
+impl<'a> Parser<'a> {
+    // --- looking around -------------------------------------------------------------
+
+    fn peek(&self) -> Token {
+        self.tokens[self.at.min(self.tokens.len() - 1)]
+    }
+
+    fn text(&self, span: Span) -> &'a str {
+        &self.source[span.start..span.end]
+    }
+
+    fn at_end(&self) -> bool {
+        self.peek().kind == Kind::End
+    }
+
+    fn bump(&mut self) -> Token {
+        let token = self.peek();
+        if token.kind != Kind::End {
+            self.at += 1;
+        }
+        token
+    }
+
+    fn eat(&mut self, kind: Kind) -> Option<Span> {
+        if self.peek().kind == kind { Some(self.bump().span) } else { None }
+    }
+
+    /// Take a token of the given kind, or say what was there instead.
+    fn expect(&mut self, kind: Kind, doing: &str) -> Option<Span> {
+        if let Some(span) = self.eat(kind) {
+            return Some(span);
+        }
+        let found = self.peek();
+        self.errors.push(
+            Diagnostic::new("E0101", format!("{doing} wants {} here.", kind.describe()))
+                .primary(found.span, format!("found {}", found.kind.describe()))
+                .rule(format!("{doing} is written with {}", kind.describe()))
+                .fix(format!("put {} here", kind.describe())),
+        );
+        None
+    }
+
+    /// Give up on this statement and start again after the next `;`.
+    ///
+    /// The semicolon is what makes recovery honest: a parser that guessed where a
+    /// statement ended would invent errors about the guess.
+    fn recover(&mut self) {
+        while !self.at_end() {
+            if self.bump().kind == Kind::Semicolon {
+                return;
+            }
+        }
+    }
+
+    // --- the grammar ----------------------------------------------------------------
+
+    fn program(&mut self) -> Program {
+        let mut program = Program::default();
+
+        while !self.at_end() {
+            let token = self.peek();
+            if token.kind == Kind::Word && self.text(token.span) == quench_qir_entry() {
+                let word = self.bump().span;
+                let body = self.body();
+                program.start = Some(Start { word, body });
+                continue;
+            }
+
+            self.errors.push(
+                Diagnostic::new("E0102", "only `START` can be at the top of a file so far.")
+                    .primary(token.span, "this is not `START`")
+                    .rule("a file holds declarations and one `START`, and nothing else runs")
+                    .tip("declaring things outside `START` is not built yet.")
+                    .fix("move this after `START`"),
+            );
+            self.recover();
+        }
+
+        program
+    }
+
+    /// Everything after `START`.
+    ///
+    /// It runs to the end of the file, because `START` is the only thing a file can hold
+    /// so far. The day there is a second one, this needs an ending.
+    fn body(&mut self) -> Vec<Stmt> {
+        let mut body = Vec::new();
+        while !self.at_end() {
+            match self.statement() {
+                Some(stmt) => body.push(stmt),
+                None => self.recover(),
+            }
+        }
+        body
+    }
+
+    fn statement(&mut self) -> Option<Stmt> {
+        let token = self.peek();
+        if token.kind != Kind::Word {
+            self.errors.push(
+                Diagnostic::new("E0103", "a statement begins with a word.")
+                    .primary(token.span, format!("found {}", token.kind.describe()))
+                    .rule("every statement starts by saying what it is — `var`, `print`")
+                    .fix("start the line with what it does"),
+            );
+            return None;
+        }
+
+        match self.text(token.span) {
+            "print" => self.print().map(Stmt::Print),
+            "var" => self.var().map(Stmt::Var),
+            other => {
+                self.errors.push(
+                    Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
+                        .primary(token.span, "here")
+                        .rule("a statement begins with `var` or `print`")
+                        .tip("that is the whole list, for now.")
+                        .fix("did you mean `var` or `print`?"),
+                );
+                None
+            }
+        }
+    }
+
+    fn print(&mut self) -> Option<Print> {
+        let word = self.bump().span;
+        self.expect(Kind::OpenList, "`print`")?;
+
+        let mut pieces = Vec::new();
+        while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            pieces.push(self.piece(true)?);
+        }
+
+        self.expect(Kind::CloseList, "`print`")?;
+        let end = self.expect(Kind::Semicolon, "a statement")?;
+        Some(Print { word, pieces, span: word.to(end) })
+    }
+
+    fn var(&mut self) -> Option<Var> {
+        let start = self.peek().span;
+        let mut chain = vec![self.bump().span];
+        while self.eat(Kind::Dot).is_some() {
+            chain.push(self.expect(Kind::Word, "a chain")?);
+        }
+
+        // The names.
+        self.expect(Kind::OpenList, "a declaration")?;
+        let mut names = Vec::new();
+        loop {
+            names.push(self.expect(Kind::Name, "a declaration")?);
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let names_end = self.expect(Kind::CloseList, "a declaration")?;
+        // The names themselves, not the brackets around them: the count is what is
+        // wrong, and the brackets are innocent.
+        let names_span = match (names.first(), names.last()) {
+            (Some(first), Some(last)) => first.to(*last),
+            _ => names_end,
+        };
+
+        self.expect(Kind::Equals, "a declaration")?;
+
+        // The values, each of them as many pieces as it likes.
+        let values_start = self.expect(Kind::OpenList, "a declaration")?;
+        let mut values = Vec::new();
+        loop {
+            let from = self.peek().span;
+            let mut pieces = Vec::new();
+            while !matches!(self.peek().kind, Kind::Comma | Kind::CloseList | Kind::End) {
+                pieces.push(self.piece(false)?);
+            }
+            let to = pieces.last().map(|p| p.span()).unwrap_or(from);
+            values.push(Value { pieces, span: from.to(to) });
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let values_end = self.expect(Kind::CloseList, "a declaration")?;
+        let end = self.expect(Kind::Semicolon, "a statement")?;
+        let values_span = match (values.first(), values.last()) {
+            (Some(first), Some(last)) => first.span.to(last.span),
+            _ => values_start.to(values_end),
+        };
+
+        if names.len() != values.len() {
+            self.errors.push(
+                Diagnostic::new(
+                    "E0105",
+                    format!(
+                        "{} declared, and {} given.",
+                        counted(names.len(), "name"),
+                        counted(values.len(), "value")
+                    ),
+                )
+                .secondary(names_span, counted(names.len(), "name"))
+                .primary(values_span, counted(values.len(), "value"))
+                .rule("a declaration gives one value for each name, in the same order")
+                .tip("a value runs until a comma, so a missing comma joins two of them into one.")
+                .fix(if names.len() > values.len() {
+                    "add the missing value, or remove the name"
+                } else {
+                    "add the missing name, or remove the value"
+                }),
+            );
+        }
+
+        Some(Var { chain, names, values, span: start.to(end) })
+    }
+
+    /// One piece of a list. `typed` says whether a written value may carry a type: it
+    /// must in a `print`, where nothing else supplies one, and must not in a declaration,
+    /// where the chain already did.
+    fn piece(&mut self, typed: bool) -> Option<Piece> {
+        let token = self.peek();
+        match token.kind {
+            Kind::Name => Some(Piece::Name(self.bump().span)),
+            Kind::Escape => Some(Piece::Escape(self.bump().span)),
+            Kind::Written => {
+                let mark = self.bump().span;
+                if typed {
+                    self.errors.push(
+                        Diagnostic::new("E0106", "this written value does not say what it is.")
+                            .primary(mark, "no type in front of it")
+                            .rule("a written value means nothing until a type reads it: `*1000*` is a number under `b16` and four characters under `str`")
+                            .tip("a declaration says the type in its chain, so only here does the value have to.")
+                            .fix(format!("`str:{}` if it is text", self.text(mark))),
+                    );
+                }
+                Some(Piece::Written { ty: None, mark })
+            }
+            Kind::Word => {
+                let ty = self.bump().span;
+                self.expect(Kind::Colon, "a typed value")?;
+                let mark = self.expect(Kind::Written, "a typed value")?;
+                if !typed {
+                    self.errors.push(
+                        Diagnostic::new("E0107", "this value says its type twice.")
+                            .primary(ty, "said here")
+                            .rule("a declaration's chain already says the type, so its values do not repeat it")
+                            .fix(format!("`{}`", self.text(mark))),
+                    );
+                }
+                Some(Piece::Written { ty: Some(ty), mark })
+            }
+            _ => {
+                self.errors.push(
+                    Diagnostic::new("E0108", "this cannot be part of a list.")
+                        .primary(token.span, format!("found {}", token.kind.describe()))
+                        .rule("a list holds written values, names and escapes")
+                        .fix("remove it"),
+                );
+                None
+            }
+        }
+    }
+}
+
+/// `one name`, `two names`, `13 names`.
+///
+/// Small counts are spelled out because the message is a sentence and a reader is
+/// reading it, not scanning it. Past twelve, digits are what a person would write.
+fn counted(n: usize, what: &str) -> String {
+    const WORDS: [&str; 13] = [
+        "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "eleven", "twelve",
+    ];
+    let count = WORDS.get(n).map_or_else(|| n.to_string(), |word| word.to_string());
+    if n == 1 { format!("{count} {what}") } else { format!("{count} {what}s") }
+}
+
+/// The name a program starts at. Kept in one place; see `quench_qir::ENTRY`.
+fn quench_qir_entry() -> &'static str {
+    "START"
+}

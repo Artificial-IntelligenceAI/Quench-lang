@@ -28,7 +28,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | --- | --- |
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
 | **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
-| Parser | Not started |
+| **Parser** (`quench-parse`) | **Working** — `START`, declarations, `print`, and recovery at the semicolon |
 | Type checker | Not started — waiting on the type system |
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
