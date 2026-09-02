@@ -9,5 +9,7 @@
 //! what decides the shape of everything here. See `notes/e-is-big-and-exact.md`.
 
 pub mod big;
+pub mod exact;
 
 pub use big::Big;
+pub use exact::{Exact, Trouble};

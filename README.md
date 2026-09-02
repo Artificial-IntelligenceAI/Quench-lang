@@ -31,7 +31,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Parser | Not started |
 | Type checker | Not started — waiting on the type system |
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
-| **Numbers** (`quench-num`) | **`Big` working** — unbounded integers, binary gcd, Knuth division. `Exact` next |
+| **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
