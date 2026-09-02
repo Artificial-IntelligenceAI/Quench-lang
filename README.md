@@ -37,8 +37,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   types, constants — and they are order-free, because none of them execute.
   Execution begins in `START` and nowhere else. See
   [notes/the-top-level-does-not-run.md](notes/the-top-level-does-not-run.md).
-- **Declarations chain**, as Luarust's do: `var.mut.b16 ['x'] = [|1000|];`.
-  Names in quotes, values in bars, semicolons at the end. See
+- **Declarations chain**, as Luarust's do: `var.mut.b16 ['x'] = [*1000*];`.
+  Names in quotes, values between marks, semicolons at the end. See
   [notes/the-declaration-chain.md](notes/the-declaration-chain.md).
 - **A Quench file is `.qnl`.** Unclaimed, and distinctive enough to search for —
   `.q`, `.qs`, `.qm` and `.qml` are all taken, and `.qn` collides with a common
@@ -51,18 +51,21 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   chain supplies a type, the value carries it — `print[str:*Hello* 'name' \n];` —
   and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
+- **Multiplication is `x` and `×`, never `*`**, because `*` is the written-value
+  mark. Letting `*` be both would mean a lexer that reads it differently depending
+  on where it is, and one unbalanced brace turning the rest of a file into nonsense.
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the
   declaration rather than on some innocent use of it later. Words rather than
-  initials, since the volume that would justify abbreviating is already gone. Variables never carry one, because nothing
-  outside a function can name them anyway. See
+  initials, since the volume that would justify abbreviating is already gone.
+  Variables never carry one, because nothing outside a function can name them
+  anyway. See
   [notes/three-lines-a-name-can-cross.md](notes/three-lines-a-name-can-cross.md).
 - **Constants outside, variables inside.** A constant is a value the compiler can
   work out; anything needing code to run to produce it would need that code to run
   before `START`, which is the model above, smuggled back in. So every variable
   lives inside a function, where it has an owner and a lifetime the borrow checker
   can see.
-
 - **Memory is owned.** Ownership and moves, with a borrow checker. Not refcounting,
   not a collector.
 - **Two host languages.** Rust for the frontend and the Cranelift Dev JIT; C++ for
@@ -81,6 +84,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **How a top-level function is declared.** The chain covers variables; there is
   nothing in Luarust to inherit for routines.
 - Whether **`mut`** keeps that spelling, given visibility chose words over initials.
+- **Whether there are modules inside a file.** The three visibilities assume a file
+  is the unit of privacy; modules would add a rung.
 
 ## Errors
 
@@ -106,6 +111,10 @@ Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to
 
 1 error.
 ```
+
+The move and borrow syntax in that sample is a **placeholder** — how a value is
+given away or lent is not designed yet. The *format* is real, and is asserted
+byte for byte in `quench-diag`'s tests.
 
 The greeting is printed once however many errors follow, and the count once at the
 end, so a program with twelve mistakes apologises once rather than twelve times.
@@ -163,8 +172,11 @@ match — rather than benchmarks. See
 cargo test
 ```
 
-The LLVM half needs LLVM 22 and is not wired up yet. `llvm-config` is expected at
-`/opt/homebrew/opt/llvm/bin/llvm-config` on macOS.
+The LLVM half needs **LLVM 23** and is not wired up yet. When it is, `build.rs`
+will find `llvm-config` from an environment variable and **assert its version**,
+rather than trusting a path: Homebrew's `/opt/homebrew/opt/llvm` moves under you
+on the next `brew upgrade`, which is exactly how the 22 that used to be written
+here stopped being true.
 
 ## Licence
 
