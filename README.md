@@ -101,6 +101,31 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **Whether there are modules inside a file.** The three visibilities assume a file
   is the unit of privacy; modules would add a rung.
 
+## Types, iteration 1
+
+| | |
+| --- | --- |
+| `b16` `b32` `b64` | IEEE 754 binary. `b64` is the widest for now — no `b128`, no `b256` |
+| `d32` `d64` | IEEE 754 decimal |
+| `u8` `u16` `u32` `u64` | unsigned integers, two's complement |
+| `i8` `i16` `i32` `i64` | signed integers, two's complement |
+| `e` | exact, unbounded **rationals**. Never rounds — including on division |
+| `bool` | |
+| `str` | |
+
+There is no IEEE 754 for integers. The nearest standard is ISO/IEC 10967-1
+(*Language Independent Arithmetic*), which covers bounded, unbounded and modulo
+integers and is written to sit alongside IEEE 754 — but almost nothing cites it, and
+the honest description is two's complement, which C only mandated outright in C23.
+
+The standard would not settle the interesting question anyway. **How arithmetic
+behaves — what overflow does, how division rounds — is a `Quench.toml` setting**, and
+those land in the semantic pile, so each one multiplies what the oracle has to prove.
+See [Settings](#settings).
+
+Only two of these allocate: `str`, and `e` because it is unbounded. Capping binary
+floats at `b64` is what keeps the rest of them out of the heap.
+
 ## Errors
 
 An error names the rule that was broken, points at the line, and ends with the fix,

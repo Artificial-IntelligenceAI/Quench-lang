@@ -106,8 +106,25 @@ defers the hard part rather than merely postponing it:
 Which means a working collector arrives before LLVM statepoints are touched at all.
 
 What blocks step 1 is the **object header** — a mark bit, and enough to find an
-object's type so its references can be traced. That needs the type system, which puts
-the type system ahead of the parser for anyone who wants the collector moving.
+object's type so its references can be traced.
+
+With iteration 1's types that is very nearly nothing. Binary floats stop at `b64` and
+integers at 64 bits, so every number fits in a register and never reaches the heap.
+**Two things allocate: `str`, and `e`.**
+
+And `e` is where the interesting question is. It is exact unbounded rationals, so it
+is a numerator and a denominator, each of them arbitrarily large — and *how that is
+laid out decides whether the collector has edges to follow at all*:
+
+- **One allocation**, with both magnitudes stored inline, is a leaf. The collector
+  marks it and never looks inside. Tracing has no edges anywhere in the language.
+- **Three allocations** — a rational pointing at two big integers — and `e` becomes
+  the first thing in Quench that contains references. Tracing has edges, `ObjectModel`
+  has real work, and this arrives long before compound types do.
+
+The first is simpler for the collector and worse for arithmetic, since every result
+of a different size means copying rather than sharing. The second is the usual
+implementation and costs the collector its holiday. Not decided.
 
 ## Testing something the oracle cannot see
 
