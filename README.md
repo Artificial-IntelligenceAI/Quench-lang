@@ -141,6 +141,14 @@ So the methods are not trusted, they are tested against each other:
 Any disagreement is a bug in at least one engine, and the seed that produced it is
 kept so it can be replayed.
 
+The oracle answers one question, though, and it is worth being clear about which.
+Code that is never optimised is still **correct**: every engine agrees, every
+generated program agrees, and the suite stays green while the output is a third
+slower than it should be. Luarust shipped exactly that. So the optimised paths carry
+their own guards, of the same shape — two things that must match, asserted to still
+match — rather than benchmarks. See
+[notes/passes-are-a-thing-you-have-to-ask-for.md](notes/passes-are-a-thing-you-have-to-ask-for.md).
+
 ## Building
 
 ```bash
