@@ -1,0 +1,18 @@
+[package]
+name = "quench-cli"
+description = "The `quench` command."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "quench"
+path = "src/main.rs"
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }
+quench-lower = { path = "../quench-lower" }
+quench-interp = { path = "../quench-interp" }
+quench-dev = { path = "../quench-dev" }

@@ -150,6 +150,35 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
             for (result, inst) in &block.insts {
                 match inst {
                     Inst::ConstI64(_) | Inst::ConstBool(_) => {}
+                    Inst::ConstText(at) => {
+                        if *at as usize >= module.text.len() {
+                            say(format!(
+                                "block {i}: names text {at}, and the module holds {}",
+                                module.text.len()
+                            ));
+                        }
+                    }
+                    Inst::CallHost { host, args } => {
+                        let wants = host.params();
+                        if args.len() != wants.len() {
+                            say(format!(
+                                "block {i}: `{}` takes {} argument(s) and is given {}",
+                                host.name(),
+                                wants.len(),
+                                args.len()
+                            ));
+                        }
+                        for (n, (arg, want)) in args.iter().zip(wants).enumerate() {
+                            if known(*arg, &mut say) && func.ty_of(*arg) != *want {
+                                say(format!(
+                                    "block {i}: `{}` wants {} for argument {n} and is given {}",
+                                    host.name(),
+                                    want.name(),
+                                    func.ty_of(*arg).name()
+                                ));
+                            }
+                        }
+                    }
                     Inst::Bin { op, lhs, rhs } => {
                         for v in [lhs, rhs] {
                             if known(*v, &mut say) && func.ty_of(*v) != Ty::I64 {

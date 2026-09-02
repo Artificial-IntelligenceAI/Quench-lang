@@ -64,6 +64,14 @@ pub const ENTRY: &str = "START";
 pub enum Ty {
     I64,
     Bool,
+    /// A piece of text the program was written with.
+    ///
+    /// A `Text` value is an index into [`Module::text`], not a pointer — QIR may not
+    /// know what machine it is for, and a pointer is the most machine-specific thing
+    /// there is. What an index *becomes* is each backend's business: the Dev JIT hands
+    /// the runtime an index into a pool it can see, and ahead-of-time output will emit a
+    /// data symbol. The IR says which piece of text; it does not say where it lives.
+    Text,
 }
 
 impl Ty {
@@ -71,6 +79,7 @@ impl Ty {
         match self {
             Ty::I64 => "i64",
             Ty::Bool => "bool",
+            Ty::Text => "text",
         }
     }
 }
@@ -129,16 +138,50 @@ pub enum CmpOp {
     Ge,
 }
 
+/// Something outside the program that it can ask for.
+///
+/// A fixed list rather than arbitrary symbol names, for the same reason QIR carries no
+/// pointers: a module travels, and a name it expects to find on the other machine is a
+/// promise it cannot keep. Everything here is something every Quench runtime has.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Host {
+    /// Write a piece of text. Takes one [`Ty::Text`].
+    PrintText,
+}
+
+impl Host {
+    pub fn name(self) -> &'static str {
+        match self {
+            Host::PrintText => "print-text",
+        }
+    }
+
+    /// What it takes, in order.
+    pub fn params(self) -> &'static [Ty] {
+        match self {
+            Host::PrintText => &[Ty::Text],
+        }
+    }
+}
+
 /// An instruction. Each one produces exactly one value.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Inst {
     ConstI64(i64),
     ConstBool(bool),
+    /// A piece of text, by index into [`Module::text`].
+    ConstText(u32),
     Bin { op: BinOp, lhs: Value, rhs: Value },
     Cmp { op: CmpOp, lhs: Value, rhs: Value },
     /// Boolean negation.
     Not(Value),
     Call { func: FuncId, args: Vec<Value> },
+    /// Ask the runtime for something.
+    ///
+    /// Produces an `i64` that nothing is expected to use — every instruction here
+    /// defines exactly one value, and a host call having nothing to give back is not a
+    /// good enough reason to make that untrue everywhere else.
+    CallHost { host: Host, args: Vec<Value> },
 }
 
 /// Where a block goes when it is done. Every block has exactly one.
@@ -204,6 +247,11 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// The function a run of this module starts at.
     pub entry: Option<FuncId>,
+    /// Every piece of text the module mentions, once each.
+    ///
+    /// Held here rather than inside instructions so that a module is one thing to send
+    /// somewhere, and so the same text written twice is stored once.
+    pub text: Vec<String>,
 }
 
 impl Module {
@@ -243,6 +291,15 @@ impl Module {
     /// Name the function a run starts at. See [`Module::entry`].
     pub fn set_entry(&mut self, id: FuncId) {
         self.entry = Some(id);
+    }
+
+    /// Add a piece of text, or find it if the module already has it.
+    pub fn intern(&mut self, text: &str) -> u32 {
+        if let Some(at) = self.text.iter().position(|held| held == text) {
+            return at as u32;
+        }
+        self.text.push(text.to_string());
+        self.text.len() as u32 - 1
     }
 }
 

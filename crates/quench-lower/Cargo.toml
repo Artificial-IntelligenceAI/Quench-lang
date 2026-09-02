@@ -1,0 +1,17 @@
+[package]
+name = "quench-lower"
+description = "The tree a person wrote, turned into the IR every engine runs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }
+quench-parse = { path = "../quench-parse" }
+quench-qir = { path = "../quench-qir" }
+
+[dev-dependencies]
+quench-interp = { path = "../quench-interp" }
+quench-dev = { path = "../quench-dev" }

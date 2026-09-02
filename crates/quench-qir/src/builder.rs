@@ -11,7 +11,7 @@
 //!
 //! [`Diagnostic`]: https://docs.rs/quench-diag
 
-use crate::{BinOp, Block, BlockId, CmpOp, FuncId, Function, Inst, Target, Term, Ty, Value};
+use crate::{BinOp, Block, BlockId, CmpOp, FuncId, Function, Host, Inst, Target, Term, Ty, Value};
 
 /// A block under construction: its parameters, its instructions, and its terminator once
 /// it has one.
@@ -102,6 +102,16 @@ impl Builder {
 
     pub fn const_bool(&mut self, b: bool) -> Value {
         self.push(Inst::ConstBool(b), Ty::Bool)
+    }
+
+    /// A piece of text, by the index [`crate::Module::intern`] gave it.
+    pub fn const_text(&mut self, at: u32) -> Value {
+        self.push(Inst::ConstText(at), Ty::Text)
+    }
+
+    /// Ask the runtime for something. The value it gives back is not meant to be used.
+    pub fn call_host(&mut self, host: Host, args: &[Value]) -> Value {
+        self.push(Inst::CallHost { host, args: args.to_vec() }, Ty::I64)
     }
 
     pub fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value) -> Value {

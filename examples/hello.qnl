@@ -1,0 +1,3 @@
+START {
+    print[str:*Hello, World!* \n];
+}

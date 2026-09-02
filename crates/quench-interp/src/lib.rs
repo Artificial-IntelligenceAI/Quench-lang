@@ -21,6 +21,7 @@
 //! `sdiv` and `srem` do, because that is what the machine code will do.
 
 use quench_qir as qir;
+use std::io::Write;
 
 /// How a run ended.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -82,10 +83,18 @@ impl std::error::Error for Error {}
 /// oracle that dies on one seed loses the whole run, and cannot tell you which seed.
 pub const DEPTH: usize = 10_000;
 
-/// Run a module from its entry.
+/// Run a module from its entry, writing anything it prints to standard output.
 pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
+    run_writing(module, &mut std::io::stdout())
+}
+
+/// The same, sending whatever it prints somewhere of your choosing.
+///
+/// Which is how a test reads what a program said, and how the oracle will compare what
+/// two engines said rather than only what they returned.
+pub fn run_writing(module: &qir::Module, out: &mut dyn Write) -> Result<Outcome, Error> {
     let id = module.entry.ok_or(Error::NoEntry)?;
-    run_id(module, id)
+    run_id(module, id, out)
 }
 
 /// Run one named function that takes nothing and returns an i64.
@@ -93,13 +102,22 @@ pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
 /// The oracle's other door: a module holds many generated programs, and this runs one
 /// of them without the module having to name it as the entry.
 pub fn run_named(module: &qir::Module, name: &str) -> Result<Outcome, Error> {
+    run_named_writing(module, name, &mut std::io::sink())
+}
+
+/// The same, keeping what it printed.
+pub fn run_named_writing(
+    module: &qir::Module,
+    name: &str,
+    out: &mut dyn Write,
+) -> Result<Outcome, Error> {
     let id = module
         .find(name)
         .ok_or_else(|| Error::Entry(format!("there is no function called `{name}`")))?;
-    run_id(module, id)
+    run_id(module, id, out)
 }
 
-fn run_id(module: &qir::Module, id: qir::FuncId) -> Result<Outcome, Error> {
+fn run_id(module: &qir::Module, id: qir::FuncId, out: &mut dyn Write) -> Result<Outcome, Error> {
     qir::verify(module).map_err(Error::Invalid)?;
     let entry = module.func(id);
     if !entry.params.is_empty() {
@@ -117,7 +135,7 @@ fn run_id(module: &qir::Module, id: qir::FuncId) -> Result<Outcome, Error> {
         )));
     }
 
-    Ok(match walk(module, id) {
+    Ok(match walk(module, id, out) {
         Ok(value) => Outcome::Returned(value),
         Err(trap) => Outcome::Trapped(trap),
     })
@@ -161,7 +179,7 @@ impl Frame {
 }
 
 /// Run, with the calls on a stack here rather than on Rust's.
-fn walk(module: &qir::Module, entry: qir::FuncId) -> Result<i64, Trap> {
+fn walk(module: &qir::Module, entry: qir::FuncId, out: &mut dyn Write) -> Result<i64, Trap> {
     let mut stack = vec![Frame::new(module, entry, &[])];
 
     loop {
@@ -182,7 +200,7 @@ fn walk(module: &qir::Module, entry: qir::FuncId) -> Result<i64, Trap> {
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots)?;
+            let value = evaluate(inst, &stack[top].slots, module, out)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
@@ -226,10 +244,31 @@ fn walk(module: &qir::Module, entry: qir::FuncId) -> Result<i64, Trap> {
 }
 
 /// Everything that is not a call, which is everything that cannot change the stack.
-fn evaluate(inst: &qir::Inst, slots: &[i64]) -> Result<i64, Trap> {
+fn evaluate(
+    inst: &qir::Inst,
+    slots: &[i64],
+    module: &qir::Module,
+    out: &mut dyn Write,
+) -> Result<i64, Trap> {
     Ok(match inst {
         qir::Inst::ConstI64(n) => *n,
         qir::Inst::ConstBool(t) => i64::from(*t),
+        // A text value is the index of the text, not a pointer to it.
+        qir::Inst::ConstText(at) => i64::from(*at),
+        qir::Inst::CallHost { host, args } => {
+            match host {
+                qir::Host::PrintText => {
+                    let at = slots[args[0].0 as usize] as usize;
+                    let text = module.text.get(at).map_or("", |s| s.as_str());
+                    // Nowhere to report a write that fails, and nothing sensible to do
+                    // about one: a program that cannot print has not computed the wrong
+                    // answer. The oracle compares what was written, so a lost write
+                    // shows up there as a disagreement rather than being silent.
+                    let _ = out.write_all(text.as_bytes());
+                }
+            }
+            0
+        }
         qir::Inst::Bin { op, lhs, rhs } => {
             let (l, r) = (slots[lhs.0 as usize], slots[rhs.0 as usize]);
             match op {

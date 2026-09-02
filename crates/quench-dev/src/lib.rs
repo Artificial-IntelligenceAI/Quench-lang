@@ -71,6 +71,13 @@ impl std::error::Error for Error {}
 pub struct Compiled {
     /// Held so the code it owns outlives every pointer taken from it.
     _jit: JITModule,
+    /// The module's text, owned here so the pointers below stay good. A `String`'s
+    /// buffer does not move when the `Vec` holding the `String` grows, which is what
+    /// makes this safe.
+    _text: Vec<String>,
+    /// What the generated code indexes into. Boxed so its address is fixed, because that
+    /// address was compiled into the code.
+    _pieces: Box<[Piece]>,
     entry: *const u8,
     /// Every function that takes nothing and returns an i64, by name.
     ///
@@ -90,6 +97,14 @@ impl Compiled {
         // and the code is kept alive by `_jit` for as long as `self` exists.
         let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(*code) };
         Some(f())
+    }
+
+    /// Run the entry, keeping whatever it printed rather than letting it out.
+    pub fn run_capturing(&self) -> (i64, String) {
+        SINK.with(|sink| *sink.borrow_mut() = Some(Vec::new()));
+        let answer = self.run();
+        let written = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
+        (answer, String::from_utf8_lossy(&written).into_owned())
     }
 
     /// Run the entry and hand back what it returned.
@@ -117,9 +132,9 @@ fn signs_disagree(
     rest: ClifValue,
     divisor: ClifValue,
 ) -> ClifValue {
-    let not_zero = b.ins().icmp_imm(IntCC::NotEqual, rest, 0);
+    let not_zero = b.ins().icmp_imm_s(IntCC::NotEqual, rest, 0);
     let mixed = b.ins().bxor(rest, divisor);
-    let differ = b.ins().icmp_imm(IntCC::SignedLessThan, mixed, 0);
+    let differ = b.ins().icmp_imm_s(IntCC::SignedLessThan, mixed, 0);
     b.ins().band(not_zero, differ)
 }
 
@@ -128,7 +143,47 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         qir::Ty::I64 => types::I64,
         // Cranelift has no one-bit type: a comparison yields an i8 that is 0 or 1.
         qir::Ty::Bool => types::I8,
+        // An index into the module's text, which is an integer like any other. Turning
+        // it into an address is this backend's business and happens in the runtime
+        // function rather than in the generated code.
+        qir::Ty::Text => types::I64,
     }
+}
+
+/// One piece of text, as the runtime sees it: where it starts and how long it is.
+///
+/// The generated code never holds one of these. It passes an *index*, and the runtime
+/// looks it up in a table whose address was baked in when the module was compiled — so
+/// nothing target-specific reaches QIR, and the pointer exists only on this side.
+#[repr(C)]
+struct Piece {
+    at: *const u8,
+    len: usize,
+}
+
+thread_local! {
+    /// Where a running program's output goes, when something is collecting it.
+    ///
+    /// A thread-local rather than an argument because the generated code calls a plain
+    /// C function and there is nowhere to put a writer. Provisional, and the reason it
+    /// is tolerable is that a worker in the oracle owns its thread.
+    static SINK: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn print_text(table: *const Piece, index: i64) -> i64 {
+    // Safe because `compile` verified the index against the module's text before any of
+    // this existed, and the table outlives the code that names it.
+    let piece = unsafe { &*table.add(index as usize) };
+    let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
+    SINK.with(|sink| match &mut *sink.borrow_mut() {
+        Some(kept) => kept.extend_from_slice(bytes),
+        None => {
+            use std::io::Write as _;
+            let _ = std::io::stdout().write_all(bytes);
+        }
+    });
+    0
 }
 
 fn cond(op: qir::CmpOp) -> IntCC {
@@ -184,7 +239,19 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .map_err(|e| Error::Backend(e.to_string()))?
         .finish(settings::Flags::new(flags))
         .map_err(|e| Error::Backend(e.to_string()))?;
-    let mut jit = JITModule::new(JITBuilder::with_isa(isa, default_libcall_names()));
+    let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
+    // The one symbol generated code is allowed to reach outside itself for.
+    builder.symbol("quench_print_text", print_text as *const u8);
+    let mut jit = JITModule::new(builder);
+
+    // The text, owned here and pointed at by a table whose address the code will carry.
+    let text: Vec<String> = module.text.clone();
+    let pieces: Box<[Piece]> = text
+        .iter()
+        .map(|s| Piece { at: s.as_ptr(), len: s.len() })
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    let table = pieces.as_ptr() as i64;
 
     // Declare everything before defining anything, so a call can name a function that has
     // not been compiled yet -- including the one making the call.
@@ -202,6 +269,15 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     }
 
     let target = jit.target_config();
+    // Declared once for the whole module: the runtime function every `CallHost` reaches.
+    let mut host_sig = jit.make_signature();
+    host_sig.params.push(AbiParam::new(types::I64)); // the table
+    host_sig.params.push(AbiParam::new(types::I64)); // which piece
+    host_sig.returns.push(AbiParam::new(types::I64));
+    let host_id = jit
+        .declare_function("quench_print_text", Linkage::Import, &host_sig)
+        .map_err(|e| Error::Backend(e.to_string()))?;
+
     let mut ctx = jit.make_context();
     let mut fctx = FunctionBuilderContext::new();
     for (i, func) in module.functions.iter().enumerate() {
@@ -209,7 +285,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         // Taken before the builder borrows the function, since both want it mutably.
         let refs: Vec<FuncRef> =
             declared.iter().map(|(id, _)| jit.declare_func_in_func(*id, &mut ctx.func)).collect();
-        lower(func, &mut ctx.func, &mut fctx, &refs, target);
+        let host = jit.declare_func_in_func(host_id, &mut ctx.func);
+        lower(func, &mut ctx.func, &mut fctx, &refs, host, table, target);
         jit.define_function(declared[i].0, &mut ctx).map_err(|e| Error::Backend(e.to_string()))?;
         jit.clear_context(&mut ctx);
     }
@@ -223,7 +300,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .filter(|(_, f)| f.params.is_empty() && f.ret == qir::Ty::I64)
         .map(|(i, f)| (f.name.clone(), jit.get_finalized_function(declared[i].0)))
         .collect();
-    Ok(Compiled { _jit: jit, entry, callable })
+    Ok(Compiled { _jit: jit, _text: text, _pieces: pieces, entry, callable })
 }
 
 /// Lower one QIR function into one Cranelift function.
@@ -236,6 +313,8 @@ fn lower(
     clif: &mut ClifFunction,
     fctx: &mut FunctionBuilderContext,
     refs: &[FuncRef],
+    host: FuncRef,
+    table: i64,
     target: TargetFrontendConfig,
 ) {
     let mut b = FunctionBuilder::new(clif, fctx);
@@ -262,6 +341,15 @@ fn lower(
             let v = match inst {
                 qir::Inst::ConstI64(n) => b.ins().iconst(types::I64, *n),
                 qir::Inst::ConstBool(t) => b.ins().iconst(types::I8, i64::from(*t)),
+                qir::Inst::ConstText(at) => b.ins().iconst(types::I64, i64::from(*at)),
+                qir::Inst::CallHost { host: _, args } => {
+                    // The table's address is a constant of this compilation. QIR carried
+                    // an index; the pointer is put on here and goes no further.
+                    let mut given = vec![b.ins().iconst(types::I64, table)];
+                    given.extend(args.iter().map(|a| vals[a.0 as usize].unwrap()));
+                    let call = b.ins().call(host, &given);
+                    b.inst_results(call)[0]
+                }
                 qir::Inst::Bin { op, lhs, rhs } => {
                     let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());
                     match op {
@@ -281,7 +369,7 @@ fn lower(
                             let quotient = b.ins().sdiv(l, r);
                             let rest = b.ins().srem(l, r);
                             let wrong_way = signs_disagree(&mut b, rest, r);
-                            let one_less = b.ins().iadd_imm(quotient, -1);
+                            let one_less = b.ins().iadd_imm_s(quotient, -1);
                             b.ins().select(wrong_way, one_less, quotient)
                         }
                         qir::BinOp::RemFloored => {

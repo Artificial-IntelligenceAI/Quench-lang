@@ -25,6 +25,22 @@ for: no pointer width, no calling convention, no target-specific anything. See
 
 Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle).
 
+## Hello, World
+
+```quench
+START {
+    print[str:*Hello, World!* \n];
+}
+```
+
+```bash
+quench run examples/hello.qnl     # the Dev JIT
+quench walk examples/hello.qnl    # the interpreter
+```
+
+Both print the same thing, which is not a coincidence — it is
+[the oracle](#the-oracle) applied to the smallest possible program.
+
 ## Status
 
 | Part | State |
@@ -32,6 +48,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
 | **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
 | **Parser** (`quench-parse`) | **Working** — `START`, declarations, `print`, and recovery at the semicolon |
+| **Lowering** (`quench-lower`) | **Working** — the tree turned into QIR: `START`, `print`, text and escapes |
+| **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
 | Type checker | Not started — waiting on the type system |
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
