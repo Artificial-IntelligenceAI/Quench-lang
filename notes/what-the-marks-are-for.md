@@ -45,7 +45,8 @@ The escapes are `\n`, `\t`, `\r` and `\\`. Anything else is an error that lists 
 ## Juxtaposition builds a value, commas separate them
 
 Items sit next to each other. There is no `+`, because nothing is being concatenated
-into a third thing — the items *are* the value, used in order.
+into a third thing — the items *are* the value, used in order. This is how a value is
+written wherever a value is written, whether it is being stored or printed:
 
 ```quench
 print[*Hello, World!* 'name' \n];
@@ -55,11 +56,17 @@ var.str ['s', 'ss'] = [*line one* \n *line two*, *idk* \n *Claude*];
 The comma is the only thing that says where one value stops, which is exactly what
 lets a value run to as many items as it likes.
 
-This is also why C could not do it. A C string literal has to be **one value** — an
-array of `char` to assign, pass and store — and `printf("Hello\n")` hands over a
-single pointer, so there is nowhere for a separate escape to travel. Escapes had to
-go inside because inside was the only place there was. Quench can put them outside
-because `print[…]` takes a *list* and never builds a combined value at all.
+C is the interesting comparison, because it came close. `"Hello" "World"` is already
+juxtaposition — two literals that become one array at compile time — so the mechanism
+was there. What C lacks is a *notation* for a value made of pieces that are not all
+string literals, and it could not easily gain one, because an escape has to work in a
+character literal too. `\'\n\'` is a single `char`, and there is no list beside it for a
+separate escape item to sit in.
+
+So C's escapes went inside because a literal there is one self-contained token that
+must denote one value, in every position a value can appear. Quench writes *every*
+value as a list of items, so there is always somewhere beside the text for an escape
+to stand — whether the list is being printed or stored.
 
 ## Open
 
