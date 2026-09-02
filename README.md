@@ -3,7 +3,7 @@
 Project under development. Nothing here is stable, and stability is **not a guarantee**.
 
 **Quench** is a language focused on three things: **explicit syntax**, **okay
-performance**, and **very helpful error messages**.
+performance**, and **very helpful error messages** (unlike fucking `C`, just joking 🤣).
 
 It runs three ways, and all three must agree:
 
