@@ -6,14 +6,17 @@ Project under development. Nothing here is stable, and stability is **not a guar
 performance**, and **very helpful error messages** (unlike fucking `C`, just joking 🤣).
 
 Quench compiles **once**, to one artefact, and that artefact runs on whatever
-machine it lands on — the machine decides how. It runs three ways, and all three
-must agree:
+machine it lands on — the machine decides how. There are four ways, each with a job
+none of the others does, and **all four must agree**:
 
-| Method | Backend | For |
+| Way | Backend | Its job |
 | --- | --- | --- |
-| **Dev JIT** | Cranelift | Editing. Compiles in milliseconds, checks everything, and says the most about what went wrong. |
-| **Hot JIT** | LLVM | Running. Starts cheap and recompiles a function once it has proved it is worth the optimiser's time. |
-| **AOT native** | LLVM | Shipping. Trades the *anywhere* away for one binary that needs nothing installed. |
+| **Interpreter** | none | **Being believed.** It generates no code, allocates no registers and lowers nothing, so when the engines disagree it is the one that is right. It is also the quickest way to run a small program, because it skips the part that costs: compiling is roughly 352× running. |
+| **Dev JIT** | Cranelift | **The edit loop.** 1.6 ms to compile, and within 1.4× of optimised LLVM on work that cannot be optimised. Deliberately at `opt_level = none`, which is what keeps it fast and what keeps it honest. |
+| **Hot JIT** | LLVM | **Running a travelling artefact fast.** This is the one that exists *because* of compile-once-run-anywhere: take portability away and ahead-of-time output would do its job, so the artefact is what justifies it. |
+| **AOT native** | LLVM | **Shipping.** Gives the *anywhere* up in exchange for one binary that needs nothing installed on the machine it lands on. |
+
+Two of the four run today. See [Status](#status).
 
 The artefact is serialised QIR, which is also what the C++ backend reads — one
 format doing both jobs. Because it travels, QIR may not know what machine it is
