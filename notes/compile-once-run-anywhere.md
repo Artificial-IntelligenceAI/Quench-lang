@@ -62,6 +62,35 @@ rather than in a line — which meant the renderer had to survive a diagnostic w
 labels at all, since a module is not a line of source and there is nothing to point
 a caret at. It does, and there is a test that says so.
 
+## Where the portability actually lives
+
+Ahead-of-time output is not portable, and that is the trade. One machine, one binary,
+needing nothing installed.
+
+But it is worth being exact about what is given up and when, because the first draft of
+the README got this slightly wrong. **The portability is in the artefact, not in the
+compiler and not in the binary.** QIR knows nothing about any machine, so a compiled
+artefact can be carried anywhere and turned into native code *for* anywhere, at any
+later moment. Ahead-of-time output is not where the *anywhere* is lost. It is where it
+is **spent**, at the last possible point, on purpose.
+
+Which means cross-compiling is a normal thing rather than a special one: the same
+artefact, a different target. LLVM as built here emits for twenty architectures, so the
+code generation half costs nothing.
+
+The other half is what the language cannot supply for you, and Luarust found both:
+
+- **A linker carrying a libc for the target.** `zig cc` does this for most targets and
+  is looked for first; a `<triple>-gcc` after it.
+- **The Quench runtime, built for that target.** This one is larger here than it was
+  for Luarust, because Quench collects: the collector is a Rust `staticlib` and it has
+  to exist compiled for every machine you want to reach.
+
+And a consequence of shipping nothing a program does not use, which cuts the right way:
+**a program that never allocates carries no collector**, so cross-compiling it needs no
+runtime archive at all. The simple programs stay simple to send somewhere else, and
+only the allocating ones need the per-target build.
+
 ## What it does not change
 
 The three engines still have to agree, and now they have to agree **across

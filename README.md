@@ -14,7 +14,7 @@ none of the others does, and **all four must agree**:
 | **Interpreter** | none | **Being believed.** It generates no code, allocates no registers and lowers nothing, so when the engines disagree it is the one that is right. It is also the quickest way to run a small program, because it skips the part that costs: compiling is roughly 352× running. |
 | **Dev JIT** | Cranelift | **The edit loop.** 1.6 ms to compile, and within 1.4× of optimised LLVM on work that cannot be optimised. Deliberately at `opt_level = none`, which is what keeps it fast and what keeps it honest. |
 | **Hot JIT** | LLVM | **Running a travelling artefact fast.** This is the one that exists *because* of compile-once-run-anywhere: take portability away and ahead-of-time output would do its job, so the artefact is what justifies it. |
-| **AOT native** | LLVM | **Shipping.** Gives the *anywhere* up in exchange for one binary that needs nothing installed on the machine it lands on. |
+| **AOT native** | LLVM | **Shipping.** Where the *anywhere* is spent rather than lost: the artefact is target-independent, so this turns it into a binary **for** any machine, at the last possible moment. The binary is not portable; that is the trade. |
 
 Two of the four run today. See [Status](#status).
 
