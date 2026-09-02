@@ -1,0 +1,16 @@
+[package]
+name = "quench-dev"
+description = "The Dev JIT: QIR lowered to machine code by Cranelift, compiled fast and run in process."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-qir = { path = "../quench-qir" }
+cranelift-codegen = "0.135"
+cranelift-frontend = "0.135"
+cranelift-jit = "0.135"
+cranelift-module = "0.135"
+cranelift-native = "0.135"

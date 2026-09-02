@@ -20,10 +20,10 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Part | State |
 | --- | --- |
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
-| Lexer, parser | Not started |
-| Type checker, borrow checker | Not started |
-| QIR (the shared IR) | Not started |
-| Dev JIT (Cranelift) | Not started |
+| Lexer, parser | Not started — waiting on the syntax |
+| Type checker, borrow checker | Not started — waiting on the type system |
+| QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
+| **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
 | Program generator, oracle | Not started |
 
