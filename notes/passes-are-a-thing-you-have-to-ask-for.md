@@ -45,11 +45,18 @@ match.
 Quench has three guards to write, and they go in with the C++ side rather than after
 it:
 
-1. **The Hot JIT and AOT must emit identical optimised IR** for the same QIR module.
-   They differ in where the machine code goes, not in what it says. If they ever
-   disagree, one of them is missing a pass — and this also catches the mistake in the
-   other direction, a pass added to one path and not the other, which no benchmark
-   would ever report.
+1. **The Hot JIT and AOT must emit identical optimised IR for the same QIR module *at
+   the same level*.** If they ever disagree, one of them is missing a pass — and this
+   also catches the mistake in the other direction, a pass added to one path and not
+   the other, which no benchmark would ever report.
+
+   The words "at the same level" were added later and matter. An earlier draft said the
+   two paths differ in where the machine code goes and not in what it says, which
+   stopped being true the moment ahead-of-time output was told to optimise fully and
+   take its time while the Hot JIT decides for itself, per function, as things prove
+   worth it. They now have different *defaults* on purpose. Ask both for the same level
+   and they must still agree; compare their defaults and you are comparing two correct
+   answers to different questions.
 2. **Optimised IR must differ from unoptimised IR** for a module chosen because it is
    obviously optimisable. This is the cheap smoke test that would have caught
    Luarust's bug on day one: it fails if the pipeline never ran at all.

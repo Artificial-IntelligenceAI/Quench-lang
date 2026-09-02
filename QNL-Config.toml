@@ -16,8 +16,14 @@ division = "truncated"
 # produce the same number, which is what the oracle checks. `none`, `speed`, or
 # `speed-and-size`.
 #
-# The Dev JIT ignores this and stays at `none`. Being the engine that did the least is
-# what makes it the one to believe when the others disagree.
+# This is really a setting for ahead-of-time output, which otherwise takes everything it
+# can and as long as it likes: nobody waits at a keyboard for a binary about to be
+# shipped, and it is the one engine whose compile time is paid once and whose run time
+# is paid by everybody. Turn it down when a build only has to exist.
+#
+# The Dev JIT never consults it and stays at `none` -- being the engine that did the
+# least is what makes it the one to believe. The Hot JIT decides for itself, per
+# function, which is what makes it the hot one.
 optimise = "speed"
 
 [run]

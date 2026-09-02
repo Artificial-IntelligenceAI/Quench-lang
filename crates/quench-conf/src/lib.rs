@@ -44,7 +44,7 @@ pub enum Division {
     Floored,
 }
 
-/// How hard the optimiser tries.
+/// How hard the optimiser tries, and therefore how long it may take.
 ///
 /// **Delivery**, but a special sort of it. It cannot change what a program answers —
 /// every level must give the same result, and that is exactly what the oracle checks.
@@ -52,15 +52,29 @@ pub enum Division {
 /// sweeping: a bug that only appears at one level is a real bug, found only if
 /// something compiled at that level.
 ///
-/// The Dev JIT ignores this and stays at [`Optimise::None`]. That is not an oversight —
-/// being the engine that did the least is what makes it the reference the others are
-/// measured against, and a setting that could change it would take that away.
+/// # It means less than it looks like it means
+///
+/// Two of the four ways of running a program do not consult it at all, because their
+/// level is decided by their job rather than by a preference:
+///
+/// - the **Dev JIT** is always [`Optimise::None`]. Being the engine that did the least
+///   is what makes it the one to believe when the others disagree, and a setting able
+///   to change that would take it away;
+/// - the **Hot JIT** decides for itself, per function, by watching which ones are worth
+///   it. That is what makes it the hot JIT.
+///
+/// So this is really about **ahead-of-time output**, which by default takes everything
+/// it can and as long as it likes: nobody is waiting at a keyboard for a binary that is
+/// about to be shipped, and it is the only engine whose compile time is spent once and
+/// whose run time is spent by everyone. The setting exists so that someone in a hurry —
+/// a build in CI that only has to exist — can ask for less.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Optimise {
     /// Compile fast and transform nothing.
-    #[default]
     None,
-    /// Make it fast.
+    /// Make it fast. The default, because the engine this setting is really for is the
+    /// one that ships.
+    #[default]
     Speed,
     /// Make it fast, and prefer the smaller of two ways of doing that.
     SpeedAndSize,
