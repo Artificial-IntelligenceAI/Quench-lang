@@ -111,8 +111,10 @@ impl<'a> Parser<'a> {
             let token = self.peek();
             if token.kind == Kind::Word && self.text(token.span) == quench_qir_entry() {
                 let word = self.bump().span;
-                let body = self.body();
-                program.start = Some(Start { word, body });
+                match self.body() {
+                    Some(body) => program.start = Some(Start { word, body }),
+                    None => self.recover(),
+                }
                 continue;
             }
 
@@ -129,19 +131,51 @@ impl<'a> Parser<'a> {
         program
     }
 
-    /// Everything after `START`.
+    /// `{ … }` — the statements a block holds.
     ///
-    /// It runs to the end of the file, because `START` is the only thing a file can hold
-    /// so far. The day there is a second one, this needs an ending.
-    fn body(&mut self) -> Vec<Stmt> {
+    /// The closing brace is what says where it ends, which is also what lets a file hold
+    /// something after it.
+    fn body(&mut self) -> Option<Vec<Stmt>> {
+        let open = self.expect(Kind::OpenBlock, "a block")?;
         let mut body = Vec::new();
-        while !self.at_end() {
-            match self.statement() {
-                Some(stmt) => body.push(stmt),
-                None => self.recover(),
+
+        loop {
+            match self.peek().kind {
+                Kind::CloseBlock => {
+                    self.bump();
+                    return Some(body);
+                }
+                Kind::End => {
+                    // Point at the brace that was opened, not at the end of the file:
+                    // the end of the file is where it was noticed, not where it went
+                    // wrong, and a long file makes that difference matter.
+                    self.errors.push(
+                        Diagnostic::new("E0109", "a block was opened here and never closed.")
+                            .primary(open, "this `{` has no partner")
+                            .rule("a block begins with `{` and ends with `}`")
+                            .tip("the end of the file closes nothing — it is the brace that does.")
+                            .fix("add a `}` where the block should end"),
+                    );
+                    return Some(body);
+                }
+                _ => match self.statement() {
+                    Some(stmt) => body.push(stmt),
+                    None => self.recover_in_block(),
+                },
             }
         }
-        body
+    }
+
+    /// Give up on a statement, but stop at the closing brace rather than running past it.
+    fn recover_in_block(&mut self) {
+        while !self.at_end() {
+            if self.peek().kind == Kind::CloseBlock {
+                return;
+            }
+            if self.bump().kind == Kind::Semicolon {
+                return;
+            }
+        }
     }
 
     fn statement(&mut self) -> Option<Stmt> {
