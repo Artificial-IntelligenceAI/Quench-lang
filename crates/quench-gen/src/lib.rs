@@ -4,4 +4,4 @@ pub mod oracle;
 pub mod write;
 
 pub use oracle::{check, cores, Disagreement, Report, Told};
-pub use write::{batch, name_of, program, Seeded};
+pub use write::{batch, name_of, program, program_under, settings_for, Seeded};

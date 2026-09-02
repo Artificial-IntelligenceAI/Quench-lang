@@ -99,8 +99,12 @@ fn generated_programs_use_the_whole_instruction_set() {
         for block in &func.blocks {
             for (_, inst) in &block.insts {
                 match inst {
-                    quench_qir::Inst::Bin { op: BinOp::Div, .. } => seen[0] = true,
-                    quench_qir::Inst::Bin { op: BinOp::Rem, .. } => seen[1] = true,
+                    quench_qir::Inst::Bin { op: BinOp::DivTruncated | BinOp::DivFloored, .. } => {
+                        seen[0] = true
+                    }
+                    quench_qir::Inst::Bin { op: BinOp::RemTruncated | BinOp::RemFloored, .. } => {
+                        seen[1] = true
+                    }
                     quench_qir::Inst::Cmp { .. } => seen[2] = true,
                     quench_qir::Inst::Not(_) => seen[3] = true,
                     quench_qir::Inst::Call { .. } => seen[4] = true,
@@ -113,4 +117,49 @@ fn generated_programs_use_the_whole_instruction_set() {
         }
     }
     assert_eq!(seen, [true; 5], "div, rem, cmp, not, call — all of them should appear");
+}
+
+#[test]
+fn a_seed_picks_a_configuration_as_well_as_a_program() {
+    use quench_conf::Division;
+    use quench_gen::settings_for;
+
+    // Both must appear, or half the language is never checked. A bug that only shows
+    // under one setting is found only if something generated that setting.
+    let mut seen_truncated = false;
+    let mut seen_floored = false;
+    for seed in 1..200u64 {
+        match settings_for(seed).division {
+            Division::Truncated => seen_truncated = true,
+            Division::Floored => seen_floored = true,
+        }
+    }
+    assert!(seen_truncated && seen_floored, "the oracle only ever checked one language");
+
+    // And the same seed must keep the same one, or a disagreement cannot be replayed.
+    for seed in [1u64, 42, 9999] {
+        assert_eq!(settings_for(seed), settings_for(seed));
+    }
+}
+
+#[test]
+fn both_divisions_reach_the_generated_programs() {
+    use quench_qir::{BinOp, Inst};
+    let module = batch(&(1..=300).collect::<Vec<_>>());
+    let mut floored = false;
+    let mut truncated = false;
+    for func in &module.functions {
+        for block in &func.blocks {
+            for (_, inst) in &block.insts {
+                if let Inst::Bin { op, .. } = inst {
+                    match op {
+                        BinOp::DivFloored | BinOp::RemFloored => floored = true,
+                        BinOp::DivTruncated | BinOp::RemTruncated => truncated = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    assert!(floored && truncated, "the setting is not reaching the instructions");
 }

@@ -1,0 +1,11 @@
+[package]
+name = "quench-conf"
+description = "QNL-Config.toml — what a project has decided, once, for every file in it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }

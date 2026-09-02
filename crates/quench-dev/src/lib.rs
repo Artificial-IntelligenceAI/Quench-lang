@@ -108,6 +108,20 @@ impl std::fmt::Debug for Compiled {
     }
 }
 
+/// Whether a remainder is non-zero and leans the other way from its divisor — which is
+/// precisely when truncating rounded one step further from negative infinity than
+/// flooring would have.
+fn signs_disagree(
+    b: &mut FunctionBuilder<'_>,
+    rest: ClifValue,
+    divisor: ClifValue,
+) -> ClifValue {
+    let not_zero = b.ins().icmp_imm(IntCC::NotEqual, rest, 0);
+    let mixed = b.ins().bxor(rest, divisor);
+    let differ = b.ins().icmp_imm(IntCC::SignedLessThan, mixed, 0);
+    b.ins().band(not_zero, differ)
+}
+
 fn clif_ty(ty: qir::Ty) -> types::Type {
     match ty {
         qir::Ty::I64 => types::I64,
@@ -239,8 +253,28 @@ fn lower(
                         qir::BinOp::Add => b.ins().iadd(l, r),
                         qir::BinOp::Sub => b.ins().isub(l, r),
                         qir::BinOp::Mul => b.ins().imul(l, r),
-                        qir::BinOp::Div => b.ins().sdiv(l, r),
-                        qir::BinOp::Rem => b.ins().srem(l, r),
+                        // The processor's own division, which rounds toward zero.
+                        qir::BinOp::DivTruncated => b.ins().sdiv(l, r),
+                        qir::BinOp::RemTruncated => b.ins().srem(l, r),
+                        // No processor floors, so it is built: divide, then correct by
+                        // one step when the remainder disagrees in sign with the divisor,
+                        // which is exactly when truncation rounded the wrong way.
+                        //
+                        // `sdiv` and `srem` still carry the traps, so a zero divisor and
+                        // `i64::MIN / -1` stop here as they do everywhere else.
+                        qir::BinOp::DivFloored => {
+                            let quotient = b.ins().sdiv(l, r);
+                            let rest = b.ins().srem(l, r);
+                            let wrong_way = signs_disagree(&mut b, rest, r);
+                            let one_less = b.ins().iadd_imm(quotient, -1);
+                            b.ins().select(wrong_way, one_less, quotient)
+                        }
+                        qir::BinOp::RemFloored => {
+                            let rest = b.ins().srem(l, r);
+                            let wrong_way = signs_disagree(&mut b, rest, r);
+                            let shifted = b.ins().iadd(rest, r);
+                            b.ins().select(wrong_way, shifted, rest)
+                        }
                     }
                 }
                 qir::Inst::Cmp { op, lhs, rhs } => {

@@ -1,0 +1,16 @@
+# What this project has decided, once, for every file in it.
+#
+# Settings come in two kinds and they do not cost the same. One changes what a program
+# *answers*, and every value of it is a separate language the three engines must agree
+# under. The other changes what gets *delivered*, and costs nothing to test.
+
+[defaults]
+# Changes what a program answers. `truncated` rounds toward zero and the remainder
+# follows the dividend, which is what every processor does. `floored` rounds toward
+# negative infinity and the remainder follows the divisor, which is what a mathematician
+# means and what makes `x % n` always land in `0..n`.
+division = "truncated"
+
+[run]
+# Changes only how a program runs, never what it says.
+engine = "dev-jit"

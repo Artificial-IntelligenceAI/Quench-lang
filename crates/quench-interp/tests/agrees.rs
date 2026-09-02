@@ -5,7 +5,7 @@
 //! third will join this file rather than replace it.
 
 use quench_interp::{run, Outcome, Trap};
-use quench_qir::{BinOp, Builder, CmpOp, Module, Ty};
+use quench_qir::{Builder, CmpOp, Module, Ty};
 
 fn just(f: quench_qir::Function) -> Module {
     let mut m = Module::new();
@@ -118,114 +118,74 @@ fn recursion_that_never_stops_is_stopped() {
     assert_eq!(run(&m).unwrap(), Outcome::Trapped(Trap::TooDeep));
 }
 
-// --- the oracle ---------------------------------------------------------------------
+// The oracle itself lives in `quench-gen`, which generates properly and runs batches
+// across every core. What stays here is the pair of engines agreeing on cases chosen by
+// hand -- the ones where a difference would be a difference of *meaning* rather than of
+// luck, and so are worth naming rather than stumbling upon.
 
-/// A deterministic scrambler, so a disagreement can be replayed from its seed.
-struct Rng(u64);
+#[test]
+fn the_two_divisions_are_different_languages() {
+    // -7 / 2 is -3 remainder -1 one way, and -4 remainder 1 the other. A program that
+    // divides means a different thing under each, which is why one setting doubles what
+    // the oracle has to prove.
+    let cases: [(fn(&mut Builder, quench_qir::Value, quench_qir::Value) -> quench_qir::Value, i64); 4] = [
+        (|b, l, r| b.div(l, r), -3),
+        (|b, l, r| b.rem(l, r), -1),
+        (|b, l, r| b.div_floored(l, r), -4),
+        (|b, l, r| b.rem_floored(l, r), 1),
+    ];
+    for (build, want) in cases {
+        let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
+        let seven = b.const_i64(-7);
+        let two = b.const_i64(2);
+        let value = build(&mut b, seven, two);
+        b.ret(value);
+        let module = just(b.finish());
 
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
+        assert_eq!(returned(&module), want, "the interpreter");
+        assert_eq!(
+            quench_dev::compile(&module).expect("it compiles").run(),
+            want,
+            "and the Dev JIT, which has to build flooring out of what the processor gives it"
+        );
     }
-
-    fn upto(&mut self, n: u64) -> u64 {
-        self.next() % n
-    }
-}
-
-/// A program built from the types outward, so it always compiles, and containing no
-/// division by zero, so it always finishes. Both engines must therefore answer.
-///
-/// This is a sketch of what `quench-gen` will be, kept here because an oracle with
-/// nothing to run is not an oracle.
-fn written(seed: u64) -> Module {
-    let mut rng = Rng(seed | 1);
-    let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
-
-    let mut numbers = vec![b.const_i64(rng.next() as i64), b.const_i64(rng.upto(1000) as i64)];
-    let mut booleans = Vec::new();
-
-    for _ in 0..rng.upto(24) + 4 {
-        match rng.upto(8) {
-            0 => numbers.push(b.const_i64(rng.next() as i64)),
-            1..=4 => {
-                let lhs = numbers[rng.upto(numbers.len() as u64) as usize];
-                let rhs = numbers[rng.upto(numbers.len() as u64) as usize];
-                let op = match rng.upto(5) {
-                    0 => BinOp::Add,
-                    1 => BinOp::Sub,
-                    2 => BinOp::Mul,
-                    3 => BinOp::Div,
-                    _ => BinOp::Rem,
-                };
-                if matches!(op, BinOp::Div | BinOp::Rem) {
-                    // A divisor that cannot be zero and cannot be -1, so neither engine
-                    // traps and both have to produce a number.
-                    let safe = b.const_i64(rng.upto(9999) as i64 + 2);
-                    numbers.push(b.bin(op, lhs, safe));
-                } else {
-                    numbers.push(b.bin(op, lhs, rhs));
-                }
-            }
-            5 | 6 => {
-                let lhs = numbers[rng.upto(numbers.len() as u64) as usize];
-                let rhs = numbers[rng.upto(numbers.len() as u64) as usize];
-                let op = match rng.upto(6) {
-                    0 => CmpOp::Eq,
-                    1 => CmpOp::Ne,
-                    2 => CmpOp::Lt,
-                    3 => CmpOp::Le,
-                    4 => CmpOp::Gt,
-                    _ => CmpOp::Ge,
-                };
-                booleans.push(b.cmp(op, lhs, rhs));
-            }
-            _ => {
-                if let Some(&flag) = booleans.last() {
-                    booleans.push(b.not(flag));
-                }
-            }
-        }
-    }
-
-    // End on a branch, so control flow is exercised rather than one straight line.
-    if let Some(&flag) = booleans.last() {
-        let yes = b.block(&[]);
-        let no = b.block(&[]);
-        b.br_if(flag, (yes, &[]), (no, &[]));
-        let last = *numbers.last().expect("there is always one");
-        let first = numbers[0];
-        b.switch_to(yes);
-        b.ret(last);
-        b.switch_to(no);
-        b.ret(first);
-    } else {
-        let last = *numbers.last().expect("there is always one");
-        b.ret(last);
-    }
-
-    just(b.finish())
 }
 
 #[test]
-fn the_interpreter_and_the_dev_jit_agree() {
-    // One program, two engines, one answer. The third joins here when it exists.
-    for seed in 1..500u64 {
-        let module = written(seed);
-        let walked = run(&module).expect("it runs");
-        let compiled = quench_dev::compile(&module).expect("it compiles").run();
+fn flooring_is_flooring_in_both_engines() {
+    // Checked against what flooring *is* rather than against a second copy of how it is
+    // done -- a formula here would only re-derive the implementation and agree with its
+    // mistakes. The defining properties: q·d + r is a, the remainder leans the way the
+    // divisor does, and it is smaller than the divisor.
+    //
+    // All four sign quadrants, and the cases where the remainder is zero and nothing
+    // should be corrected at all.
+    fn value(build: impl FnOnce(&mut Builder) -> quench_qir::Value) -> (i64, i64) {
+        let mut b = Builder::new(quench_qir::ENTRY, &[], Ty::I64);
+        let out = build(&mut b);
+        b.ret(out);
+        let module = just(b.finish());
+        (returned(&module), quench_dev::compile(&module).expect("it compiles").run())
+    }
 
-        match walked {
-            Outcome::Returned(value) => assert_eq!(
-                value, compiled,
-                "seed {seed}: the interpreter said {value}, the Dev JIT said {compiled}"
-            ),
-            Outcome::Trapped(trap) => {
-                panic!("seed {seed}: the interpreter stopped with {trap:?}, and generated programs are not supposed to stop")
+    for a in [-13i64, -12, -1, 0, 1, 12, 13] {
+        for d in [-6i64, -4, -1, 1, 4, 6] {
+            let (walked_q, compiled_q) =
+                value(|b| { let l = b.const_i64(a); let r = b.const_i64(d); b.div_floored(l, r) });
+            let (walked_r, compiled_r) =
+                value(|b| { let l = b.const_i64(a); let r = b.const_i64(d); b.rem_floored(l, r) });
+
+            assert_eq!(walked_q, compiled_q, "{a} / {d}: the engines disagree");
+            assert_eq!(walked_r, compiled_r, "{a} % {d}: the engines disagree");
+
+            let (q, r) = (walked_q, walked_r);
+            assert_eq!(q * d + r, a, "{a} / {d}: q·d + r is not a");
+            assert!(r.abs() < d.abs(), "{a} % {d}: remainder {r} is not smaller than {d}");
+            if r != 0 {
+                assert_eq!(r < 0, d < 0, "{a} % {d}: remainder {r} leans the wrong way");
             }
+            // And that it really floored: truncating would have rounded toward zero.
+            assert!(q <= a / d, "{a} / {d}: flooring never rounds further from -inf than truncating");
         }
     }
 }

@@ -21,6 +21,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
+use quench_conf::{Division, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -54,11 +55,30 @@ pub fn name_of(seed: u64) -> String {
     format!("p{seed}")
 }
 
+/// Which configuration a seed is checked under.
+///
+/// A seed picks a program **and** the settings it means something under, because a
+/// semantic setting is not a variation on a language — it is a different language, and
+/// a bug that only appears under one of them is found only if something generated it.
+/// See `notes/every-knob-is-a-multiplier.md`.
+pub fn settings_for(seed: u64) -> Settings {
+    let mut rng = Seeded::from(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    Settings {
+        division: if rng.upto(2) == 0 { Division::Truncated } else { Division::Floored },
+        ..Settings::default()
+    }
+}
+
 /// One program: a function taking nothing and giving back an `i64`.
 ///
 /// `helper`, when given, is something the program may call — which is how a generated
 /// program exercises calls at all without being able to recurse.
 pub fn program(seed: u64, helper: Option<FuncId>) -> Function {
+    program_under(seed, helper, settings_for(seed))
+}
+
+/// The same, under settings chosen by the caller.
+pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> Function {
     let mut rng = Seeded::from(seed);
     let mut b = Builder::new(name_of(seed), &[], Ty::I64);
 
@@ -81,14 +101,20 @@ pub fn program(seed: u64, helper: Option<FuncId>) -> Function {
             }
             1..=4 => {
                 let lhs = rng.pick(&numbers);
+                // Which division a program gets is the project's decision, written down
+                // as an instruction by the time it reaches here.
+                let (divide, remainder) = match settings.division {
+                    Division::Truncated => (BinOp::DivTruncated, BinOp::RemTruncated),
+                    Division::Floored => (BinOp::DivFloored, BinOp::RemFloored),
+                };
                 let op = match rng.upto(5) {
                     0 => BinOp::Add,
                     1 => BinOp::Sub,
                     2 => BinOp::Mul,
-                    3 => BinOp::Div,
-                    _ => BinOp::Rem,
+                    3 => divide,
+                    _ => remainder,
                 };
-                let value = if matches!(op, BinOp::Div | BinOp::Rem) {
+                let value = if op.can_trap() {
                     // Neither zero nor -1, so neither engine stops. See the module docs.
                     let safe = b.const_i64(rng.upto(9_999) as i64 + 2);
                     b.bin(op, lhs, safe)

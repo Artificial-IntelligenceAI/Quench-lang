@@ -121,11 +121,19 @@ impl Builder {
     }
 
     pub fn div(&mut self, lhs: Value, rhs: Value) -> Value {
-        self.bin(BinOp::Div, lhs, rhs)
+        self.bin(BinOp::DivTruncated, lhs, rhs)
     }
 
     pub fn rem(&mut self, lhs: Value, rhs: Value) -> Value {
-        self.bin(BinOp::Rem, lhs, rhs)
+        self.bin(BinOp::RemTruncated, lhs, rhs)
+    }
+
+    pub fn div_floored(&mut self, lhs: Value, rhs: Value) -> Value {
+        self.bin(BinOp::DivFloored, lhs, rhs)
+    }
+
+    pub fn rem_floored(&mut self, lhs: Value, rhs: Value) -> Value {
+        self.bin(BinOp::RemFloored, lhs, rhs)
     }
 
     pub fn cmp(&mut self, op: CmpOp, lhs: Value, rhs: Value) -> Value {

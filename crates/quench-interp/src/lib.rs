@@ -238,8 +238,24 @@ fn evaluate(inst: &qir::Inst, slots: &[i64]) -> Result<i64, Trap> {
                 qir::BinOp::Add => l.wrapping_add(r),
                 qir::BinOp::Sub => l.wrapping_sub(r),
                 qir::BinOp::Mul => l.wrapping_mul(r),
-                qir::BinOp::Div => l.checked_div(r).ok_or(trap_for(r))?,
-                qir::BinOp::Rem => l.checked_rem(r).ok_or(trap_for(r))?,
+                qir::BinOp::DivTruncated => l.checked_div(r).ok_or(trap_for(r))?,
+                qir::BinOp::RemTruncated => l.checked_rem(r).ok_or(trap_for(r))?,
+                qir::BinOp::DivFloored => {
+                    let quotient = l.checked_div(r).ok_or(trap_for(r))?;
+                    let rest = l.wrapping_rem(r);
+                    // Truncation rounded toward zero. When the remainder does not agree
+                    // in sign with the divisor, that was one step the wrong way.
+                    if rest != 0 && (rest < 0) != (r < 0) {
+                        quotient.wrapping_sub(1)
+                    } else {
+                        quotient
+                    }
+                }
+                qir::BinOp::RemFloored => {
+                    let rest = l.checked_rem(r).ok_or(trap_for(r))?;
+                    // `|rest| < |r|` and their signs differ, so this cannot overflow.
+                    if rest != 0 && (rest < 0) != (r < 0) { rest + r } else { rest }
+                }
             }
         }
         qir::Inst::Cmp { op, lhs, rhs } => {

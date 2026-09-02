@@ -18,7 +18,8 @@
 //! No thread pool crate is used, because none is needed for this and the project has no
 //! third-party dependencies at all.
 
-use crate::write::{batch, name_of};
+use crate::write::{batch, name_of, settings_for};
+use quench_conf::Settings;
 use quench_interp::Outcome;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -28,6 +29,10 @@ use std::time::{Duration, Instant};
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Disagreement {
     pub seed: u64,
+    /// The settings the program meant something under. Without this a disagreement
+    /// cannot be reproduced, because the same seed is a different language under
+    /// different settings.
+    pub settings: Settings,
     pub interpreted: Told,
     pub compiled: Told,
 }
@@ -91,6 +96,7 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                             let mut found = found.lock().expect("no worker panics holding this");
                             found.push(Disagreement {
                                 seed: seeds[0],
+                                settings: settings_for(seeds[0]),
                                 interpreted: Told::Refused("(not reached)".into()),
                                 compiled: Told::Refused(why.to_string()),
                             });
@@ -113,6 +119,7 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                         if walked != ran {
                             disagreed.push(Disagreement {
                                 seed,
+                                settings: settings_for(seed),
                                 interpreted: walked,
                                 compiled: ran,
                             });

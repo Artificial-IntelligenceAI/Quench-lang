@@ -88,15 +88,34 @@ pub struct BlockId(pub u32);
 pub struct FuncId(pub u32);
 
 /// Arithmetic. Both operands and the result are `i64`.
+///
+/// There are four divisions rather than one with a setting attached, because QIR says
+/// what it means and a backend never works it out. Which one a Quench program gets is
+/// decided by `[defaults] division` in `QNL-Config.toml`, and by the time the frontend
+/// is finished that decision is written down here as an instruction.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BinOp {
     Add,
     Sub,
     Mul,
-    /// Truncating division. Division by zero is a trap, not a value.
-    Div,
-    /// Remainder, with the sign of the dividend. By zero it traps, as `Div` does.
-    Rem,
+    /// Toward zero, and the remainder follows the dividend: `-7 / 2` is `-3`.
+    DivTruncated,
+    /// The remainder that goes with [`BinOp::DivTruncated`]: `-7 % 2` is `-1`.
+    RemTruncated,
+    /// Toward negative infinity, and the remainder follows the divisor: `-7 / 2` is `-4`.
+    DivFloored,
+    /// The remainder that goes with [`BinOp::DivFloored`]: `-7 % 2` is `1`.
+    RemFloored,
+}
+
+impl BinOp {
+    /// Whether this stops on a zero divisor, and on `i64::MIN / -1`.
+    pub fn can_trap(self) -> bool {
+        matches!(
+            self,
+            BinOp::DivTruncated | BinOp::RemTruncated | BinOp::DivFloored | BinOp::RemFloored
+        )
+    }
 }
 
 /// Comparison. Both operands are `i64`; the result is `bool`.

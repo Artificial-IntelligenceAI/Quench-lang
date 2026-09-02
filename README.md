@@ -29,6 +29,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
 | **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
 | **Parser** (`quench-parse`) | **Working** — `START`, declarations, `print`, and recovery at the semicolon |
+| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
 | Type checker | Not started — waiting on the type system |
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
@@ -167,10 +168,13 @@ an emoji that draws two cells wide gets two carets.
 
 ## Settings
 
-A project's settings live beside its source in a `QNL-Config.toml`, and a `defaults.`
-line at the top of a file overrides the project for that file. Quench is meant to
-be very customisable — but settings come in two kinds, and only one of them is
-cheap:
+A project's settings live beside its source in a [`QNL-Config.toml`](QNL-Config.toml),
+read by `quench-conf` — by hand, not by a library, because this file decides how every
+source file in the project is built and so a mistake in it deserves the rule, the line
+and the fix rather than `invalid value at line 4`.
+
+Quench is meant to be very customisable — but settings come in two kinds, and only one
+of them is cheap:
 
 - those that change **what gets delivered** — embedded source, target CPU, which
   engine runs it — cost nothing to test, because the answer is the same either way;
@@ -178,7 +182,13 @@ cheap:
   does — multiply the oracle, because three engines have to agree under *each*
   setting, not once overall.
 
-So the first kind can grow freely and the second is argued one knob at a time. See
+So the first kind can grow freely and the second is argued one knob at a time.
+
+The first semantic one is here: `[defaults] division`, truncated or floored. It is
+threaded all the way through — the generator picks a configuration per seed, both
+engines carry it as **separate QIR instructions** rather than a mode they interpret,
+and a disagreement names the settings it happened under. The oracle now proves two
+languages instead of one, and still finishes 200,000 programs in 5.3 seconds. See
 [notes/every-knob-is-a-multiplier.md](notes/every-knob-is-a-multiplier.md).
 
 ## The oracle
