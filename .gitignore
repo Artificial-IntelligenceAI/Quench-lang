@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# C++ / LLVM side
+/native/build
+*.o
+*.a
+*.dylib
+
+# Oracle output: generated programs, and the ones that disagreed
+/corpus
+/findings
+*.qn.out

@@ -1,0 +1,285 @@
+//! Laying an error out the way Quench says them.
+//!
+//! ```text
+//! Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
+//!
+//! file: /Users/ts/hello/src/main.qn, line: 3, column: 6 (src/main.qn:3:6)
+//!
+//! `greeting` was given away on line 2, so it cannot be used here.
+//!
+//!   2 | give greeting to shout;
+//!     | ~~~~ given away here, and `text` is not copied
+//!   3 | show greeting;
+//!     |      ^^^^^^^^ used here, after it was given away
+//!
+//! Error code: E0301
+//! Rule(s) broken: a value has one owner, and giving it away ends the old owner's use of it
+//! Tip(s): `text` owns a buffer, so giving it moves the buffer rather than copying it.
+//! Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to read it
+//!
+//! 1 error.
+//! ```
+//!
+//! The greeting is printed once however many errors follow, and the count once at the
+//! end, so a program with twelve mistakes apologises once rather than twelve times.
+//!
+//! The fix is last on purpose: it is what should still be on screen when the reader stops
+//! reading.
+//!
+//! The sample program above is **placeholder syntax**. Quench's surface syntax is not
+//! decided yet, and nothing in this crate depends on it: a diagnostic is spans and text,
+//! and the layout below would render an error in any language at all.
+
+use crate::diag::{Diagnostic, LabelStyle};
+use crate::source::SourceFile;
+use std::fmt::Write as _;
+
+/// The apology, printed once above however many errors follow it.
+pub const GREETING: &str =
+    "Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.";
+
+/// Render one diagnostic, without the greeting or the count.
+pub fn diagnostic(source: &SourceFile, diag: &Diagnostic) -> String {
+    let mut out = String::new();
+
+    // Where it is, in the two forms: one to read, one to paste.
+    if let Some(label) = diag.primary_label() {
+        let at = source.position(label.span.start);
+        let _ = writeln!(
+            out,
+            "file: {}, line: {}, column: {} ({})",
+            source.path().display(),
+            at.line,
+            at.column,
+            source.short_location(label.span.start),
+        );
+        out.push('\n');
+    }
+
+    let _ = writeln!(out, "{}", diag.message);
+
+    if !diag.labels.is_empty() {
+        out.push('\n');
+        if source.has_text() {
+            out.push_str(&snippet(source, diag));
+        } else {
+            // The line is known and the line cannot be shown. Say which, rather than
+            // printing an empty frame and letting it look like an empty line.
+            let _ = writeln!(
+                out,
+                "  (this was built without its source, so the line above cannot be shown.)\n"
+            );
+        }
+    }
+
+    out.push('\n');
+    let _ = writeln!(out, "Error code: {}", diag.code);
+    write_field(&mut out, "Rule(s) broken", &diag.rules);
+    write_field(&mut out, "Tip(s)", &diag.tips);
+    write_field(&mut out, "Suggested fix(s)", &diag.fixes);
+
+    out
+}
+
+/// Render a whole run: the greeting, every diagnostic, and the count.
+pub fn report(source: &SourceFile, diags: &[Diagnostic]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{GREETING}");
+
+    for diag in diags {
+        out.push('\n');
+        out.push_str(&diagnostic(source, diag));
+    }
+
+    out.push('\n');
+    let _ = writeln!(out, "{}.", count_of(diags.len()));
+    out
+}
+
+/// `1 error` or `12 errors`, so the last line reads as a sentence either way.
+fn count_of(n: usize) -> String {
+    if n == 1 { "1 error".to_string() } else { format!("{n} errors") }
+}
+
+/// A field that may hold nothing, one thing, or several. One goes on the same line as its
+/// label; several are listed under it, so a long list stays readable.
+fn write_field(out: &mut String, label: &str, values: &[String]) {
+    match values {
+        [] => {}
+        [only] => {
+            let _ = writeln!(out, "{label}: {only}");
+        }
+        many => {
+            let _ = writeln!(out, "{label}:");
+            for value in many {
+                let _ = writeln!(out, "  - {value}");
+            }
+        }
+    }
+}
+
+/// The source lines an error points at, each with its carets underneath.
+fn snippet(source: &SourceFile, diag: &Diagnostic) -> String {
+    let mut labels: Vec<_> = diag.labels.iter().collect();
+    labels.sort_by_key(|l| l.span.start);
+
+    // Wide enough for the largest line number, so the gutters line up.
+    let widest = labels
+        .iter()
+        .map(|l| source.line_of(l.span.start).to_string().len())
+        .max()
+        .unwrap_or(1);
+
+    let mut out = String::new();
+    for label in labels {
+        let line = source.line_of(label.span.start);
+        let (indent, under) = source.caret_layout(label.span);
+        let mark = match label.style {
+            LabelStyle::Primary => '^',
+            LabelStyle::Secondary => '~',
+        };
+
+        let _ = writeln!(out, "{:>widest$} | {}", line, source.line_text(line), widest = widest + 2);
+        let _ = writeln!(
+            out,
+            "{:>widest$} | {}{} {}",
+            "",
+            " ".repeat(indent),
+            mark.to_string().repeat(under),
+            label.note,
+            widest = widest + 2
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diag::Diagnostic;
+    use crate::source::Span;
+
+    /// Placeholder syntax — see the module docs. What matters is that a value is given
+    /// away on one line and used on the next.
+    const PROGRAM: &str = "own greeting: text = \"hello\";\n\
+                           give greeting to shout;\n\
+                           show greeting;\n";
+
+    fn source() -> SourceFile {
+        SourceFile::new("src/main.qn", PROGRAM)
+    }
+
+    /// The worked example from the module docs, built the way the compiler will build it.
+    fn used_after_giving() -> Diagnostic {
+        // Point at `give`, which is the act that ended the ownership — not at the name,
+        // which is not the part that is wrong.
+        let given = PROGRAM.find("give").unwrap();
+        let used = PROGRAM.rfind("greeting").unwrap();
+        Diagnostic::new("E0301", "`greeting` was given away on line 2, so it cannot be used here.")
+            .secondary(
+                Span::new(given, given + "give".len()),
+                "given away here, and `text` is not copied",
+            )
+            .primary(Span::new(used, used + "greeting".len()), "used here, after it was given away")
+            .rule("a value has one owner, and giving it away ends the old owner's use of it")
+            .tip("`text` owns a buffer, so giving it moves the buffer rather than copying it.")
+            .fix("line 2 — `lend greeting to shout;`, if `shout` only needs to read it")
+    }
+
+    #[test]
+    fn one_error_reads_the_way_the_docs_say() {
+        let out = report(&source(), &[used_after_giving()]);
+        let expected = "\
+Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
+
+file: src/main.qn, line: 3, column: 6 (src/main.qn:3:6)
+
+`greeting` was given away on line 2, so it cannot be used here.
+
+  2 | give greeting to shout;
+    | ~~~~ given away here, and `text` is not copied
+  3 | show greeting;
+    |      ^^^^^^^^ used here, after it was given away
+
+Error code: E0301
+Rule(s) broken: a value has one owner, and giving it away ends the old owner's use of it
+Tip(s): `text` owns a buffer, so giving it moves the buffer rather than copying it.
+Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to read it
+
+1 error.
+";
+        assert_eq!(out, expected, "\n--- got ---\n{out}");
+    }
+
+    #[test]
+    fn the_apology_is_made_once_however_many_errors_follow() {
+        let out = report(&source(), &[used_after_giving(), used_after_giving(), used_after_giving()]);
+        assert_eq!(out.matches(GREETING).count(), 1);
+        assert_eq!(out.matches("Error code: E0301").count(), 3);
+        assert!(out.ends_with("3 errors.\n"));
+    }
+
+    #[test]
+    fn a_clean_run_still_counts() {
+        let out = report(&source(), &[]);
+        assert!(out.starts_with(GREETING));
+        assert!(out.ends_with("0 errors.\n"));
+    }
+
+    #[test]
+    fn several_rules_are_listed_rather_than_run_together() {
+        let diag = Diagnostic::new("E0001", "two things at once.")
+            .primary(Span::new(0, 3), "here")
+            .rule("the first rule")
+            .rule("the second rule");
+        let out = diagnostic(&source(), &diag);
+        assert!(out.contains("Rule(s) broken:\n  - the first rule\n  - the second rule\n"), "{out}");
+    }
+
+    #[test]
+    fn empty_fields_are_left_out_entirely() {
+        let diag =
+            Diagnostic::new("E0002", "nothing more to say.").primary(Span::new(0, 3), "here");
+        let out = diagnostic(&source(), &diag);
+        assert!(out.contains("Error code: E0002"));
+        assert!(!out.contains("Tip(s)"));
+        assert!(!out.contains("Suggested fix(s)"));
+        assert!(!out.contains("Rule(s)"));
+    }
+
+    #[test]
+    fn a_caret_under_an_emoji_name_is_two_cells_wide() {
+        // The whole reason the layout is measured in cells: a caret counted in characters
+        // would be one column short here, and would sit under the wrong thing.
+        let family = "\u{1F9D1}\u{200D}\u{1F9D1}\u{200D}\u{1F9D2}\u{200D}\u{1F9D2}";
+        let text = format!("the family {family} lives here\n");
+        let src = SourceFile::new("src/main.qn", text.clone());
+        let at = text.find(family).unwrap();
+
+        let diag = Diagnostic::new("E0003", "that name is not declared.")
+            .primary(Span::new(at, at + family.len()), "used here");
+        let out = diagnostic(&src, &diag);
+
+        assert!(out.contains("column: 12 (src/main.qn:1:12)"), "{out}");
+        assert!(out.contains("\n    |            ^^ used here\n"), "{out}");
+
+        // Eleven cells of indent, then two carets, which is where the emoji is drawn.
+        let caret_line = out.lines().find(|l| l.contains('^')).unwrap();
+        let body = caret_line.split_once("| ").unwrap().1;
+        assert_eq!(body.len() - body.trim_start().len(), 11);
+    }
+
+    #[test]
+    fn the_gutter_widens_for_larger_line_numbers() {
+        let mut text = String::new();
+        for _ in 0..120 {
+            text.push_str("a line of plain text\n");
+        }
+        let src = SourceFile::new("src/main.qn", text.clone());
+        let late = text.len() - 15;
+        let diag =
+            Diagnostic::new("E0004", "something here.").primary(Span::new(late, late + 5), "here");
+        let out = diagnostic(&src, &diag);
+        assert!(out.contains("  120 | "), "{out}");
+    }
+}
