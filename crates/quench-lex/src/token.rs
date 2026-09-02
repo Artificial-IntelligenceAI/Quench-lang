@@ -33,6 +33,13 @@ pub enum Kind {
     Comma,
     /// `.` — between the parts of a chain.
     Dot,
+    /// `:` — between a type and the written value it reads.
+    ///
+    /// A written value has no meaning on its own: `*1000*` is a number under `b16` and
+    /// four characters under `str`. A declaration supplies the type from its chain, so
+    /// nothing has to be said twice. Anywhere else the value states it — `str:*hello*` —
+    /// rather than being read as whatever seems likely.
+    Colon,
     /// `=`
     Equals,
 
@@ -78,6 +85,7 @@ impl Kind {
             Kind::Semicolon => "`;`",
             Kind::Comma => "`,`",
             Kind::Dot => "`.`",
+            Kind::Colon => "`:`",
             Kind::Equals => "`=`",
             Kind::Word => "a word",
             Kind::Name => "a name",

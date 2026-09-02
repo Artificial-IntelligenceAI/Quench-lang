@@ -60,6 +60,7 @@ impl<'a> Lexer<'a> {
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
                 '.' => self.single(Kind::Dot),
+                ':' => self.single(Kind::Colon),
                 '=' => self.single(Kind::Equals),
                 '"' => self.double_quoted(),
                 '\\' => self.escape(),

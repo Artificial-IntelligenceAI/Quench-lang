@@ -42,6 +42,27 @@ secretly instructions.
 
 The escapes are `\n`, `\t`, `\r` and `\\`. Anything else is an error that lists them.
 
+## A written value states its type where nothing else can
+
+A written value means nothing on its own. `*1000*` is the number one thousand under
+`b16` and the four characters `1000` under `str`, and that is the type's decision.
+
+In a declaration the chain has already said it, so nothing is repeated:
+
+```quench
+var.str ['s'] = [*line one*];
+```
+
+A print list has no chain, so the value says it itself:
+
+```quench
+print[str:** \n]
+```
+
+A name needs no annotation anywhere, because its declaration gave it one already.
+This is the same rule as everywhere else here — the information exists, so it is
+written down rather than guessed at from what seems likely.
+
 ## Juxtaposition builds a value, commas separate them
 
 Items sit next to each other. There is no `+`, because nothing is being concatenated

@@ -276,3 +276,40 @@ fn commas_separate_the_values_and_juxtaposition_builds_each_one() {
         ]
     );
 }
+
+#[test]
+fn a_printed_value_carries_the_type_that_reads_it() {
+    use Kind::*;
+    // `*1000*` is a number under `b16` and four characters under `str`. A declaration
+    // says which in its chain; a print list has no chain, so the value says it itself.
+    let out = lex(r"print[str:** \n]");
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(
+        out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+        [Word, OpenList, Word, Colon, Written, Escape, CloseList, End]
+    );
+}
+
+#[test]
+fn an_empty_written_value_is_a_pair_of_marks_with_nothing_in_them() {
+    let out = lex("print[str:**]");
+    assert!(out.ok(), "{:#?}", out.errors);
+    let t = out.tokens[4];
+    assert_eq!(t.kind, Kind::Written);
+    assert_eq!(&"print[str:**]"[t.span.start..t.span.end], "**");
+}
+
+#[test]
+fn the_type_is_a_word_like_any_other() {
+    use Kind::*;
+    for ty in ["str", "b16", "i64", "bool"] {
+        let source = format!("print[{ty}:*1000* \\n]");
+        let out = lex(&source);
+        assert!(out.ok(), "{ty}: {:#?}", out.errors);
+        assert_eq!(
+            out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+            [Word, OpenList, Word, Colon, Written, Escape, CloseList, End],
+            "{ty}"
+        );
+    }
+}
