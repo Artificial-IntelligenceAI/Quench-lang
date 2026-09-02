@@ -100,6 +100,22 @@ counts **graphemes**, the column in `file:line:column` counts **bytes** so it ca
 pasted into an editor or a `grep`, and the caret is placed by **terminal cells**, so
 an emoji that draws two cells wide gets two carets.
 
+## Settings
+
+A project's settings live beside its source in a `Quench.toml`, and a `defaults.`
+line at the top of a file overrides the project for that file. Quench is meant to
+be very customisable — but settings come in two kinds, and only one of them is
+cheap:
+
+- those that change **what gets delivered** — embedded source, target CPU, which
+  engine runs it — cost nothing to test, because the answer is the same either way;
+- those that change **what a program answers** — how division rounds, what overflow
+  does — multiply the oracle, because three engines have to agree under *each*
+  setting, not once overall.
+
+So the first kind can grow freely and the second is argued one knob at a time. See
+[notes/every-knob-is-a-multiplier.md](notes/every-knob-is-a-multiplier.md).
+
 ## The oracle
 
 A language with three execution methods has three places for the same bug to hide.
