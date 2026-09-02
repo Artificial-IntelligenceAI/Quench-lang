@@ -121,7 +121,7 @@ integers and is written to sit alongside IEEE 754 — but almost nothing cites i
 the honest description is two's complement, which C only mandated outright in C23.
 
 The standard would not settle the interesting question anyway. **How arithmetic
-behaves — what overflow does, how division rounds — is a `Quench.toml` setting**, and
+behaves — what overflow does, how division rounds — is a `QNL-Config.toml` setting**, and
 those land in the semantic pile, so each one multiplies what the oracle has to prove.
 See [Settings](#settings).
 
@@ -167,7 +167,7 @@ an emoji that draws two cells wide gets two carets.
 
 ## Settings
 
-A project's settings live beside its source in a `Quench.toml`, and a `defaults.`
+A project's settings live beside its source in a `QNL-Config.toml`, and a `defaults.`
 line at the top of a file overrides the project for that file. Quench is meant to
 be very customisable — but settings come in two kinds, and only one of them is
 cheap:

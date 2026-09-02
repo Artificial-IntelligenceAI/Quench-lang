@@ -132,7 +132,7 @@ impl Big {
     /// Truncating division, and a remainder with the sign of the dividend.
     ///
     /// `None` when `other` is zero. Which convention a Quench program actually sees is a
-    /// `Quench.toml` setting; this is the one everything else is defined in terms of.
+    /// `QNL-Config.toml` setting; this is the one everything else is defined in terms of.
     pub fn div_rem(&self, other: &Big) -> Option<(Big, Big)> {
         if other.is_zero() {
             return None;

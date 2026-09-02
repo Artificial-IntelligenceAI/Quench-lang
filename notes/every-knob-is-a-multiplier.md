@@ -1,7 +1,7 @@
 # Every knob is a multiplier
 
 Quench is meant to be very customisable, and settings for a project live beside its
-source in a `Quench.toml`. Luarust's shape is inherited: `[defaults]` for what gets
+source in a `QNL-Config.toml`. Luarust's shape is inherited: `[defaults]` for what gets
 accepted, `[build]` for what gets delivered, sections for how it runs — and a
 `defaults.` line at the top of a file still wins for that file, because whatever a
 file says about itself is the last word on it.
