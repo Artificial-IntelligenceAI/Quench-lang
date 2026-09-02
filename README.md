@@ -36,9 +36,13 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   types, constants — and they are order-free, because none of them execute.
   Execution begins in `START` and nowhere else. See
   [notes/the-top-level-does-not-run.md](notes/the-top-level-does-not-run.md).
+- **Declarations chain**, as Luarust's do: `var.mut.b16 ['x'] = [|1000|];`.
+  Names in quotes, values in bars, semicolons at the end. See
+  [notes/the-declaration-chain.md](notes/the-declaration-chain.md).
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
-  `export`. Words rather than initials, since the volume that would justify
-  abbreviating is already gone. Variables never carry one, because nothing
+  `export`. **Required** — there is no default, so a missing one is an error on the
+  declaration rather than on some innocent use of it later. Words rather than
+  initials, since the volume that would justify abbreviating is already gone. Variables never carry one, because nothing
   outside a function can name them anyway. See
   [notes/three-lines-a-name-can-cross.md](notes/three-lines-a-name-can-cross.md).
 - **Constants outside, variables inside.** A constant is a value the compiler can
