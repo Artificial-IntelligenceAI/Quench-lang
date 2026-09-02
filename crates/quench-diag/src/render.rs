@@ -3,7 +3,7 @@
 //! ```text
 //! Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 //!
-//! file: /Users/ts/hello/src/main.qn, line: 3, column: 6 (src/main.qn:3:6)
+//! file: /Users/ts/hello/src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
 //!
 //! `greeting` was given away on line 2, so it cannot be used here.
 //!
@@ -166,7 +166,7 @@ mod tests {
                            show greeting;\n";
 
     fn source() -> SourceFile {
-        SourceFile::new("src/main.qn", PROGRAM)
+        SourceFile::new("src/main.qnl", PROGRAM)
     }
 
     /// The worked example from the module docs, built the way the compiler will build it.
@@ -192,7 +192,7 @@ mod tests {
         let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qn, line: 3, column: 6 (src/main.qn:3:6)
+file: src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
 
 `greeting` was given away on line 2, so it cannot be used here.
 
@@ -253,14 +253,14 @@ Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to
         // would be one column short here, and would sit under the wrong thing.
         let family = "\u{1F9D1}\u{200D}\u{1F9D1}\u{200D}\u{1F9D2}\u{200D}\u{1F9D2}";
         let text = format!("the family {family} lives here\n");
-        let src = SourceFile::new("src/main.qn", text.clone());
+        let src = SourceFile::new("src/main.qnl", text.clone());
         let at = text.find(family).unwrap();
 
         let diag = Diagnostic::new("E0003", "that name is not declared.")
             .primary(Span::new(at, at + family.len()), "used here");
         let out = diagnostic(&src, &diag);
 
-        assert!(out.contains("column: 12 (src/main.qn:1:12)"), "{out}");
+        assert!(out.contains("column: 12 (src/main.qnl:1:12)"), "{out}");
         assert!(out.contains("\n    |            ^^ used here\n"), "{out}");
 
         // Eleven cells of indent, then two carets, which is where the emoji is drawn.
@@ -275,7 +275,7 @@ Suggested fix(s): line 2 — `lend greeting to shout;`, if `shout` only needs to
         for _ in 0..120 {
             text.push_str("a line of plain text\n");
         }
-        let src = SourceFile::new("src/main.qn", text.clone());
+        let src = SourceFile::new("src/main.qnl", text.clone());
         let late = text.len() - 15;
         let diag =
             Diagnostic::new("E0004", "something here.").primary(Span::new(late, late + 5), "here");

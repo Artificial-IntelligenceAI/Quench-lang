@@ -200,7 +200,7 @@ mod tests {
     const FAMILY: &str = "🧑‍🧑‍🧒‍🧒";
 
     fn file(text: &str) -> SourceFile {
-        SourceFile::new("src/main.qn", text)
+        SourceFile::new("src/main.qnl", text)
     }
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(at.line, 1);
         assert_eq!(at.column, 13, "thirteen characters in, as a reader counts");
         assert_eq!(at.byte_column, 37, "but thirty-seven bytes in");
-        assert_eq!(f.short_location(marker), "src/main.qn:1:37");
+        assert_eq!(f.short_location(marker), "src/main.qnl:1:37");
     }
 
     #[test]

@@ -39,6 +39,9 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **Declarations chain**, as Luarust's do: `var.mut.b16 ['x'] = [|1000|];`.
   Names in quotes, values in bars, semicolons at the end. See
   [notes/the-declaration-chain.md](notes/the-declaration-chain.md).
+- **A Quench file is `.qnl`.** Unclaimed, and distinctive enough to search for —
+  `.q`, `.qs`, `.qm` and `.qml` are all taken, and `.qn` collides with a common
+  abbreviation.
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the
   declaration rather than on some innocent use of it later. Words rather than
@@ -63,8 +66,12 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 ## Decisions not made yet
 
 - The **type system**.
-- The **surface syntax**. Everything you see in a test fixture or a doc comment is a
-  placeholder, and is labelled as one. `.qn` as the file extension is provisional too.
+- **How a running program fails** — how an error is signalled and propagated at run
+  time, as opposed to how the compiler reports one. `START` returns an `i64` exit
+  status for now, and that is waiting on this.
+- **How a top-level function is declared.** The chain covers variables; there is
+  nothing in Luarust to inherit for routines.
+- Whether **`mut`** keeps that spelling, given visibility chose words over initials.
 
 ## Errors
 
@@ -74,7 +81,7 @@ because the fix is what should still be on screen when the reader stops reading.
 ```text
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qn, line: 3, column: 6 (src/main.qn:3:6)
+file: src/main.qnl, line: 3, column: 6 (src/main.qnl:3:6)
 
 `greeting` was given away on line 2, so it cannot be used here.
 
