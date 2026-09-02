@@ -44,12 +44,23 @@ going wrong — and it says so, rather than range-checking a damaged file field 
 field into some plausible program nobody wrote. It is explicitly **not** a defence:
 anyone editing a chunk on purpose recomputes it in a line.
 
-And `verify` runs on load. It exists already, written as an internal check on the
-frontend, and its messages say so — they are addressed to whoever is writing the
-compiler, because nothing else could produce a malformed module. **That stops being
-true here.** A module that arrives from elsewhere and does not check out is a corrupt
-or hostile file, not a compiler bug, and telling its reader that Quench has an
-internal error would be a lie. The same check needs a second voice.
+And `verify` runs on load. It was written as an internal check on the frontend, and
+its messages said so — addressed to whoever is writing the compiler, because nothing
+else could produce a malformed module. **That stops being true the moment a module
+travels.** So the findings are data now, and an `Audience` decides who is being told:
+
+- `Ourselves` — this compiler built it, nothing else could have, so it is a bug in
+  Quench. The reader is told their program is probably fine and asked to report it.
+  `E9001`, and E9xxx is the range for *not your program's fault*.
+- `AFileWeWereGiven` — it arrived. A copy that stopped early and a module built by
+  another version of Quench both look exactly like this, so the fixes offered are
+  build it again from source, or check it was transferred whole. `E0801`.
+
+Both come out as ordinary diagnostics, in the format every other Quench error uses.
+A reader should not have to learn a second one because the trouble is in a file
+rather than in a line — which meant the renderer had to survive a diagnostic with no
+labels at all, since a module is not a line of source and there is nothing to point
+a caret at. It does, and there is a test that says so.
 
 ## What it does not change
 

@@ -5,9 +5,18 @@
 //! wearing three costumes. So the IR is checked once, here, before any backend sees it,
 //! and a backend is then entitled to assume what it reads is well formed.
 //!
-//! This is a check on the *frontend*, not on a user's program. Anything it catches is a
-//! compiler bug, which is why it produces a plain description rather than a diagnostic
-//! with a rule and a suggested fix — there is no fix a user could apply.
+//! **The same check has two audiences.** While a module has only ever been in this
+//! process, nothing but a bug in Quench could have malformed it, and saying so plainly is
+//! right — there is no fix a user could apply. But QIR travels: it is the artefact
+//! Quench compiles to, so a module can also arrive from a file, from another machine,
+//! from a download that stopped early. Then a failure is not a compiler bug, it is a
+//! damaged or foreign file, and telling its reader that Quench has an internal error
+//! would be a lie.
+//!
+//! So the findings are data, and [`Audience`] decides who is being told. Both come out
+//! as ordinary [`Diagnostic`]s, in the format every other Quench error uses — a reader
+//! should not have to learn a second one because the trouble is in a file rather than in
+//! a line.
 //!
 //! What is not checked yet: **dominance**. A value used before the block that defines it
 //! can reach is not caught here, and will be caught by Cranelift's own verifier with a
@@ -15,8 +24,54 @@
 //! there are enough passes to justify one.
 
 use crate::{Inst, Module, Term, Ty, Value};
+use quench_diag::Diagnostic;
 use std::collections::HashSet;
 use std::fmt;
+
+/// Who is being told that a module does not check out.
+///
+/// The failure is identical; the truthful thing to say about it is not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Audience {
+    /// This compiler built the module and is checking its own work. Nothing else could
+    /// have produced it, so this is a bug in Quench and the reader can only report it.
+    Ourselves,
+    /// The module arrived — a file, another machine, a transfer that stopped early. Not
+    /// Quench's bug, and not necessarily anyone's, and there are things the reader can
+    /// actually do about it.
+    AFileWeWereGiven,
+}
+
+/// Turn findings into an error in Quench's own format.
+///
+/// `origin` names the thing at fault: the path a module was read from, or what the
+/// compiler was about to do with one it built.
+pub fn diagnose(wrong: &[Invalid], audience: Audience, origin: &str) -> Diagnostic {
+    // E9xxx is the range for "this is not your program's fault".
+    let mut diag = match audience {
+        Audience::Ourselves => Diagnostic::new(
+            "E9001",
+            format!("Quench built a module for {origin} that is not well formed. This is a bug in Quench, not in your program."),
+        )
+        .rule("the compiler checks its own output before any backend sees it, so that one bug cannot become three different wrong answers")
+        .tip("your program may well be fine. Nothing you wrote can cause this.")
+        .fix("please report it, with the program that caused it if you can share it"),
+
+        Audience::AFileWeWereGiven => Diagnostic::new(
+            "E0801",
+            format!("`{origin}` is not a Quench module this version can run."),
+        )
+        .rule("a module is checked before it is believed, rather than being read field by field into some plausible program nobody wrote")
+        .tip("a copy that stopped early, or a module built by a different version of Quench, both look like this.")
+        .fix("build it again from source")
+        .fix("or check it was transferred whole"),
+    };
+
+    for one in wrong {
+        diag = diag.tip(format!("what was wrong: {one}"));
+    }
+    diag
+}
 
 /// Something wrong with a module, in the terms the compiler's own authors would use.
 #[derive(Clone, PartialEq, Eq, Debug)]

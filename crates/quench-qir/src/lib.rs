@@ -231,4 +231,4 @@ pub mod builder;
 pub mod verify;
 
 pub use builder::Builder;
-pub use verify::{verify, Invalid};
+pub use verify::{diagnose, verify, Audience, Invalid};

@@ -26,7 +26,12 @@ use quench_qir as qir;
 ///
 /// None of these are things a Quench program can cause. A program that does not make
 /// sense is stopped by the frontend, with a diagnostic; anything here is a bug in the
-/// compiler, and says so plainly rather than apologising to someone who cannot fix it.
+/// compiler.
+///
+/// [`Error::Invalid`] carries its findings rather than a rendered message, so a caller
+/// can say the true thing about them: [`qir::diagnose`] with [`qir::Audience::Ourselves`]
+/// when this compiler built the module, and [`qir::Audience::AFileWeWereGiven`] when it
+/// was read from somewhere. See [`qir::verify`].
 #[derive(Debug)]
 pub enum Error {
     /// The IR did not check out. See [`qir::verify`].
