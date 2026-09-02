@@ -37,6 +37,42 @@ So **there is no single ratio between these two engines**, and quoting one would
 mislead in both directions. The gap is however much structure an optimiser can find:
 nothing when the work is irreducible, unbounded when the work can be deleted.
 
+## The same loop, four compilers
+
+Luarust was the first comparison; Julia and C# were added because they are three
+genuinely different backends — LLVM twice, and .NET's RyuJIT, which is a tiered JIT
+built for startup and so closer in spirit to the Dev JIT than LLVM is.
+
+| 100M iterations | chain (irreducible) | adds (has a closed form) |
+| --- | --- | --- |
+| Luarust — LLVM | ~2.2 ns | **loop eliminated** — 0.0016 ns |
+| Julia — LLVM | 2.46 ns | **loop eliminated** — 0.0016 ns |
+| C# — RyuJIT | 2.51 ns | 0.24 ns — ran it, about a cycle an iteration |
+| **Quench Dev JIT** — Cranelift at `none` | **3.07 ns** | 0.50 ns — ran it plainly |
+
+All four answered `15000000`, which is four independent implementations agreeing and
+worth more than the timings.
+
+**On irreducible work everything converges into a 40% band.** Four compilers, three
+backends, decades of tuning between them, and they all land between 2.2 and 3.1 ns
+because they are all waiting on the same 64-bit division. An unoptimised Cranelift JIT
+is within 22% of C# and 25% of Julia.
+
+**On optimisable work the spread is three hundred times**, and the three-way split says
+more than a two-way one would: LLVM found the closed form and deleted the loop, RyuJIT
+did not but unrolled it to about a cycle an iteration, and Cranelift at `none` ran it
+straight at about two.
+
+## The finding is about benchmarking, not about Quench
+
+The same four compilers, on the same machine, in the same afternoon, are 1.4× apart on
+one loop and 300× apart on another.
+
+So **any single number comparing these engines is choosing its answer by choosing its
+benchmark**. That is worth having measured before Quench publishes a performance claim
+of any kind, because the temptation to quote the flattering loop will be there, and the
+number would be true and useless.
+
 ## What this says about the Dev JIT
 
 It is doing its job. 1.6 ms to compile, and code within 1.4× of optimised LLVM on work
