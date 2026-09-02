@@ -109,7 +109,7 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 | `d32` `d64` | IEEE 754 decimal |
 | `u8` `u16` `u32` `u64` | unsigned integers, two's complement |
 | `i8` `i16` `i32` `i64` | signed integers, two's complement |
-| `e` | exact, unbounded **rationals**. Never rounds — including on division |
+| `e` | exact, unbounded **rationals**, for numbers too large to hold any other way. Never rounds — including on division. See [notes/e-is-big-and-exact.md](notes/e-is-big-and-exact.md) |
 | `bool` | |
 | `str` | |
 
