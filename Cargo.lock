@@ -334,6 +334,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "quench-num"
+version = "0.0.0"
+
+[[package]]
 name = "quench-qir"
 version = "0.0.0"
 dependencies = [

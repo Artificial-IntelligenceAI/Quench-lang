@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/quench-diag", "crates/quench-lex", "crates/quench-qir", "crates/quench-dev"]
+members = ["crates/quench-diag", "crates/quench-lex", "crates/quench-num", "crates/quench-qir", "crates/quench-dev"]
 
 [workspace.package]
 version = "0.0.0"
