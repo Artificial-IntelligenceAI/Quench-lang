@@ -1,0 +1,12 @@
+[package]
+name = "quench-check"
+description = "Names resolved and types checked — the last place an error can point at what somebody wrote."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+quench-diag = { path = "../quench-diag" }
+quench-parse = { path = "../quench-parse" }

@@ -73,10 +73,10 @@ fn the_same_text_twice_is_stored_once() {
 
 #[test]
 fn a_file_with_no_start_is_not_a_program() {
-    // The parser is happy with this -- a file of declarations is a fine thing to parse.
-    // Only something trying to *run* it knows that was not what was wanted.
-    let out = quench_parse::parse("");
-    assert!(out.ok(), "the parser has no complaint");
+    // Nothing before this point complains -- a file of declarations is a fine thing to
+    // parse and a fine thing to check. Only something trying to *run* it knows that was
+    // not what was wanted.
+    assert!(quench_check::check("").ok(), "checking has no complaint either");
 
     let rendered = report("");
     assert!(rendered.contains("no `START`, so there is nothing to run"), "{rendered}");
@@ -86,17 +86,74 @@ fn a_file_with_no_start_is_not_a_program() {
 #[test]
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
-        ("START { var.str ['a'] = [*x*]; }", "declaring things is not built yet"),
-        ("START { print['a']; }", "printing a name is not built yet"),
+        // A type Quench means to have and does not have yet.
         ("START { print[b16:*1*]; }", "`b16` is not built yet"),
+        // Joining a name to something else builds a new value, which needs the collector.
+        ("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a' *y*]; }", "needs the collector"),
     ];
     for (source, expected) in cases {
         let rendered = report(source);
         assert!(rendered.contains(expected), "{source}\n{rendered}");
     }
+
+    // And declaring things, which this test used to assert was not built, now is.
+    assert!(lower("START { var.str ['a'] = [*x*]; print['a']; }").ok());
 }
 
 #[test]
 fn a_program_that_prints_nothing_is_still_a_program() {
     assert_eq!(said("START { }"), "");
+}
+
+#[test]
+fn a_declaration_and_the_name_that_uses_it() {
+    assert_eq!(
+        said("START {\n var.str ['greeting'] = [*Hello*];\n print['greeting' str:*, World!* \\n];\n}\n"),
+        "Hello, World!\n"
+    );
+}
+
+#[test]
+fn a_number_prints_as_a_number() {
+    assert_eq!(said("START { var.i64 ['n'] = [*42*]; print['n']; }"), "42");
+    assert_eq!(said("START { var.i64 ['n'] = [*-7*]; print['n']; }"), "-7");
+    assert_eq!(
+        said("START { var.i64 ['n'] = [*9223372036854775807*]; print['n']; }"),
+        "9223372036854775807",
+        "the whole range of an i64 survives the trip"
+    );
+}
+
+#[test]
+fn the_same_characters_are_a_number_or_text_depending_on_the_type() {
+    // Which is the rule the marks exist for, running for the first time.
+    assert_eq!(said("START { var.i64 ['a'] = [*1000*]; print['a']; }"), "1000");
+    assert_eq!(said("START { var.str ['a'] = [*1000*]; print['a']; }"), "1000");
+    // The same output, arrived at two different ways -- one printed a number, the other
+    // printed four characters.
+}
+
+#[test]
+fn copying_a_value_names_it_again_rather_than_building_anything() {
+    assert_eq!(
+        said("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print['a' 'b']; }"),
+        "xx"
+    );
+    // And the module holds that text once, because copying did not make a second one.
+    let out = lower("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print['a' 'b']; }");
+    assert_eq!(out.module.expect("a program").text.len(), 1);
+}
+
+#[test]
+fn a_declaration_that_is_never_used_still_has_to_make_sense() {
+    assert!(!lower("START { var.i64 ['n'] = [*hello*]; }").ok());
+}
+
+#[test]
+fn a_program_that_does_not_check_out_is_not_lowered() {
+    // Building QIR from a program that failed checking would make nonsense out of it,
+    // and the nonsense would be reported by an engine rather than by the compiler.
+    let out = lower("START { print['nope']; }");
+    assert!(out.module.is_none());
+    assert!(!out.errors.is_empty());
 }

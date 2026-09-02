@@ -147,12 +147,15 @@ pub enum CmpOp {
 pub enum Host {
     /// Write a piece of text. Takes one [`Ty::Text`].
     PrintText,
+    /// Write a number. Takes one [`Ty::I64`].
+    PrintI64,
 }
 
 impl Host {
     pub fn name(self) -> &'static str {
         match self {
             Host::PrintText => "print-text",
+            Host::PrintI64 => "print-i64",
         }
     }
 
@@ -160,6 +163,7 @@ impl Host {
     pub fn params(self) -> &'static [Ty] {
         match self {
             Host::PrintText => &[Ty::Text],
+            Host::PrintI64 => &[Ty::I64],
         }
     }
 }

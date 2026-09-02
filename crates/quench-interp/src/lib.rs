@@ -257,6 +257,9 @@ fn evaluate(
         qir::Inst::ConstText(at) => i64::from(*at),
         qir::Inst::CallHost { host, args } => {
             match host {
+                qir::Host::PrintI64 => {
+                    let _ = write!(out, "{}", slots[args[0].0 as usize]);
+                }
                 qir::Host::PrintText => {
                     let at = slots[args[0].0 as usize] as usize;
                     let text = module.text.get(at).map_or("", |s| s.as_str());

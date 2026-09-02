@@ -171,11 +171,22 @@ thread_local! {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn print_i64(_table: *const Piece, value: i64) -> i64 {
+    write_out(value.to_string().as_bytes());
+    0
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn print_text(table: *const Piece, index: i64) -> i64 {
     // Safe because `compile` verified the index against the module's text before any of
     // this existed, and the table outlives the code that names it.
     let piece = unsafe { &*table.add(index as usize) };
     let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
+    write_out(bytes);
+    0
+}
+
+fn write_out(bytes: &[u8]) {
     SINK.with(|sink| match &mut *sink.borrow_mut() {
         Some(kept) => kept.extend_from_slice(bytes),
         None => {
@@ -183,7 +194,6 @@ extern "C" fn print_text(table: *const Piece, index: i64) -> i64 {
             let _ = std::io::stdout().write_all(bytes);
         }
     });
-    0
 }
 
 fn cond(op: qir::CmpOp) -> IntCC {
@@ -242,6 +252,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
     // The one symbol generated code is allowed to reach outside itself for.
     builder.symbol("quench_print_text", print_text as *const u8);
+    builder.symbol("quench_print_i64", print_i64 as *const u8);
     let mut jit = JITModule::new(builder);
 
     // The text, owned here and pointed at by a table whose address the code will carry.
@@ -274,9 +285,17 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     host_sig.params.push(AbiParam::new(types::I64)); // the table
     host_sig.params.push(AbiParam::new(types::I64)); // which piece
     host_sig.returns.push(AbiParam::new(types::I64));
-    let host_id = jit
-        .declare_function("quench_print_text", Linkage::Import, &host_sig)
-        .map_err(|e| Error::Backend(e.to_string()))?;
+    // One declaration per host function. They share a signature -- table, one argument,
+    // an answer nothing uses -- so the lowering only has to pick which.
+    let mut hosts = Vec::new();
+    for (host, symbol) in
+        [(qir::Host::PrintText, "quench_print_text"), (qir::Host::PrintI64, "quench_print_i64")]
+    {
+        let id = jit
+            .declare_function(symbol, Linkage::Import, &host_sig)
+            .map_err(|e| Error::Backend(e.to_string()))?;
+        hosts.push((host, id));
+    }
 
     let mut ctx = jit.make_context();
     let mut fctx = FunctionBuilderContext::new();
@@ -285,8 +304,11 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         // Taken before the builder borrows the function, since both want it mutably.
         let refs: Vec<FuncRef> =
             declared.iter().map(|(id, _)| jit.declare_func_in_func(*id, &mut ctx.func)).collect();
-        let host = jit.declare_func_in_func(host_id, &mut ctx.func);
-        lower(func, &mut ctx.func, &mut fctx, &refs, host, table, target);
+        let host_refs: Vec<(qir::Host, FuncRef)> = hosts
+            .iter()
+            .map(|(host, id)| (*host, jit.declare_func_in_func(*id, &mut ctx.func)))
+            .collect();
+        lower(func, &mut ctx.func, &mut fctx, &refs, &host_refs, table, target);
         jit.define_function(declared[i].0, &mut ctx).map_err(|e| Error::Backend(e.to_string()))?;
         jit.clear_context(&mut ctx);
     }
@@ -313,7 +335,7 @@ fn lower(
     clif: &mut ClifFunction,
     fctx: &mut FunctionBuilderContext,
     refs: &[FuncRef],
-    host: FuncRef,
+    hosts: &[(qir::Host, FuncRef)],
     table: i64,
     target: TargetFrontendConfig,
 ) {
@@ -342,12 +364,17 @@ fn lower(
                 qir::Inst::ConstI64(n) => b.ins().iconst(types::I64, *n),
                 qir::Inst::ConstBool(t) => b.ins().iconst(types::I8, i64::from(*t)),
                 qir::Inst::ConstText(at) => b.ins().iconst(types::I64, i64::from(*at)),
-                qir::Inst::CallHost { host: _, args } => {
+                qir::Inst::CallHost { host, args } => {
+                    let which = hosts
+                        .iter()
+                        .find(|(known, _)| known == host)
+                        .map(|(_, r)| *r)
+                        .expect("every host function is declared");
                     // The table's address is a constant of this compilation. QIR carried
                     // an index; the pointer is put on here and goes no further.
                     let mut given = vec![b.ins().iconst(types::I64, table)];
                     given.extend(args.iter().map(|a| vals[a.0 as usize].unwrap()));
-                    let call = b.ins().call(host, &given);
+                    let call = b.ins().call(which, &given);
                     b.inst_results(call)[0]
                 }
                 qir::Inst::Bin { op, lhs, rhs } => {

@@ -311,6 +311,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quench-check"
+version = "0.0.0"
+dependencies = [
+ "quench-diag",
+ "quench-parse",
+]
+
+[[package]]
 name = "quench-cli"
 version = "0.0.0"
 dependencies = [
@@ -373,10 +381,10 @@ dependencies = [
 name = "quench-lower"
 version = "0.0.0"
 dependencies = [
+ "quench-check",
  "quench-dev",
  "quench-diag",
  "quench-interp",
- "quench-parse",
  "quench-qir",
 ]
 

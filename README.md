@@ -29,7 +29,11 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 
 ```quench
 START {
-    print[str:*Hello, World!* \n];
+    var.str ['greeting'] = [*Hello*];
+    var.i64 ['answer']   = [*42*];
+
+    print['greeting' str:*, World!* \n];
+    print[str:*The answer is * 'answer' str:*.* \n];
 }
 ```
 
@@ -51,7 +55,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Lowering** (`quench-lower`) | **Working** — the tree turned into QIR: `START`, `print`, text and escapes |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
-| Type checker | Not started — waiting on the type system |
+| **Type checker** (`quench-check`) | **Working** — names resolved, types checked, `i64` and `str` all the way down |
 | Collector, stack maps | Not started — written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
