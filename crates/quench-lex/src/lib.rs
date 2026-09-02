@@ -62,11 +62,9 @@ impl<'a> Lexer<'a> {
                 '.' => self.single(Kind::Dot),
                 '=' => self.single(Kind::Equals),
                 '"' => self.double_quoted(),
-                '*' => self.text(),
                 '\\' => self.escape(),
-                '\'' => self.quoted('\'', Kind::Name, "a name"),
-                '|' => self.quoted('|', Kind::Literal, "a written value"),
-                '`' => self.quoted('`', Kind::Literal, "a written value"),
+                '\'' => self.delimited('\'', Kind::Name, "a name"),
+                '*' => self.delimited('*', Kind::Written, "a written value"),
                 c if starts_word(c) => self.word(),
                 _ => self.unknown(),
             }
@@ -119,54 +117,21 @@ impl<'a> Lexer<'a> {
         self.source[self.at + 1..].chars().next().is_some_and(in_word)
     }
 
-    /// Something between a pair of marks: `'a name'`, `|a value|`, `` `a value` ``.
+    /// Anything between a pair of marks: `'a name'`, `*a written value*`.
     ///
     /// The span covers the marks as well as what is between them, so an error can
-    /// underline the whole thing rather than its middle.
-    fn quoted(&mut self, mark: char, kind: Kind, what: &str) {
+    /// underline the whole thing rather than its middle. A `\` in here escapes the
+    /// closing mark and nothing else — that mark is the single character which could not
+    /// otherwise be written, and every other character is the one it looks like.
+    fn delimited(&mut self, mark: char, kind: Kind, what: &str) {
         let start = self.at;
         self.at += mark.len_utf8();
 
         while let Some(c) = self.peek() {
-            if c == mark {
-                self.at += mark.len_utf8();
-                self.tokens.push(Token { kind, span: Span::new(start, self.at) });
-                return;
-            }
-            // A newline inside one is always a missing closing mark rather than a very
-            // tall name, and saying so where it opened is more use than saying it at the
-            // end of the file.
-            if c == '\n' {
-                break;
-            }
-            self.at += c.len_utf8();
-        }
-
-        let span = Span::new(start, self.at);
-        self.errors.push(
-            Diagnostic::new("E0002", format!("{what} was opened here and never closed."))
-                .primary(span, format!("this `{mark}` has no partner"))
-                .rule(format!("{what} begins and ends with `{mark}`, on one line"))
-                .tip("a line ending closes nothing — it is the mark that does.")
-                .fix(format!("add a closing `{mark}` before the end of the line")),
-        );
-        // The opening mark was the mistake, so keep what followed it: it is far more
-        // likely to be real source than part of a very long name.
-        self.at = start + mark.len_utf8();
-    }
-
-    /// `*…*` — text, to print.
-    ///
-    /// Scanned as a whole, and left alone. The only escape recognised in here is `\*`,
-    /// which is how a `*` gets written when a `*` is also what ends the run. Everything
-    /// else is the character it looks like.
-    fn text(&mut self) {
-        let start = self.at;
-        self.at += 1;
-        while let Some(c) = self.peek() {
             match c {
-                // A run does not span lines, for the same reason a name does not: a
-                // missing mark is far more likely than a very tall piece of text.
+                // A newline is always a missing closing mark rather than a very tall
+                // name, and saying so where it opened is more use than saying it at the
+                // end of the file.
                 '\n' => break,
                 '\\' => {
                     self.at += 1;
@@ -174,10 +139,9 @@ impl<'a> Lexer<'a> {
                         self.at += next.len_utf8();
                     }
                 }
-                '*' => {
-                    self.at += 1;
-                    self.tokens
-                        .push(Token { kind: Kind::Text, span: Span::new(start, self.at) });
+                c if c == mark => {
+                    self.at += mark.len_utf8();
+                    self.tokens.push(Token { kind, span: Span::new(start, self.at) });
                     return;
                 }
                 _ => self.at += c.len_utf8(),
@@ -185,13 +149,16 @@ impl<'a> Lexer<'a> {
         }
 
         self.errors.push(
-            Diagnostic::new("E0002", "text was opened here and never closed.")
-                .primary(Span::new(start, self.at), "this `*` has no partner")
-                .rule("text begins and ends with `*`, on one line")
-                .tip("to write a `*` inside text, put a `\\` in front of it.")
-                .fix("add a closing `*` before the end of the line"),
+            Diagnostic::new("E0002", format!("{what} was opened here and never closed."))
+                .primary(Span::new(start, self.at), format!("this `{mark}` has no partner"))
+                .rule(format!("{what} begins and ends with `{mark}`, on one line"))
+                .tip("a line ending closes nothing — it is the mark that does.")
+                .tip(format!("to write a `{mark}` inside one, put a `\\` in front of it."))
+                .fix(format!("add a closing `{mark}` before the end of the line")),
         );
-        self.at = start + 1;
+        // The opening mark was the mistake, so keep what followed it: far more likely to
+        // be real source than the inside of a very long name.
+        self.at = start + mark.len_utf8();
     }
 
     /// `\n` and friends, standing on their own between the things they separate.
@@ -220,7 +187,7 @@ impl<'a> Lexer<'a> {
             Diagnostic::new("E0004", format!("`\\{c}` is not an escape Quench knows."))
                 .primary(span, "here")
                 .rule("the escapes are `\\n`, `\\t`, `\\r` and `\\\\`")
-                .tip("inside text, a `\\` is only for writing a `*`. Everywhere else it makes one of the four above.")
+                .tip("inside a written value a `\\` is only for writing the closing mark. Out here it makes one of the four above.")
                 .fix(format!("`\\\\{c}` if a backslash and a `{c}` is what was wanted")),
         );
     }
@@ -247,11 +214,9 @@ impl<'a> Lexer<'a> {
         self.errors.push(
             Diagnostic::new("E0003", "Quench does not write anything between double quotes.")
                 .primary(span, "here")
-                .rule("a name is quoted with `'`, a written value goes between `|` bars, and text goes between `*` marks")
-                .tip("the three are kept apart on purpose, so a quoted thing is always a name and never has to be read as something else depending on where it sits.")
-                .fix(format!(
-                    "`'{inside}'` if it is a name, `|{inside}|` if it is a value, `*{inside}*` if it is text to print"
-                )),
+                .rule("a name is quoted with `'`, and a written value goes between `*` marks")
+                .tip("the two are kept apart on purpose, so a quoted thing is always a name and never has to be read as a value depending on where it sits.")
+                .fix(format!("`'{inside}'` if it is a name, `*{inside}*` if it is a written value")),
         );
     }
 

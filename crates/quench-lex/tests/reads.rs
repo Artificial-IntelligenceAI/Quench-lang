@@ -16,12 +16,12 @@ fn text(source: &str, n: usize) -> String {
 fn a_declaration_comes_apart_the_way_the_chain_reads() {
     use Kind::*;
     assert_eq!(
-        kinds("var.mut.b16 ['x'] = [|1000|];"),
+        kinds("var.mut.b16 ['x'] = [*1000*];"),
         [
             Word, Dot, Word, Dot, Word, // var . mut . b16
             OpenList, Name, CloseList,  // [ 'x' ]
             Equals,
-            OpenList, Literal, CloseList, // [ |1000| ]
+            OpenList, Written, CloseList, // [ |1000| ]
             Semicolon,
             End,
         ]
@@ -38,20 +38,20 @@ fn quench_reserves_no_words() {
 
 #[test]
 fn a_name_may_contain_anything_you_can_type() {
-    let source = "var.str ['a friendly greeting'] = [|hello|];";
+    let source = "var.str ['a friendly greeting'] = [*hello*];";
     assert_eq!(text(source, 4), "'a friendly greeting'");
 
-    let source = "var.b16 ['🧑‍🧑‍🧒‍🧒'] = [|1|];";
+    let source = "var.b16 ['🧑‍🧑‍🧒‍🧒'] = [*1*];";
     assert_eq!(text(source, 4), "'🧑‍🧑‍🧒‍🧒'");
 }
 
 #[test]
-fn a_value_wears_bars_or_backticks_and_the_lexer_does_not_read_it() {
+fn one_mark_for_a_written_value_and_the_lexer_does_not_read_it() {
     // `1000` is a number under b16 and text under str. That is the type's decision, not
-    // this one, so both arrive as the same kind of token.
-    assert_eq!(kinds("[|1000|]"), [Kind::OpenList, Kind::Literal, Kind::CloseList, Kind::End]);
-    assert_eq!(kinds("[`1000`]"), [Kind::OpenList, Kind::Literal, Kind::CloseList, Kind::End]);
-    assert_eq!(text("[|1000|]", 1), "|1000|");
+    // this one, so there is one kind of token here and no reading of what is inside.
+    assert_eq!(kinds("[*1000*]"), [Kind::OpenList, Kind::Written, Kind::CloseList, Kind::End]);
+    assert_eq!(text("[*1000*]", 1), "*1000*");
+    assert_eq!(kinds("[*hello*]"), kinds("[*1000*]"));
 }
 
 #[test]
@@ -63,8 +63,8 @@ fn a_hyphenated_word_is_one_word() {
 #[test]
 fn a_comment_reaches_the_end_of_its_line_and_no_further() {
     assert_eq!(
-        kinds("# this is ignored;\nvar.str ['a'] = [|b|];"),
-        kinds("var.str ['a'] = [|b|];")
+        kinds("# this is ignored;\nvar.str ['a'] = [*b*];"),
+        kinds("var.str ['a'] = [*b*];")
     );
 }
 
@@ -77,7 +77,7 @@ fn the_end_is_always_the_last_token() {
 
 #[test]
 fn an_unclosed_name_says_so_where_it_opened() {
-    let source = "var.str ['name = [|x|];\n";
+    let source = "var.str ['name = [*x*];\n";
     let out = lex(source);
     assert_eq!(out.errors.len(), 1, "{:?}", out.errors);
 
@@ -90,12 +90,14 @@ file: src/main.qnl, line: 1, column: 10 (src/main.qnl:1:10)
 
 a name was opened here and never closed.
 
-  1 | var.str ['name = [|x|];
+  1 | var.str ['name = [*x*];
     |          ^^^^^^^^^^^^^^ this `'` has no partner
 
 Error code: E0002
 Rule(s) broken: a name begins and ends with `'`, on one line
-Tip(s): a line ending closes nothing — it is the mark that does.
+Tip(s):
+  - a line ending closes nothing — it is the mark that does.
+  - to write a `'` inside one, put a `\\` in front of it.
 Suggested fix(s): add a closing `'` before the end of the line
 
 1 error.
@@ -112,7 +114,7 @@ fn a_double_quoted_thing_is_one_mistake_not_two() {
     assert_eq!(out.errors[0].code, "E0003");
     let fix = out.errors[0].fixes.join(" ");
     assert!(fix.contains("`'hello'`"), "{fix}");
-    assert!(fix.contains("`|hello|`"), "{fix}");
+    assert!(fix.contains("`*hello*`"), "{fix}");
 }
 
 #[test]
@@ -127,7 +129,7 @@ fn a_value_written_without_bars_is_told_where_bars_go() {
 fn one_bad_line_does_not_hide_the_next() {
     // Three separate mistakes. A lexer that stopped at the first would report a third of
     // what is wrong with this file.
-    let out = lex("var.str ['a = [|x|];\nvar.b16 ['y'] = [\"z\"];\nvar.b16 ['w'] = [9];\n");
+    let out = lex("var.str ['a = [*x*];\nvar.b16 ['y'] = [\"z\"];\nvar.b16 ['w'] = [9];\n");
     assert_eq!(out.errors.len(), 3, "{:#?}", out.errors);
     assert_eq!(out.errors.iter().map(|e| e.code.as_str()).collect::<Vec<_>>(), ["E0002", "E0003", "E0001"]);
 }
@@ -152,7 +154,7 @@ fn the_hard_one_comes_apart_exactly_as_written() {
     assert!(out.ok(), "{:#?}", out.errors);
     assert_eq!(
         out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
-        [Word, OpenList, Text, Name, Text, Name, Escape, CloseList, Semicolon, End]
+        [Word, OpenList, Written, Name, Written, Name, Escape, CloseList, Semicolon, End]
     );
 
     // The pieces, checked one at a time, because the interesting claim is where each
@@ -177,7 +179,7 @@ fn text_holds_whatever_was_put_in_it() {
     let source = r"print[*{};[]|'#$%^&= 12345*];";
     let out = lex(source);
     assert!(out.ok(), "{:#?}", out.errors);
-    assert_eq!(out.tokens[2].kind, Kind::Text);
+    assert_eq!(out.tokens[2].kind, Kind::Written);
     assert_eq!(&source[out.tokens[2].span.start..out.tokens[2].span.end], r"*{};[]|'#$%^&= 12345*");
 }
 
@@ -185,7 +187,7 @@ fn text_holds_whatever_was_put_in_it() {
 fn a_star_inside_text_is_written_with_a_backslash() {
     let out = lex(r"print[*two \* three*];");
     assert!(out.ok(), "{:#?}", out.errors);
-    assert_eq!(out.tokens[2].kind, Kind::Text);
+    assert_eq!(out.tokens[2].kind, Kind::Written);
 }
 
 #[test]
@@ -223,11 +225,54 @@ fn unclosed_text_says_so_and_offers_the_backslash() {
 }
 
 #[test]
-fn a_double_quote_now_offers_all_three_marks() {
+fn a_double_quote_offers_both_marks() {
     let out = lex("print[\"Hello\"];");
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     let fix = out.errors[0].fixes.join(" ");
     assert!(fix.contains("`'Hello'`"), "{fix}");
-    assert!(fix.contains("`|Hello|`"), "{fix}");
     assert!(fix.contains("`*Hello*`"), "{fix}");
+}
+
+#[test]
+fn a_value_is_a_list_of_items_juxtaposed() {
+    use Kind::*;
+    // Nothing joins them. There is no `+` because nothing is being built -- the items
+    // sit next to each other and are used in order.
+    let out = lex(r"var.str ['s'] = [*line one* \n *line two*];");
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(
+        out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+        [
+            Word, Dot, Word,                       // var . str
+            OpenList, Name, CloseList,             // [ 's' ]
+            Equals,
+            OpenList, Written, Escape, Written, CloseList, // [ *line one* \n *line two* ]
+            Semicolon,
+            End,
+        ]
+    );
+}
+
+#[test]
+fn commas_separate_the_values_and_juxtaposition_builds_each_one() {
+    use Kind::*;
+    // Two names, two values. The comma is the only thing that says where one value stops,
+    // which is what lets a value be as many items long as it likes.
+    let out = lex(r"var.str ['s', 'ss'] = [*line one* \n *line two*, *idk* \n *Claude*];");
+    assert!(out.ok(), "{:#?}", out.errors);
+    assert_eq!(
+        out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+        [
+            Word, Dot, Word,
+            OpenList, Name, Comma, Name, CloseList,
+            Equals,
+            OpenList,
+            Written, Escape, Written,   // 's'
+            Comma,
+            Written, Escape, Written,   // 'ss'
+            CloseList,
+            Semicolon,
+            End,
+        ]
+    );
 }

@@ -1,51 +1,74 @@
 # What the marks are for
 
-Quench writes three different things between marks, and uses a different mark for each:
+Quench writes two things between marks, and uses a different mark for each:
 
 | written | is | example |
 | --- | --- | --- |
 | `'…'` | a **name** | `var.str ['greeting']` |
-| `\|…\|` or `` `…` `` | a **written value** | `= [\|1000\|]` |
-| `*…*` | **text**, to print | `print[*Hello, World!*]` |
+| `*…*` | a **written value** | `= [*hello*]` |
 
-The point of three marks rather than one is that a mark answers the question by
-itself. A quoted thing is a name wherever you meet it, and never has to be read as a
-value because of where it happens to sit. Nothing about position decides what
-something is.
+Two, not three, and that is the whole point. "Is this text or is it a number?" was
+never a question the marks had to answer, because **the type answers it**: `*1000*` is
+the number one thousand under `b16` and the four characters `1000` under `str`. A
+third mark would have been a second, worse answer to a question already settled
+properly elsewhere.
 
-That is also why a single reader habit — writing `"…"` — gets an error offering all
-three, since the mistake is not knowing the question was three questions.
+What the marks *do* settle is the one question position cannot: a quoted thing is a
+name wherever you meet it, and never has to be read as a value because of where it
+happens to sit.
 
-## Text is literal, and escapes stand outside it
+That is also why writing `"…"` gets an error offering both, since the mistake is not
+knowing there were two questions.
 
-Between `*` marks, everything is the character it looks like: emoji, braces,
-punctuation, digits, semicolons, `|` bars, `'` quotes. None of it is a token, none of
-it is interpreted.
+## A written value is literal, and escapes stand outside it
+
+Between the marks, everything is the character it looks like: emoji, braces,
+punctuation, digits, semicolons, quotes.
 
 The one exception is `\*`, which exists because the closing mark is the single
-character that could not otherwise be written.
+character that could not otherwise be written. The same rule applies inside a name,
+with `\'`.
 
 Escapes are **outside**:
 
 ```quench
-print[*Hello, World!* 'name' \n];
+var.str ['s'] = [*line one* \n *line two*];
 ```
 
-`\n` is an item in the list, sitting next to the text rather than hidden inside it.
-Which means `*a\nb*` is a backslash and an `n` — not a newline — and that is not a
-trap, it is the whole design: reading a piece of Quench text never involves working
-out which of its characters were secretly instructions.
+`\n` is an item, sitting next to the text rather than hidden inside it. So `*a\nb*`
+is a backslash and an `n` — not a newline — and that is not a trap, it is the design:
+reading a piece of Quench text never means working out which of its characters were
+secretly instructions.
 
 The escapes are `\n`, `\t`, `\r` and `\\`. Anything else is an error that lists them.
 
-## Joining is juxtaposition
+## Juxtaposition builds a value, commas separate them
 
-Items in a print list sit next to each other. There is no `+`, and nothing to
-concatenate, because nothing is being built — the list is the list, and it is printed
-in order.
+Items sit next to each other. There is no `+`, because nothing is being concatenated
+into a third thing — the items *are* the value, used in order.
+
+```quench
+print[*Hello, World!* 'name' \n];
+var.str ['s', 'ss'] = [*line one* \n *line two*, *idk* \n *Claude*];
+```
+
+The comma is the only thing that says where one value stops, which is exactly what
+lets a value run to as many items as it likes.
+
+This is also why C could not do it. A C string literal has to be **one value** — an
+array of `char` to assign, pass and store — and `printf("Hello\n")` hands over a
+single pointer, so there is nowhere for a separate escape to travel. Escapes had to
+go inside because inside was the only place there was. Quench can put them outside
+because `print[…]` takes a *list* and never builds a combined value at all.
 
 ## Open
 
-`*` is now spoken for, so **multiplication needs another spelling**. Luarust accepted
-both `*` and `x`; Quench can only have the second, or something else entirely. Worth
-settling before arithmetic is written rather than after.
+`*` is spoken for, so **multiplication is `x` and `×`**, never `*`. The alternative
+was making the lexer stateful — `*` meaning multiply inside a `math` block and text
+outside — which costs an unbalanced brace turning the rest of a file into nonsense
+tokens. That is the wrong thing for this language to trade for one character.
+
+**A stored `str` cannot yet contain a newline.** Under the literal rule
+`[*a\nb*]` is a backslash and an `n`, and juxtaposition is a print-time thing. Either
+a value gets built from items the way a printed line is, or text with a newline in it
+exists only at the moment of printing. Worth settling before `str` does anything real.
