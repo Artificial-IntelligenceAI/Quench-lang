@@ -47,7 +47,9 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
   text or a number is the *type's* question, not the mark's — `*1000*` is a number
   under `b16` and four characters under `str`. A written value is literal, and
   escapes stand outside it: `\n` is an item in the list, not a character hidden in
-  the text. Items juxtapose to build a value, commas separate values. See
+  the text. Items juxtapose to build a value, commas separate values. Where no
+  chain supplies a type, the value carries it — `print[str:*Hello* 'name' \n];` —
+  and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the

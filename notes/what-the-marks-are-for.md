@@ -59,9 +59,18 @@ A print list has no chain, so the value says it itself:
 print[str:** \n]
 ```
 
-A name needs no annotation anywhere, because its declaration gave it one already.
-This is the same rule as everywhere else here — the information exists, so it is
-written down rather than guessed at from what seems likely.
+A name needs no annotation anywhere, because its declaration gave it one already:
+
+```quench
+print[str:*Hello, World!* 'name' \n];
+```
+
+A **bare written value in a print list is not valid** — `print[*Hello*];` states no
+type, and there is nowhere for one to come from. This is the same rule as everywhere
+else here: the information exists, so it is written down rather than guessed at from
+what seems likely.
+
+Every statement ends in a `;`, print included.
 
 ## Juxtaposition builds a value, commas separate them
 

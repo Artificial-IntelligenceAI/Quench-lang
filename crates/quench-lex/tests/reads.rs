@@ -143,9 +143,10 @@ fn recovery_keeps_what_followed_the_bad_mark() {
     assert!(out.tokens.iter().any(|t| t.kind == Kind::Word), "{:?}", out.tokens);
 }
 
-/// The line the author wrote to see whether this would survive it.
+/// The line the author wrote to see whether this would survive it, with the types the
+/// written values now carry.
 const THE_HARD_ONE: &str =
-    r"print[*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&* 'x' *🧑‍🧑‍🧒‍🧒🥹✌️* 'y' \n];";
+    r"print[str:*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&* 'x' str:*🧑‍🧑‍🧒‍🧒🥹✌️* 'y' \n];";
 
 #[test]
 fn the_hard_one_comes_apart_exactly_as_written() {
@@ -154,7 +155,14 @@ fn the_hard_one_comes_apart_exactly_as_written() {
     assert!(out.ok(), "{:#?}", out.errors);
     assert_eq!(
         out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
-        [Word, OpenList, Written, Name, Written, Name, Escape, CloseList, Semicolon, End]
+        [
+            Word, OpenList,
+            Word, Colon, Written,   // str:*…*
+            Name,                   // 'x' — bare, its declaration gave it a type
+            Word, Colon, Written,
+            Name,
+            Escape, CloseList, Semicolon, End,
+        ]
     );
 
     // The pieces, checked one at a time, because the interesting claim is where each
@@ -165,36 +173,36 @@ fn the_hard_one_comes_apart_exactly_as_written() {
     };
     assert_eq!(piece(0), "print");
     // The `&*` at the end is an ampersand and then the closing mark, not `&` and a star.
-    assert_eq!(piece(2), r"*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&*");
-    assert_eq!(piece(3), "'x'");
-    assert_eq!(piece(4), "*🧑‍🧑‍🧒‍🧒🥹✌️*");
-    assert_eq!(piece(5), "'y'");
-    assert_eq!(piece(6), r"\n");
+    assert_eq!(piece(4), r"*Hello, World! 🤣 \* 234567uythgf{}9!@#$%^&*");
+    assert_eq!(piece(5), "'x'");
+    assert_eq!(piece(8), "*🧑‍🧑‍🧒‍🧒🥹✌️*");
+    assert_eq!(piece(9), "'y'");
+    assert_eq!(piece(10), r"\n");
 }
 
 #[test]
 fn text_holds_whatever_was_put_in_it() {
     // Braces, punctuation, digits and a semicolon are all just characters in here. If any
     // of them were tokens the line below would come apart into a dozen pieces.
-    let source = r"print[*{};[]|'#$%^&= 12345*];";
+    let source = r"print[str:*{};[]|'#$%^&= 12345*];";
     let out = lex(source);
     assert!(out.ok(), "{:#?}", out.errors);
-    assert_eq!(out.tokens[2].kind, Kind::Written);
-    assert_eq!(&source[out.tokens[2].span.start..out.tokens[2].span.end], r"*{};[]|'#$%^&= 12345*");
+    assert_eq!(out.tokens[4].kind, Kind::Written);
+    assert_eq!(&source[out.tokens[4].span.start..out.tokens[4].span.end], r"*{};[]|'#$%^&= 12345*");
 }
 
 #[test]
 fn a_star_inside_text_is_written_with_a_backslash() {
-    let out = lex(r"print[*two \* three*];");
+    let out = lex(r"print[str:*two \* three*];");
     assert!(out.ok(), "{:#?}", out.errors);
-    assert_eq!(out.tokens[2].kind, Kind::Written);
+    assert_eq!(out.tokens[4].kind, Kind::Written);
 }
 
 #[test]
 fn an_escape_between_the_marks_is_not_an_escape() {
     // The whole point of putting escapes outside: what is between the marks is literal,
     // so this is one piece of text containing a backslash and an `n`, not a newline.
-    let out = lex(r"print[*a\nb*];");
+    let out = lex(r"print[str:*a\nb*];");
     assert!(out.ok(), "{:#?}", out.errors);
     assert_eq!(out.tokens.iter().filter(|t| t.kind == Kind::Escape).count(), 0);
 }
@@ -218,7 +226,7 @@ fn an_escape_nobody_has_heard_of_lists_the_ones_that_exist() {
 
 #[test]
 fn unclosed_text_says_so_and_offers_the_backslash() {
-    let out = lex("print[*Hello\n];");
+    let out = lex("print[str:*Hello\n];");
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert_eq!(out.errors[0].code, "E0002");
     assert!(out.errors[0].tips.join(" ").contains(r"put a `\` in front"), "{:?}", out.errors[0]);
@@ -282,33 +290,33 @@ fn a_printed_value_carries_the_type_that_reads_it() {
     use Kind::*;
     // `*1000*` is a number under `b16` and four characters under `str`. A declaration
     // says which in its chain; a print list has no chain, so the value says it itself.
-    let out = lex(r"print[str:** \n]");
+    let out = lex(r"print[str:** \n];");
     assert!(out.ok(), "{:#?}", out.errors);
     assert_eq!(
         out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
-        [Word, OpenList, Word, Colon, Written, Escape, CloseList, End]
+        [Word, OpenList, Word, Colon, Written, Escape, CloseList, Semicolon, End]
     );
 }
 
 #[test]
 fn an_empty_written_value_is_a_pair_of_marks_with_nothing_in_them() {
-    let out = lex("print[str:**]");
+    let out = lex("print[str:**];");
     assert!(out.ok(), "{:#?}", out.errors);
     let t = out.tokens[4];
     assert_eq!(t.kind, Kind::Written);
-    assert_eq!(&"print[str:**]"[t.span.start..t.span.end], "**");
+    assert_eq!(&"print[str:**];"[t.span.start..t.span.end], "**");
 }
 
 #[test]
 fn the_type_is_a_word_like_any_other() {
     use Kind::*;
     for ty in ["str", "b16", "i64", "bool"] {
-        let source = format!("print[{ty}:*1000* \\n]");
+        let source = format!("print[{ty}:*1000* \\n];");
         let out = lex(&source);
         assert!(out.ok(), "{ty}: {:#?}", out.errors);
         assert_eq!(
             out.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
-            [Word, OpenList, Word, Colon, Written, Escape, CloseList, End],
+            [Word, OpenList, Word, Colon, Written, Escape, CloseList, Semicolon, End],
             "{ty}"
         );
     }
