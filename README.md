@@ -32,6 +32,15 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 - **A program starts at `start`.** Named for what it does, rather than by
   convention. Nothing marks it and nothing is special about it otherwise: the
   compiler builds every function, then looks for that name.
+- **The top level does not run.** A file is a list of declarations — functions,
+  types, constants — and they are order-free, because none of them execute.
+  Execution begins in `start` and nowhere else. See
+  [notes/the-top-level-does-not-run.md](notes/the-top-level-does-not-run.md).
+- **Constants outside, variables inside.** A constant is a value the compiler can
+  work out; anything needing code to run to produce it would need that code to run
+  before `start`, which is the model above, smuggled back in. So every variable
+  lives inside a function, where it has an owner and a lifetime the borrow checker
+  can see.
 
 - **Memory is owned.** Ownership and moves, with a borrow checker. Not refcounting,
   not a collector.
