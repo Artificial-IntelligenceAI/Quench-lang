@@ -26,11 +26,19 @@
 //!   are, become things QIR *says* — resolved by the frontend and written down — not
 //!   properties for a backend to infer. Stack maps travel back the other way, normalised
 //!   by both backends into one format so the collector reads a single thing.
-//! - **Serialisation** is not written, because the only consumer so far is in the same
-//!   process. It arrives with the C++ side, which is the point at which a format has a
-//!   second reader and can therefore be designed against a real requirement rather than
-//!   an imagined one. [`VERSION`] exists from the start so that there is never a QIR
-//!   without one.
+//! - **Serialisation** is not written yet, but it is not optional and it is not late.
+//!   Serialised QIR is Quench's distributable artefact — compile once, run anywhere —
+//!   as well as the format the C++ backend reads, so it has two readers and always did.
+//!   [`VERSION`] exists from the start so that there is never a QIR without one.
+//!
+//! # The constraint that follows from being portable
+//!
+//! Because the machine that compiles is not the machine that runs, **QIR may not know
+//! what machine it is for**. No pointer width, no word size, no host-sized integer, no
+//! calling convention, no struct layout, no register class, no target-specific type.
+//! Those belong to whichever backend eventually runs the module, and every one of them
+//! is easy to admit by accident and very hard to remove once files exist that somebody
+//! else compiled.
 
 /// The version of the IR itself.
 ///

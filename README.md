@@ -5,13 +5,20 @@ Project under development. Nothing here is stable, and stability is **not a guar
 **Quench** is a language focused on three things: **explicit syntax**, **okay
 performance**, and **very helpful error messages** (unlike fucking `C`, just joking 🤣).
 
-It runs three ways, and all three must agree:
+Quench compiles **once**, to one artefact, and that artefact runs on whatever
+machine it lands on — the machine decides how. It runs three ways, and all three
+must agree:
 
 | Method | Backend | For |
 | --- | --- | --- |
 | **Dev JIT** | Cranelift | Editing. Compiles in milliseconds, checks everything, and says the most about what went wrong. |
 | **Hot JIT** | LLVM | Running. Starts cheap and recompiles a function once it has proved it is worth the optimiser's time. |
-| **AOT native** | LLVM | Shipping. One binary that needs nothing on the machine it lands on. |
+| **AOT native** | LLVM | Shipping. Trades the *anywhere* away for one binary that needs nothing installed. |
+
+The artefact is serialised QIR, which is also what the C++ backend reads — one
+format doing both jobs. Because it travels, QIR may not know what machine it is
+for: no pointer width, no calling convention, no target-specific anything. See
+[notes/compile-once-run-anywhere.md](notes/compile-once-run-anywhere.md).
 
 Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle).
 
