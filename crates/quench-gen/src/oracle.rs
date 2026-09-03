@@ -104,7 +104,40 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                     let mine = next.fetch_add(1, Ordering::Relaxed);
                     let Some(seeds) = batches.get(mine) else { return };
 
-                    let module = batch(seeds);
+                    let written = batch(seeds);
+
+                    // Every module goes to bytes and back before anything runs it. The
+                    // artefact is the thing a program *is* once it stops being source,
+                    // so a format that lost something would be a wrong answer rather
+                    // than a broken file — and this is where a wrong answer is caught.
+                    let bytes = quench_qir::write(&written);
+                    let module = match quench_qir::read(&bytes, "a generated module") {
+                        Ok(back) => back,
+                        Err(why) => {
+                            let mut found = found.lock().expect("no worker panics holding this");
+                            found.push(Disagreement {
+                                seed: seeds[0],
+                                settings: settings_for(seeds[0]),
+                                answers: vec![(
+                                    "the artefact".to_string(),
+                                    Told::Refused(why.message.clone()),
+                                )],
+                            });
+                            continue;
+                        }
+                    };
+                    if module != written {
+                        let mut found = found.lock().expect("no worker panics holding this");
+                        found.push(Disagreement {
+                            seed: seeds[0],
+                            settings: settings_for(seeds[0]),
+                            answers: vec![(
+                                "the artefact".to_string(),
+                                Told::Refused("what came back is not what went in".to_string()),
+                            )],
+                        });
+                        continue;
+                    }
 
                     // One compilation per level, however many programs are in the batch.
                     let mut compiled = Vec::new();

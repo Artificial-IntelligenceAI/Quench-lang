@@ -1,12 +1,13 @@
 //! Run the oracle over a range of seeds and say what it found.
 //!
-//!     cargo run --release -p quench-gen --example oracle -- [programs] [per-batch]
+//!     cargo run --release -p quench-gen --example oracle -- [programs] [per-batch] [workers]
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let programs: u64 = args.first().and_then(|a| a.parse().ok()).unwrap_or(20_000);
     let per_batch: usize = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(64);
-    let workers = quench_gen::cores();
+    let workers: usize =
+        args.get(2).and_then(|a| a.parse().ok()).unwrap_or_else(quench_gen::cores);
 
     let seeds: Vec<u64> = (1..=programs).collect();
     println!("{programs} programs, {per_batch} per batch, {workers} workers, 3 ways each");

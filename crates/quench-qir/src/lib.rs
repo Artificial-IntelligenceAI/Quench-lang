@@ -718,4 +718,6 @@ pub mod builder;
 pub mod verify;
 
 pub use builder::Builder;
+pub mod artefact;
+pub use artefact::{read, write, Wrong};
 pub use verify::{diagnose, verify, Audience, Invalid};

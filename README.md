@@ -40,6 +40,7 @@ START {
 ```bash
 quench run examples/hello.qnl     # the Dev JIT
 quench walk examples/hello.qnl    # the interpreter
+quench build examples/hello.qnl   # write the artefact — `run` takes that too
 ```
 
 Both print the same thing, which is not a coincidence — it is
@@ -55,6 +56,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Lowering** (`quench-lower`) | **Working** — the tree turned into QIR: `START`, `print`, text and escapes |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
 | **The heap** (`quench-heap`) | **Working** — mark and sweep, shared by both engines, nothing moving |
+| **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked, `i64` and `str` all the way down |
 | Collector, stack maps | **Stage 1** — arrays allocate and nothing frees them yet. Written here, in Rust, not borrowed |

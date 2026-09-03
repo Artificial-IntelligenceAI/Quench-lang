@@ -12,3 +12,6 @@
 /corpus
 /findings
 *.qn.out
+
+# Artefacts. Built from the source beside them.
+*.qnlo

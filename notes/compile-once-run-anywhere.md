@@ -33,6 +33,10 @@ designed. That was wrong, and wrong in an expensive direction: **portability is 
 second reader**, and it has been there since the beginning. The requirement is real
 now, not imagined, so the format can be designed properly now.
 
+*(And then it waited anyway, for longer than it should have, while types and arrays
+and a collector went in — until it was noticed that the C++ backend cannot begin,
+because its input is a file that did not exist. It exists now.)*
+
 ## Reading a file somebody else made
 
 The moment an artefact travels, it stops being something this compiler produced and
@@ -97,3 +101,57 @@ The three engines still have to agree, and now they have to agree **across
 machines**: the same artefact, run by two different engines on two different
 processors, answers identically. Which is what the oracle was always for; the
 artefact just makes the claim bigger.
+
+---
+
+## The file
+
+```
+"QNL\0"  version                       4 + 4
+then, for each section:
+  kind  length  sum-of-body  body        4 + 8 + 8 + length
+```
+
+Four sections — the text a program was written with, the constant tables, the
+functions, and which function is the entry. Every number little-endian, whatever
+machine wrote it and whatever machine reads it, so the encoding is one thing rather
+than a property of who was holding the pen.
+
+`quench build hello.qnl` writes `hello.qnlo`, and `quench run` takes either.
+`examples/functions.qnl` is 1,672 bytes as an artefact.
+
+### The sum is for accidents, and says so
+
+FNV-1a, five lines, no dependency. A chunk's body is checked before a single field of
+it is believed — a copy that stopped early, a transfer that went wrong, a disk going
+bad. It is **not** a defence: anybody editing a chunk on purpose recomputes it in a
+line, and the code says so rather than implying otherwise.
+
+### The codes are written out, not derived
+
+Every enum in the file has its numbers listed one by one rather than taken from the
+order the variants happen to be declared in. A file outlives the source that wrote it,
+so moving a variant must not silently change what an old file means. There is a test
+that round-trips every type, every operation, every comparison and every runtime call,
+which is what says none was missed.
+
+### Reading is total
+
+No reader panics, none indexes without looking, and a counted run is checked against
+what is actually left before a single byte is reserved for it — so a file claiming four
+billion of something is refused rather than asking for the memory to hold them. An
+enum code nobody has heard of is an error, not a guess.
+
+And `verify` runs on load with the audience switched, so a module that arrived gets
+`E0801` and the two fixes that are actually available — build it again, or check it was
+copied whole — rather than `E9001`, which asks somebody to report a bug in Quench.
+
+### The oracle reads it too
+
+Every module the generator makes is written to bytes and read back before anything
+runs it, and the programs are run from what came back. Two thousand round trips per
+sweep, 200,000 programs, and a format that lost something would show up as a wrong
+answer rather than as a broken file. It costs nothing measurable.
+
+That is the second reader the note wanted, arriving before the C++ one — and it is why
+the format can be trusted before a line of C++ exists to test it against.
