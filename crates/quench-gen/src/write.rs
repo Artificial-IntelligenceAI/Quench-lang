@@ -192,7 +192,7 @@ pub fn program_under(
 
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(18) {
+        match rng.upto(20) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -273,6 +273,61 @@ pub fn program_under(
                     b.bin(op, lhs, rhs)
                 };
                 numbers.push(value);
+            }
+            14 => {
+                // Printing, which is the only thing a program says that an answer
+                // cannot carry -- and the one path the oracle could not see until it
+                // started capturing. Every number type has its own way of being written
+                // down, and each of those is code that could differ between engines
+                // while every arithmetic answer agreed.
+                let stream = b.const_i64(0); // standard output
+                match rng.upto(7) {
+                    0 => {
+                        let n = rng.pick(&numbers);
+                        b.call_host(Host::PrintI64, &[stream, n]);
+                    }
+                    // The same bits read as unsigned, which is a different set of
+                    // characters for every number with its top bit set.
+                    1 => {
+                        let n = rng.pick(&numbers);
+                        b.call_host(Host::PrintU64, &[stream, n]);
+                    }
+                    // The shortest text that reads back as the same bits, which is the
+                    // hardest thing on this list to get identical twice.
+                    2 => {
+                        let x = rng.pick(&floats);
+                        let width = b.const_i64(match float_ty {
+                            Ty::F64 => 64,
+                            Ty::F32 => 32,
+                            _ => 16,
+                        });
+                        b.call_host(Host::PrintFloat, &[stream, x, width]);
+                    }
+                    3 => {
+                        let d = rng.pick(&decimals);
+                        b.call_host(Host::PrintDecimal, &[stream, d]);
+                    }
+                    4 => {
+                        let e = rng.pick(&exacts);
+                        b.call_host(Host::PrintExact, &[stream, e]);
+                    }
+                    5 => {
+                        let t = rng.pick(&texts);
+                        b.call_host(Host::PrintText, &[stream, t]);
+                    }
+                    _ => {
+                        let handle = rng.pick(&handles);
+                        let kind = b.const_i64(0); // `Elements::I64`
+                        let deep = b.const_i64(0);
+                        b.call_host(Host::PrintArray, &[stream, handle, kind, deep]);
+                    }
+                }
+                // A flag, sometimes, so that what a program prints and what it answers
+                // are not two unrelated halves of it.
+                if rng.upto(4) == 0 {
+                    let (l, r) = (rng.pick(&numbers), rng.pick(&numbers));
+                    flags.push(b.cmp(CmpOp::Lt, l, r));
+                }
             }
             13 => {
                 // `e` and text, the last two things that allocate and the last two the

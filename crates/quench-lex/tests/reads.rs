@@ -477,3 +477,49 @@ fn equality_and_declaration_are_not_the_same_symbol() {
     // `eq-to` is a word and needs no token, hyphen and all.
     assert_eq!(kinds("eq-to"), [Word, End]);
 }
+
+#[test]
+fn a_comment_can_say_how_many_lines_it_covers() {
+    // `#3` covers three lines counting its own, so the two under it are gone and the
+    // fourth is not.
+    assert_eq!(
+        kinds("#3 dull\nvar\nvar\nvar"),
+        [Kind::Word, Kind::End],
+        "one `var` left, the fourth line"
+    );
+    assert_eq!(kinds("#1 only itself\nvar"), [Kind::Word, Kind::End]);
+    assert_eq!(kinds("# no count\nvar"), [Kind::Word, Kind::End]);
+
+    // Digits stuck to a word are text, not a count. Eating two lines because somebody
+    // wrote an ordinal is not a trade worth making.
+    assert_eq!(
+        kinds("#3rd attempt\nvar\nvar"),
+        [Kind::Word, Kind::Word, Kind::End],
+        "both `var`s survive"
+    );
+    // And a space between makes it text too, since the count is written against the `#`.
+    assert_eq!(kinds("# 3\nvar\nvar"), [Kind::Word, Kind::Word, Kind::End]);
+}
+
+#[test]
+fn a_count_of_nought_and_a_count_past_the_end_are_refused() {
+    let none = quench_lex::lex("#0 nothing\nvar");
+    assert_eq!(none.errors.len(), 1, "{:#?}", none.errors);
+    assert_eq!(none.errors[0].code, "E0007");
+    assert!(none.errors[0].message.contains("comments nothing"));
+
+    // Two lines here, and it asked for five. The trailing newline ends the last line
+    // rather than starting another, so this is two and not three.
+    let past = quench_lex::lex("#5 too many\nvar\n");
+    assert_eq!(past.errors.len(), 1, "{:#?}", past.errors);
+    assert_eq!(past.errors[0].code, "E0007");
+    assert!(
+        past.errors[0].message.contains("5 lines and there are 2"),
+        "{}",
+        past.errors[0].message
+    );
+
+    // Exactly enough is not an error, with or without that trailing newline.
+    assert!(quench_lex::lex("#3 exact\nvar\nvar\n").errors.is_empty());
+    assert!(quench_lex::lex("#2 exact\nvar").errors.is_empty());
+}

@@ -102,9 +102,16 @@ fn the_oracle_notices_when_two_engines_differ() {
     assert_eq!(compiled, Some(1), "and they agree here, which is the control");
 
     // Now the same comparison the oracle makes, against a deliberately wrong answer.
-    let told_walked = Told::Answered(1);
-    let told_compiled = Told::Answered(2);
+    let said = String::new();
+    let told_walked = Told::Answered { value: 1, said: said.clone() };
+    let told_compiled = Told::Answered { value: 2, said: said.clone() };
     assert_ne!(told_walked, told_compiled, "a disagreement is a disagreement");
+
+    // And against the same answer printed differently, which is the other half of
+    // what an engine says and was not compared at all until it was captured.
+    let quiet = Told::Answered { value: 1, said };
+    let loud = Told::Answered { value: 1, said: "1".to_string() };
+    assert_ne!(quiet, loud, "what a program printed is part of what it said");
 }
 
 #[test]

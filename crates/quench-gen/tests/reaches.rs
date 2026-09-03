@@ -96,3 +96,20 @@ fn no_shape_is_so_rare_that_generating_it_is_luck() {
         assert!(n > 100, "`{shape}` was written {n} times in two thousand programs");
     }
 }
+
+#[test]
+fn what_a_program_prints_is_compared_too() {
+    // An answer is one `i64`. What a program *prints* is everything else it says, and
+    // every number type has its own way of being written down -- the shortest text
+    // that reads back as the same float, a `u64` read as unsigned, a decimal's cohort,
+    // an `e` with or without a denominator. None of that was compared until now, so
+    // seven host calls' worth of formatting sat outside the oracle entirely.
+    let seen = written(1..=2000);
+    for shape in [
+        "print-i64", "print-u64", "print-float", "print-decimal", "print-exact",
+        "print-text", "print-array",
+    ] {
+        let n = seen.get(shape).copied().unwrap_or(0);
+        assert!(n > 100, "`{shape}` was written {n} times in two thousand programs");
+    }
+}

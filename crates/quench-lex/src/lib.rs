@@ -165,8 +165,69 @@ impl<'a> Lexer<'a> {
         self.tokens.push(Token { kind, span: Span::new(start, self.at) });
     }
 
-    /// `#` to the end of the line. Comments are not tokens; nothing downstream wants them.
+    /// `#` to the end of the line, or `#3` to the end of the third line counting this
+    /// one. Comments are not tokens; nothing downstream wants them.
+    ///
+    /// A count is digits written straight after the `#` with nothing else stuck to
+    /// them: `#3 why the next two lines are dull` counts three, and `#3rd attempt` is
+    /// an ordinary comment about a third attempt. Quietly eating two lines because
+    /// somebody wrote an ordinal is not a trade worth making.
     fn comment(&mut self) {
+        let start = self.at;
+        self.at += 1; // the `#`
+
+        let digits_at = self.at;
+        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            self.at += 1;
+        }
+        let digits = &self.source[digits_at..self.at];
+        // Stuck to a word rather than standing alone, so it is text and not a count.
+        let counted = !digits.is_empty() && self.peek().is_none_or(char::is_whitespace);
+        let asked: usize = if counted { digits.parse().unwrap_or(usize::MAX) } else { 1 };
+        let marker = Span::new(start, if counted { self.at } else { start + 1 });
+
+        self.to_end_of_line();
+        if !counted {
+            return;
+        }
+
+        if asked == 0 {
+            self.errors.push(
+                Diagnostic::new("E0007", "`#0` comments nothing.")
+                    .primary(marker, "here")
+                    .rule("a comment's count is how many lines it covers, counting the one it is written on")
+                    .tip("`#` and `#1` are the same thing: this line and no other.")
+                    .fix("`#` for this line, or a count of one or more"),
+            );
+            return;
+        }
+
+        // The rest of them, each swallowed whole. The last one stops before its own
+        // newline, the way a plain comment does, so nothing else has to know a comment
+        // was ever here.
+        let mut had = 1usize;
+        while had < asked && self.peek() == Some('\n') {
+            self.at += 1;
+            // A newline at the end of the file ends the last line rather than starting
+            // another one, so there is nothing here to have covered.
+            if self.peek().is_none() {
+                break;
+            }
+            self.to_end_of_line();
+            had += 1;
+        }
+        if had < asked {
+            self.errors.push(
+                Diagnostic::new("E0007", format!("this asks to comment {asked} lines and there are {had}."))
+                    .primary(marker, format!("asks for {asked}"))
+                    .rule("a comment's count is how many lines it covers, counting the one it is written on")
+                    .tip("the file ends before the count does, so some of what it meant to cover is not there.")
+                    .fix(format!("`#{had}`, or write the lines it was covering")),
+            );
+        }
+    }
+
+    fn to_end_of_line(&mut self) {
         while let Some(c) = self.peek() {
             if c == '\n' {
                 break;
@@ -322,7 +383,7 @@ impl<'a> Lexer<'a> {
         // The ones that are almost always a habit from another language rather than a typo.
         diag = match c {
             '/' => diag
-                .tip("comments start with `#`, and run to the end of the line.")
+                .tip("comments start with `#`, and run to the end of the line -- or of the third line, written `#3`.")
                 .fix("`# like this`"),
             _ => diag.fix("remove it"),
         };

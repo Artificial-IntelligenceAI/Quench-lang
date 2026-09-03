@@ -137,6 +137,26 @@ impl Compiled {
         )
     }
 
+    /// The same, keeping whatever it printed rather than letting it out.
+    ///
+    /// What a program *prints* is the only thing it says that nothing else can see:
+    /// two engines agreeing on an answer and differing on the text beside it is a
+    /// disagreement, and until this there was no way to look.
+    pub fn call_capturing(&self, name: &str) -> Option<(qir::Outcome, Printed)> {
+        SINK.with(|sink| *sink.borrow_mut() = Some((Vec::new(), Vec::new())));
+        let outcome = self.call_outcome(name);
+        let (out, err) = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
+        outcome.map(|outcome| {
+            (
+                outcome,
+                Printed {
+                    out: String::from_utf8_lossy(&out).into_owned(),
+                    err: String::from_utf8_lossy(&err).into_owned(),
+                },
+            )
+        })
+    }
+
     /// What the heap kept, which is the one thing the oracle cannot see.
     pub fn kept(&self) -> (usize, usize, usize, usize) {
         HEAP.with(|heap| {

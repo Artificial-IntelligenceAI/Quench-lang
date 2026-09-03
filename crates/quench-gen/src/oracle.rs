@@ -41,8 +41,14 @@ pub struct Disagreement {
 /// What an engine said.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Told {
-    Answered(i64),
-    Stopped(String),
+    /// What it gave back, and what it printed on the way there. Both are compared: two
+    /// engines agreeing on the number and differing on the text beside it have
+    /// disagreed, and every number type has its own way of being written down.
+    Answered { value: i64, said: String },
+    /// The same for one that stopped -- what it managed to print before it did is part
+    /// of what it said, and stopping in the same place is not the same as stopping
+    /// after having written the same things.
+    Stopped { why: String, said: String },
     /// The engine could not run it at all, which is a bug in the generator or the IR.
     Refused(String),
 }
@@ -164,20 +170,34 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                         let name = name_of(seed);
                         let mut answers: Vec<(String, Told)> = Vec::new();
 
+                        let (mut out, mut err) = (Vec::new(), Vec::new());
+                        let walked = quench_interp::run_named_writing(
+                            &module,
+                            &name,
+                            &mut quench_interp::Writing { out: &mut out, err: &mut err },
+                        );
+                        let said = String::from_utf8_lossy(&out).into_owned();
                         answers.push((
                             "interpreter".to_string(),
-                            match quench_interp::run_named(&module, &name) {
-                                Ok(Outcome::Returned(v)) => Told::Answered(v),
-                                Ok(Outcome::Trapped(t)) => Told::Stopped(t.describe().to_string()),
+                            match walked {
+                                Ok(Outcome::Returned(value)) => Told::Answered { value, said },
+                                Ok(Outcome::Trapped(t)) => {
+                                    Told::Stopped { why: t.describe().to_string(), said }
+                                }
                                 Err(why) => Told::Refused(why.to_string()),
                             },
                         ));
                         for (way, built) in &compiled {
                             answers.push((
                                 (*way).to_string(),
-                                match built.call_outcome(&name) {
-                                    Some(Outcome::Returned(v)) => Told::Answered(v),
-                                    Some(Outcome::Trapped(t)) => Told::Stopped(t.describe().to_string()),
+                                match built.call_capturing(&name) {
+                                    Some((Outcome::Returned(value), printed)) => {
+                                        Told::Answered { value, said: printed.out }
+                                    }
+                                    Some((Outcome::Trapped(t), printed)) => Told::Stopped {
+                                        why: t.describe().to_string(),
+                                        said: printed.out,
+                                    },
                                     None => Told::Refused("no such function once compiled".into()),
                                 },
                             ));
