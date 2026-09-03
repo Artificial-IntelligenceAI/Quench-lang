@@ -6,7 +6,7 @@
 //! Anything in this file that started to look like a judgement would belong further up.
 
 use quench_check::{Arm, Checked, Flow, Func, Local, OpKind, Place, Printed, Stmt, Ty, Value};
-use quench_conf::{Division, Logic, Overflow, Settings};
+use quench_conf::{Division, Logic, NoNumber, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
 
@@ -158,6 +158,7 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
         Ty::Bool => qir::Ty::Bool,
         Ty::Str => qir::Ty::Text,
         Ty::Exact => qir::Ty::Exact,
+        Ty::Float => qir::Ty::Float,
         Ty::Arr { .. } => qir::Ty::Handle,
     }
 }
@@ -276,6 +277,7 @@ fn lower_body(
                                 Ty::I64 => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
                                 Ty::Exact => qir::Host::PrintExact,
+                                Ty::Float => qir::Host::PrintFloat,
                                 // An array is the one thing whose printing takes a
                                 // third argument, because a slot is an `i64` whatever
                                 // is in it and the runtime has to be told which.
@@ -561,6 +563,7 @@ fn elements(of: &Ty) -> (qir::Elements, i64) {
         Ty::Bool => (qir::Elements::Bool, 0),
         Ty::Str => (qir::Elements::Text, 0),
         Ty::Exact => (qir::Elements::Exact, 0),
+        Ty::Float => (qir::Elements::Float, 0),
         Ty::Arr { of, .. } => {
             let (kind, depth) = elements(of);
             (kind, depth + 1)
@@ -621,6 +624,7 @@ fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qi
         // Never looked at, and so never read. Making one would mean calling into the
         // runtime for a number the checker has already promised nobody wants.
         qir::Ty::Exact => b.const_i64(0),
+        qir::Ty::Float => b.const_float(0.0),
     }
 }
 
@@ -667,6 +671,7 @@ fn emit(
             b.const_text(at)
         }
         Value::Number(n) => b.const_i64(*n),
+        Value::Float(bits) => b.const_float(f64::from_bits(*bits)),
         // Read by the runtime, from the text it was written with -- because what it
         // reads to does not fit in anything the IR can carry.
         Value::Exact(written) => {
@@ -799,6 +804,29 @@ fn emit(
                     OpKind::Eq => same,
                     OpKind::Ne => b.not(same),
                     _ => unreachable!("refused by the checker: arrays have no order"),
+                };
+            }
+            // IEEE, and nothing else. What a compiler could do to make two engines
+            // differ — fuse a multiply into an add, keep extra precision, flush a
+            // denormal to nought — it only does when asked, and nothing here asks.
+            if b.ty_of(l) == qir::Ty::Float {
+                let stops = w.settings.no_number == NoNumber::Stops;
+                return match op {
+                    OpKind::Add if stops => b.bin(qir::BinOp::FAddChecked, l, r),
+                    OpKind::Sub if stops => b.bin(qir::BinOp::FSubChecked, l, r),
+                    OpKind::Mul if stops => b.bin(qir::BinOp::FMulChecked, l, r),
+                    OpKind::Div if stops => b.bin(qir::BinOp::FDivChecked, l, r),
+                    OpKind::Add => b.bin(qir::BinOp::FAdd, l, r),
+                    OpKind::Sub => b.bin(qir::BinOp::FSub, l, r),
+                    OpKind::Mul => b.bin(qir::BinOp::FMul, l, r),
+                    OpKind::Div => b.bin(qir::BinOp::FDiv, l, r),
+                    OpKind::Lt => b.fcmp(qir::CmpOp::Lt, l, r),
+                    OpKind::Gt => b.fcmp(qir::CmpOp::Gt, l, r),
+                    OpKind::Le => b.fcmp(qir::CmpOp::Le, l, r),
+                    OpKind::Ge => b.fcmp(qir::CmpOp::Ge, l, r),
+                    OpKind::Eq => b.fcmp(qir::CmpOp::Eq, l, r),
+                    OpKind::Ne => b.fcmp(qir::CmpOp::Ne, l, r),
+                    _ => unreachable!("refused by the checker: not built for a `b64`"),
                 };
             }
             // Text is compared by what it holds rather than by which piece it is, which

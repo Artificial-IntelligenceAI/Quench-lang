@@ -149,7 +149,7 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
         for (i, block) in func.blocks.iter().enumerate() {
             for (result, inst) in &block.insts {
                 match inst {
-                    Inst::ConstI64(_) | Inst::ConstBool(_) => {}
+                    Inst::ConstI64(_) | Inst::ConstBool(_) | Inst::ConstFloat(_) => {}
                     Inst::ConstText(at) => {
                         if *at as usize >= module.text.len() {
                             say(format!(
@@ -195,6 +195,14 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                     Inst::Bin { op, lhs, rhs } => {
                         let wants = match op {
                             BinOp::And | BinOp::Or => Ty::Bool,
+                            BinOp::FAdd
+                            | BinOp::FSub
+                            | BinOp::FMul
+                            | BinOp::FDiv
+                            | BinOp::FAddChecked
+                            | BinOp::FSubChecked
+                            | BinOp::FMulChecked
+                            | BinOp::FDivChecked => Ty::Float,
                             _ => Ty::I64,
                         };
                         for v in [lhs, rhs] {
@@ -207,16 +215,26 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                             }
                         }
                     }
+                    Inst::FCmp { op, lhs, rhs } => {
+                        for v in [lhs, rhs] {
+                            if known(*v, &mut say) && func.ty_of(*v) != Ty::Float {
+                                say(format!(
+                                    "block {i}: {op:?} on floats wants b64 and {v:?} is {}",
+                                    func.ty_of(*v).name()
+                                ));
+                            }
+                        }
+                    }
                     Inst::Cmp { op, lhs, rhs } => {
                         // Two of the same thing, and a thing that fits in a register.
                         // Text and exact numbers are compared by a host call instead,
                         // because what they hold is not what their value is.
                         for v in [lhs, rhs] {
                             if known(*v, &mut say)
-                                && !matches!(func.ty_of(*v), Ty::I64 | Ty::Bool)
+                                && !matches!(func.ty_of(*v), Ty::I64 | Ty::Bool | Ty::Float)
                             {
                                 say(format!(
-                                    "block {i}: {op:?} wants i64 or bool and {v:?} is {}",
+                                    "block {i}: {op:?} wants i64, bool or b64 and {v:?} is {}",
                                     func.ty_of(*v).name()
                                 ));
                             }

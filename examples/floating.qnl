@@ -1,0 +1,28 @@
+# `b64` is IEEE 754 binary64. It rounds, and every engine rounds identically --
+# which is the whole of what a standard buys.
+
+START {
+    var.immut.b64 ['a'] = [*1.5*];
+    var.immut.b64 ['b'] = [*0.25*];
+    var.immut.b64 ['sum'] = ['a' + 'b'];
+    print.stdout['a' str:* + * 'b' str:* = * 'sum' \n];
+
+    # The famous one. `e` gets it right by never rounding; `b64` gets it wrong in
+    # the way every conforming machine gets it wrong.
+    var.immut.b64 ['near'] = [*0.1* + *0.2*];
+    var.immut.bool ['ok']  = [b64:*0.1* + b64:*0.2* == b64:*0.3*];
+    print.stdout[str:*0.1 + 0.2 = * 'near' str:*, and that is 0.3: * 'ok' \n];
+
+    var.immut.e ['exact'] = [e:*0.1* + e:*0.2*];
+    var.immut.bool ['exactly'] = [e:*0.1* + e:*0.2* == e:*0.3*];
+    print.stdout[str:*as `e`:     * 'exact' str:*, and that is 0.3: * 'exactly' \n];
+
+    # `infinity` and `not-a-number` are values of the type, under the default
+    # `[defaults] no-number = "carries-on"`.
+    var.immut.b64 ['zero'] = [*0*];
+    var.immut.b64 ['big'] = ['a' / 'zero'];
+    print.stdout['a' str:* / 0 = * 'big' \n];
+    var.immut.b64 ['none'] = ['zero' / 'zero'];
+    var.immut.bool ['itself'] = ['none' == 'none'];
+    print.stdout['none' str:*, equal to itself: * 'itself' \n];
+}

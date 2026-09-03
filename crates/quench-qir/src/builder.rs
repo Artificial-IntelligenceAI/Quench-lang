@@ -122,6 +122,14 @@ impl Builder {
         self.push(Inst::ConstHandle(at), Ty::Handle)
     }
 
+    pub fn const_float(&mut self, x: f64) -> Value {
+        self.push(Inst::ConstFloat(x.to_bits()), Ty::Float)
+    }
+
+    pub fn fcmp(&mut self, op: CmpOp, lhs: Value, rhs: Value) -> Value {
+        self.push(Inst::FCmp { op, lhs, rhs }, Ty::Bool)
+    }
+
     /// Write something, somewhere.
     pub fn print(&mut self, host: Host, to: Stream, what: Value) -> Value {
         let stream = self.const_i64(to as i64);
@@ -144,6 +152,14 @@ impl Builder {
         // in QIR where one instruction wears two types.
         let ty = match op {
             BinOp::And | BinOp::Or => Ty::Bool,
+            BinOp::FAdd
+            | BinOp::FSub
+            | BinOp::FMul
+            | BinOp::FDiv
+            | BinOp::FAddChecked
+            | BinOp::FSubChecked
+            | BinOp::FMulChecked
+            | BinOp::FDivChecked => Ty::Float,
             _ => Ty::I64,
         };
         self.push(Inst::Bin { op, lhs, rhs }, ty)

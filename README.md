@@ -170,6 +170,14 @@ Both print the same thing, which is not a coincidence — it is
   may not be known until the program runs. Nothing converts on its own, so a number
   among them is an error: `print` shows any type because showing is not joining, and
   writes one piece after another rather than making one.
+- **`b64` is IEEE 754 and nothing else.** `+ − x /` and the comparisons, which the
+  standard fully specifies — so every engine gives the same bits. What would break that
+  is what a compiler does only when asked: fusing a multiply into an add, keeping extra
+  precision, flushing denormals. **Fast-math is not a setting and will not become one.**
+  `^` and `mod` are refused, because no standard requires a `pow` to round the same way
+  twice. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
+  or stops. See
+  [notes/what-a-float-is-allowed-to-do.md](notes/what-a-float-is-allowed-to-do.md).
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

@@ -93,3 +93,23 @@ impl Exact {
         Ok(answer)
     }
 }
+
+/// How a `b64` is shown, written once so that no engine can have its own idea of it.
+///
+/// The shortest text that reads back as the same 64 bits, and always with a point in
+/// it — `1.0` rather than `1`, so that what is shown says which type it came from.
+/// Every library that prints a float differs in the last digit or the exponent, which
+/// is exactly the kind of difference three engines must not be allowed to have.
+pub fn show_f64(x: f64) -> String {
+    if x.is_nan() {
+        return "not-a-number".to_string();
+    }
+    if x.is_infinite() {
+        return if x < 0.0 { "-infinity" } else { "infinity" }.to_string();
+    }
+    let shown = format!("{x}");
+    if shown.contains(['.', 'e']) {
+        return shown;
+    }
+    format!("{shown}.0")
+}

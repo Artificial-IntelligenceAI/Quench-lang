@@ -84,6 +84,7 @@ fn shown(
                 // unreadable without them.
                 qir::Elements::Text => format!("*{}*", texts[*value as usize]),
                 qir::Elements::Exact => exacts[*value as usize].to_string(),
+                qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
         .collect();
@@ -113,6 +114,11 @@ fn alike(
             // so these are compared by value rather than by which they are -- and so is
             // text, for the same reason.
             qir::Elements::Exact => exacts[*x as usize] == exacts[*y as usize],
+            // By what they are, not by their bits: two ways of writing nought are one
+            // number, and a not-a-number is not even itself.
+            qir::Elements::Float => {
+                f64::from_bits(*x as u64) == f64::from_bits(*y as u64)
+            }
             qir::Elements::Text => texts[*x as usize] == texts[*y as usize],
             _ => x == y,
         }
@@ -329,6 +335,8 @@ fn evaluate(
         // A text value is the index of the text, not a pointer to it.
         qir::Inst::ConstText(at) => i64::from(*at),
         qir::Inst::ConstHandle(at) => i64::from(*at),
+        // Carried as bits, which is what a slot holds anyway.
+        qir::Inst::ConstFloat(bits) => *bits as i64,
         qir::Inst::CallHost { host, args } => {
             match host {
                 qir::Host::ArrayNew => {
@@ -465,6 +473,11 @@ fn evaluate(
                         std::cmp::Ordering::Greater => 1,
                     });
                 }
+                qir::Host::PrintFloat => {
+                    let value = f64::from_bits(slots[args[1].0 as usize] as u64);
+                    let shown = quench_num::show_f64(value);
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
+                }
                 qir::Host::PrintExact => {
                     let value = &exacts[slots[args[1].0 as usize] as usize];
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
@@ -498,6 +511,27 @@ fn evaluate(
                 // program sees is a setting applied further up.
                 // Both sides were worked out before this ran, which is the whole of
                 // what `asks-both` means.
+                // IEEE, plainly: nothing fused, nothing relaxed, and the bits back.
+                qir::BinOp::FAdd
+                | qir::BinOp::FSub
+                | qir::BinOp::FMul
+                | qir::BinOp::FDiv
+                | qir::BinOp::FAddChecked
+                | qir::BinOp::FSubChecked
+                | qir::BinOp::FMulChecked
+                | qir::BinOp::FDivChecked => {
+                    let (a, b) = (f64::from_bits(l as u64), f64::from_bits(r as u64));
+                    let answer = match op {
+                        qir::BinOp::FAdd | qir::BinOp::FAddChecked => a + b,
+                        qir::BinOp::FSub | qir::BinOp::FSubChecked => a - b,
+                        qir::BinOp::FMul | qir::BinOp::FMulChecked => a * b,
+                        _ => a / b,
+                    };
+                    if op.checks_the_answer() && !answer.is_finite() {
+                        return Err(Trap::NoNumber);
+                    }
+                    answer.to_bits() as i64
+                }
                 qir::BinOp::And => i64::from(l != 0 && r != 0),
                 qir::BinOp::Or => i64::from(l != 0 || r != 0),
                 qir::BinOp::Add => l.wrapping_add(r),
@@ -528,6 +562,22 @@ fn evaluate(
         }
         qir::Inst::Cmp { op, lhs, rhs } => {
             let (l, r) = (slots[lhs.0 as usize], slots[rhs.0 as usize]);
+            i64::from(match op {
+                qir::CmpOp::Eq => l == r,
+                qir::CmpOp::Ne => l != r,
+                qir::CmpOp::Lt => l < r,
+                qir::CmpOp::Le => l <= r,
+                qir::CmpOp::Gt => l > r,
+                qir::CmpOp::Ge => l >= r,
+            })
+        }
+        // Rust's own `f64` comparisons are IEEE's, including a not-a-number being
+        // false against everything and itself.
+        qir::Inst::FCmp { op, lhs, rhs } => {
+            let (l, r) = (
+                f64::from_bits(slots[lhs.0 as usize] as u64),
+                f64::from_bits(slots[rhs.0 as usize] as u64),
+            );
             i64::from(match op {
                 qir::CmpOp::Eq => l == r,
                 qir::CmpOp::Ne => l != r,

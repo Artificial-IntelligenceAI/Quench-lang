@@ -62,6 +62,8 @@ pub enum Trap {
     Overflowed = 5,
     /// A whole number raised to a negative power, whose answer is a fraction.
     NegativePower = 6,
+    /// A float operation with no number to answer with, under `no-number = "stops"`.
+    NoNumber = 8,
     /// An exact number raised to a fraction, whose answer is generally not a ratio —
     /// the square root of two is the oldest number known not to be one.
     FractionalPower = 7,
@@ -77,6 +79,7 @@ impl Trap {
             Trap::TooDeep => "calls nested too deep",
             Trap::Overflowed => "a number too large to hold",
             Trap::NegativePower => "a whole number raised to a negative power",
+            Trap::NoNumber => "an answer that is not a number",
             Trap::FractionalPower => "an exact number raised to a fraction",
         }
     }
@@ -90,6 +93,7 @@ impl Trap {
             4 => Trap::TooDeep,
             5 => Trap::Overflowed,
             6 => Trap::NegativePower,
+            8 => Trap::NoNumber,
             7 => Trap::FractionalPower,
             _ => return None,
         })
@@ -134,6 +138,14 @@ pub enum Ty {
     /// A handle, not a pointer — the same reason [`Ty::Text`] is an index. What a handle
     /// *is* belongs to whichever runtime is holding the heap.
     Handle,
+    /// IEEE 754 binary64. A `b64`.
+    ///
+    /// The only type here whose arithmetic is a *standard* rather than a decision:
+    /// `+ - x /` and the comparisons are fully specified under round-to-nearest-even,
+    /// so every conforming machine gives the same bits. What is not specified — fusing
+    /// a multiply into an add, keeping extra precision, flushing denormals — is what a
+    /// compiler does only when asked, and nothing here asks.
+    Float,
     /// A number held exactly, however large it grows. An `e`.
     ///
     /// A handle like [`Ty::Handle`] is, and for the same reason: what an exact number
@@ -159,6 +171,7 @@ impl Ty {
             Ty::Text => "text",
             Ty::Handle => "handle",
             Ty::Exact => "exact",
+            Ty::Float => "b64",
         }
     }
 }
@@ -200,6 +213,16 @@ pub enum BinOp {
     DivFloored,
     /// The remainder that goes with [`BinOp::DivFloored`]: `-7 % 2` is `1`.
     RemFloored,
+    /// On `Float`. Plain IEEE, with nothing fused and nothing relaxed.
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    /// The same, stopping rather than answering `infinity` or `not-a-number`.
+    FAddChecked,
+    FSubChecked,
+    FMulChecked,
+    FDivChecked,
     /// Both, and either. On `Bool`, and always asking both sides — the form
     /// `[defaults] logic = "asks-both"` lowers to. Stopping early is control flow and
     /// is built out of blocks instead, because that is what stopping early *is*.
@@ -209,6 +232,14 @@ pub enum BinOp {
 
 impl BinOp {
     /// Whether this stops on a zero divisor, and on `i64::MIN / -1`.
+    /// Whether this stops rather than answering `infinity` or `not-a-number`.
+    pub fn checks_the_answer(self) -> bool {
+        matches!(
+            self,
+            BinOp::FAddChecked | BinOp::FSubChecked | BinOp::FMulChecked | BinOp::FDivChecked
+        )
+    }
+
     pub fn can_trap(self) -> bool {
         !matches!(self, BinOp::Add | BinOp::Sub | BinOp::Mul)
     }
@@ -333,6 +364,9 @@ pub enum Host {
     TextCompare,
     /// `(stream, exact)` — a whole number wears no denominator.
     PrintExact,
+    /// `(stream, b64)` — the shortest text that reads back as the same bits, always
+    /// with a point in it.
+    PrintFloat,
     /// `(base, exponent)` — exactly. A negative exponent is fine and gives a ratio.
     /// Can stop, on a fractional exponent or one too large to finish.
     ExactPow,
@@ -367,6 +401,7 @@ impl Host {
             Host::TextJoin => "text-join",
             Host::TextCompare => "text-compare",
             Host::PrintExact => "print-exact",
+            Host::PrintFloat => "print-float",
             Host::ExactPow => "exact-pow",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
@@ -397,6 +432,7 @@ impl Host {
             Host::TextJoin => &[Ty::Text, Ty::Text],
             Host::TextCompare => &[Ty::Text, Ty::Text],
             Host::PrintExact => &[Ty::I64, Ty::Exact],
+            Host::PrintFloat => &[Ty::I64, Ty::Float],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
@@ -461,6 +497,7 @@ pub enum Elements {
     Bool = 1,
     Text = 2,
     Exact = 3,
+    Float = 4,
 }
 
 impl Elements {
@@ -470,6 +507,7 @@ impl Elements {
             1 => Elements::Bool,
             2 => Elements::Text,
             3 => Elements::Exact,
+            4 => Elements::Float,
             _ => return None,
         })
     }
@@ -506,12 +544,20 @@ pub enum Inst {
     /// A handle to one of [`Module::tables`], which is its index — the layout is fixed
     /// before anything runs, so there is nothing to look up.
     ConstHandle(u32),
+    /// A `b64`, carried as its bits so that the IR compares and hashes like everything
+    /// else in it — a float does not, and QIR is a thing that gets compared.
+    ConstFloat(u64),
     /// A piece of text, by index into [`Module::text`].
     ConstText(u32),
     Bin { op: BinOp, lhs: Value, rhs: Value },
     Cmp { op: CmpOp, lhs: Value, rhs: Value },
     /// Boolean negation.
     Not(Value),
+    /// Comparing two `Float`s, which is its own instruction rather than [`Inst::Cmp`]
+    /// with different operands: the bits of a float do not order the way the float does
+    /// — a negative one has its sign bit set, and a not-a-number compares false against
+    /// everything including itself.
+    FCmp { op: CmpOp, lhs: Value, rhs: Value },
     Call { func: FuncId, args: Vec<Value> },
     /// Ask the runtime for something.
     ///

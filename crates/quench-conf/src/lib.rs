@@ -118,6 +118,27 @@ pub enum Logic {
     AsksBoth,
 }
 
+/// What a float does when there is no number to give back.
+///
+/// **Semantic**, and the same shape as `overflow`: `*1.0* / *0.0*` is `infinity` under
+/// one and a stop under the other, so the same program answers differently and every
+/// engine must agree under each.
+///
+/// The default is [`NoNumber::CarriesOn`] because `b64` *is* IEEE 754 binary64, and
+/// `infinity` and `not-a-number` are values of that type rather than accidents of it.
+/// Asking to stop is asking for something narrower than the type, which is a thing to
+/// opt into rather than out of.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum NoNumber {
+    /// `infinity`, `-infinity` or `not-a-number`, and the program carries on. What the
+    /// processor does, so it costs nothing.
+    #[default]
+    CarriesOn,
+    /// Stop, in the same place and for the same reason in every engine. Costs a check
+    /// after every operation that could produce one.
+    Stops,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -136,6 +157,8 @@ pub struct Settings {
     pub division: Division,
     /// `[defaults] logic`
     pub logic: Logic,
+    /// `[defaults] no-number`
+    pub no_number: NoNumber,
     /// `[run] engine`
     pub engine: Engine,
     /// `[build] optimise`
@@ -210,6 +233,12 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 _ => errors
                     .push(bad_value(span_of(value), key, value, &["stops-early", "asks-both"])),
             },
+            ("defaults", "no-number") => match value {
+                "carries-on" => settings.no_number = NoNumber::CarriesOn,
+                "stops" => settings.no_number = NoNumber::Stops,
+                _ => errors
+                    .push(bad_value(span_of(value), key, value, &["carries-on", "stops"])),
+            },
             ("defaults", "overflow") => match value {
                 "wrap" => settings.overflow = Overflow::Wrap,
                 "trap" => settings.overflow = Overflow::Trap,
@@ -242,7 +271,7 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                     .primary(span_of(key), "here")
                     .rule("a setting that is not understood is refused rather than ignored, since a project that set it meant something by it")
                     .tip(match section {
-                        "defaults" => "`[defaults]` holds `division`, `logic` and `overflow`.",
+                        "defaults" => "`[defaults]` holds `division`, `logic`, `no-number` and `overflow`.",
                         "build" => "`[build]` holds `optimise`.",
                         "run" => "`[run]` holds `engine`.",
                         _ => "that section holds nothing yet.",

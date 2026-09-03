@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Division, Logic, Overflow, Settings};
+use quench_conf::{Division, Logic, NoNumber, Overflow, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -65,6 +65,7 @@ pub fn settings_for(seed: u64) -> Settings {
     Settings {
         division: if rng.upto(2) == 0 { Division::Truncated } else { Division::Floored },
         logic: if rng.upto(2) == 0 { Logic::StopsEarly } else { Logic::AsksBoth },
+        no_number: if rng.upto(2) == 0 { NoNumber::CarriesOn } else { NoNumber::Stops },
         overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
         ..Settings::default()
     }

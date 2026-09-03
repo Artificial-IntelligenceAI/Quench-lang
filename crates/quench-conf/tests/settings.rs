@@ -48,7 +48,7 @@ fn a_setting_it_does_not_know_is_refused_rather_than_ignored() {
     // says so.
     let out = errors("[defaults]\ndivison = \"floored\"\n");
     assert!(out.contains("`divison` is not a setting `[defaults]` has."), "{out}");
-    assert!(out.contains("`[defaults]` holds `division`, `logic` and `overflow`."), "{out}");
+    assert!(out.contains("`[defaults]` holds `division`, `logic`, `no-number` and `overflow`."), "{out}");
 }
 
 #[test]
@@ -100,6 +100,21 @@ fn logic_says_whether_the_right_side_is_asked() {
     assert_eq!(quench_conf::Settings::default().logic, quench_conf::Logic::StopsEarly);
 
     let (_, errors) = quench_conf::read("[defaults]\nlogic = \"lazy\"\n");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].code, "E0705");
+}
+
+#[test]
+fn no_number_says_what_a_float_does_when_it_has_none() {
+    let (settings, errors) = quench_conf::read("[defaults]\nno-number = \"stops\"\n");
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(settings.no_number, quench_conf::NoNumber::Stops);
+
+    // Carrying on is the default, because `b64` *is* IEEE 754 binary64 and `infinity`
+    // and `not-a-number` are values of that type rather than accidents of it.
+    assert_eq!(quench_conf::Settings::default().no_number, quench_conf::NoNumber::CarriesOn);
+
+    let (_, errors) = quench_conf::read("[defaults]\nno-number = \"ieee\"\n");
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].code, "E0705");
 }

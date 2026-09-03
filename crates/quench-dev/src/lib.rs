@@ -13,7 +13,9 @@
 //! to be turned up.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, AbiParam, BlockArg, FuncRef, InstBuilder, MemFlagsData};
+use cranelift_codegen::ir::{
+    condcodes::FloatCC, types, AbiParam, BlockArg, FuncRef, InstBuilder, MemFlagsData,
+};
 use cranelift_codegen::ir::{Function as ClifFunction, Value as ClifValue};
 use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_codegen::settings::{self, Configurable as _};
@@ -305,6 +307,7 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         // A handle into the heap, which is an index and so an integer as well. The
         // generated code never dereferences one; it hands it back to the runtime.
         qir::Ty::Handle | qir::Ty::Exact => types::I64,
+        qir::Ty::Float => types::F64,
     }
 }
 
@@ -335,6 +338,17 @@ struct Runtime {
     /// generated code checks afterwards. Aborting the process was the previous answer,
     /// and it lost the whole run rather than one program.
     stopped: i64,
+}
+
+/// The byte order of the machine this is compiling for, which is the machine it is
+/// running on: a JIT's target is its host. Cranelift's `bitcast` insists on being told,
+/// and moving the bits of a float into an integer register is not a reordering.
+fn native_order() -> cranelift_codegen::ir::Endianness {
+    if cfg!(target_endian = "little") {
+        cranelift_codegen::ir::Endianness::Little
+    } else {
+        cranelift_codegen::ir::Endianness::Big
+    }
 }
 
 /// Where `stopped` sits inside [`Runtime`], for the load the generated code emits.
@@ -518,6 +532,12 @@ extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn print_float(_rt: *mut Runtime, stream: i64, bits: i64) -> i64 {
+    write_out(stream, quench_num::show_f64(f64::from_bits(bits as u64)).as_bytes());
+    0
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn print_exact(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
     let shown = EXACTS.with(|e| e.borrow()[value as usize].to_string());
     write_out(stream, shown.as_bytes());
@@ -616,6 +636,7 @@ fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> b
             qir::Elements::Exact => {
                 EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
             }
+            qir::Elements::Float => f64::from_bits(*x as u64) == f64::from_bits(*y as u64),
             qir::Elements::Text => text_of(*x) == text_of(*y),
             _ => x == y,
         }
@@ -652,6 +673,7 @@ fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> Stri
                     format!("*{}*", text_of(*value))
                 }
                 qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
+                qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
         .collect();
@@ -766,6 +788,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_div", exact_div as *const u8);
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
+    builder.symbol("quench_print_float", print_float as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
     builder.symbol("quench_text_join", text_join as *const u8);
     builder.symbol("quench_exact_pow", exact_pow as *const u8);
@@ -821,6 +844,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactDiv, "quench_exact_div"),
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
+        (qir::Host::PrintFloat, "quench_print_float"),
         (qir::Host::TextCompare, "quench_text_compare"),
         (qir::Host::TextJoin, "quench_text_join"),
         (qir::Host::ExactPow, "quench_exact_pow"),
@@ -851,7 +875,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
             .map(|(host, id)| (*host, jit.declare_func_in_func(*id, &mut ctx.func)))
             .collect();
         lower(func, &mut ctx.func, &mut fctx, &refs, &host_refs, table, target);
-        jit.define_function(declared[i].0, &mut ctx).map_err(|e| Error::Backend(e.to_string()))?;
+        jit.define_function(declared[i].0, &mut ctx)
+            .map_err(|e| Error::Backend(format!("{e:?}")))?;
         jit.clear_context(&mut ctx);
     }
 
@@ -920,6 +945,7 @@ fn lower(
                 qir::Inst::ConstText(at) | qir::Inst::ConstHandle(at) => {
                     b.ins().iconst(types::I64, i64::from(*at))
                 }
+                qir::Inst::ConstFloat(bits) => b.ins().f64const(f64::from_bits(*bits)),
                 qir::Inst::CallHost { host, args } => {
                     let which = hosts
                         .iter()
@@ -935,10 +961,19 @@ fn lower(
                         // is widened at the boundary rather than anywhere QIR can see.
                         // Keyed on what the value *is*, not on what the host's table
                         // says: one argument is whatever the array holds.
-                        given.push(if func.ty_of(*arg) == qir::Ty::Bool {
-                            b.ins().uextend(types::I64, value)
-                        } else {
-                            value
+                        given.push(match func.ty_of(*arg) {
+                            qir::Ty::Bool => b.ins().uextend(types::I64, value),
+                            // A `b64` lives in a float register and the runtime takes
+                            // an integer, so its bits move across rather than its value.
+                            // The bits, not the value — the runtime takes an integer
+                            // and a `b64` lives in a float register. Native order,
+                            // because both ends of this call are the same machine.
+                            qir::Ty::Float => b.ins().bitcast(
+                                types::I64,
+                                MemFlagsData::new().with_endianness(native_order()),
+                                value,
+                            ),
+                            _ => value,
                         });
                     }
                     let call = b.ins().call(which, &given);
@@ -960,6 +995,40 @@ fn lower(
                     match op {
                         // A `Bool` is already nought or one, so this is the whole
                         // operation and needs no normalising afterwards.
+                        // Plain IEEE. Cranelift fuses nothing on its own and is asked
+                        // for nothing here, which is the whole of what keeps three
+                        // engines to the same bits.
+                        qir::BinOp::FAdd => b.ins().fadd(l, r),
+                        qir::BinOp::FSub => b.ins().fsub(l, r),
+                        qir::BinOp::FMul => b.ins().fmul(l, r),
+                        qir::BinOp::FDiv => b.ins().fdiv(l, r),
+                        qir::BinOp::FAddChecked
+                        | qir::BinOp::FSubChecked
+                        | qir::BinOp::FMulChecked
+                        | qir::BinOp::FDivChecked => {
+                            let answer = match op {
+                                qir::BinOp::FAddChecked => b.ins().fadd(l, r),
+                                qir::BinOp::FSubChecked => b.ins().fsub(l, r),
+                                qir::BinOp::FMulChecked => b.ins().fmul(l, r),
+                                _ => b.ins().fdiv(l, r),
+                            };
+                            // Finite or it stops: an infinity and a not-a-number both
+                            // fail a comparison against themselves after subtraction,
+                            // but the plain way is to ask whether it is finite.
+                            let fits = b.create_block();
+                            let does_not = b.create_block();
+                            let big = b.ins().f64const(f64::INFINITY);
+                            let magnitude = b.ins().fabs(answer);
+                            let finite = b.ins().fcmp(FloatCC::LessThan, magnitude, big);
+                            b.ins().brif(finite, fits, &[], does_not, &[]);
+                            b.switch_to_block(does_not);
+                            let code = b.ins().iconst(types::I64, qir::Trap::NoNumber as i64);
+                            let at = b.ins().iconst(types::I64, table);
+                            b.ins().store(MemFlagsData::trusted(), code, at, STOPPED_AT);
+                            b.ins().jump(stopping, &[]);
+                            b.switch_to_block(fits);
+                            answer
+                        }
                         qir::BinOp::And => b.ins().band(l, r),
                         qir::BinOp::Or => b.ins().bor(l, r),
                         qir::BinOp::Add => b.ins().iadd(l, r),
@@ -1002,6 +1071,18 @@ fn lower(
                             b.ins().select(wrong_way, shifted, rest)
                         }
                     }
+                }
+                qir::Inst::FCmp { op, lhs, rhs } => {
+                    let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());
+                    let how = match op {
+                        qir::CmpOp::Eq => FloatCC::Equal,
+                        qir::CmpOp::Ne => FloatCC::NotEqual,
+                        qir::CmpOp::Lt => FloatCC::LessThan,
+                        qir::CmpOp::Le => FloatCC::LessThanOrEqual,
+                        qir::CmpOp::Gt => FloatCC::GreaterThan,
+                        qir::CmpOp::Ge => FloatCC::GreaterThanOrEqual,
+                    };
+                    b.ins().fcmp(how, l, r)
                 }
                 qir::Inst::Cmp { op, lhs, rhs } => {
                     let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());

@@ -1345,3 +1345,76 @@ START {
         "true ab!",
     );
 }
+
+#[test]
+fn a_float_is_ieee_and_nothing_else() {
+    // The famous one. `e` gets it right by never rounding; `b64` gets it wrong in the
+    // way every conforming machine gets it wrong, which is the point of a standard.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['a'] = [*1.5*];
+    var.immut.b64 ['b'] = [*0.25*];
+    var.immut.b64 ['sum'] = ['a' + 'b'];
+    var.immut.b64 ['whole'] = [*3*];
+    var.immut.b64 ['tenth'] = [*0.1*];
+    var.immut.b64 ['fifth'] = [*0.2*];
+    var.immut.b64 ['near'] = ['tenth' + 'fifth'];
+    var.immut.bool ['ok'] = ['tenth' + 'fifth' == b64:*0.3*];
+    print.stdout['sum' str:* * 'whole' str:* * 'near' str:* * 'ok'];
+}
+"),
+        "1.75 3.0 0.30000000000000004 false",
+    );
+}
+
+#[test]
+fn infinity_and_not_a_number_are_answers_a_float_can_reach() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['one'] = [*1*];
+    var.immut.b64 ['zero'] = [*0*];
+    var.immut.b64 ['big'] = ['one' / 'zero'];
+    var.immut.b64 ['none'] = ['zero' / 'zero'];
+    var.immut.bool ['itself'] = ['none' == 'none'];
+    print.stdout['big' str:* * 'none' str:* * 'itself'];
+}
+"),
+        "infinity not-a-number false",
+        "and a not-a-number is not even equal to itself, which is IEEE's rule",
+    );
+}
+
+#[test]
+fn no_number_says_whether_a_float_may_reach_one() {
+    let source = "\
+START {
+    var.immut.b64 ['one'] = [*1*];
+    var.immut.b64 ['zero'] = [*0*];
+    var.immut.b64 ['big'] = ['one' / 'zero'];
+    print.stdout['big'];
+}
+";
+    let carries = quench_conf::Settings::default();
+    assert_eq!(said_under(source, carries), "infinity");
+
+    let stops = quench_conf::Settings {
+        no_number: quench_conf::NoNumber::Stops,
+        ..quench_conf::Settings::default()
+    };
+    let out = quench_lower::lower_under(source, stops);
+    assert_eq!(
+        quench_interp::run(&out.module.expect("a program")).expect("it runs"),
+        quench_interp::Outcome::Trapped(quench_interp::Trap::NoNumber),
+    );
+}
+
+#[test]
+fn an_array_of_floats_shows_what_it_holds() {
+    assert_eq!(
+        said("START {\n    var.immut.arr.b64 (3) ['xs'] = [[*1.5* *2* *-0.25*]];\n    print.stdout['xs'];\n}\n"),
+        "[1.5 2.0 -0.25]",
+        "always with a point, so what is shown says which type it came from",
+    );
+}
