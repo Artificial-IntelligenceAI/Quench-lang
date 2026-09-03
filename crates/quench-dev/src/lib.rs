@@ -816,6 +816,10 @@ fn lower(
                 qir::Inst::Bin { op, lhs, rhs } => {
                     let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());
                     match op {
+                        // A `Bool` is already nought or one, so this is the whole
+                        // operation and needs no normalising afterwards.
+                        qir::BinOp::And => b.ins().band(l, r),
+                        qir::BinOp::Or => b.ins().bor(l, r),
                         qir::BinOp::Add => b.ins().iadd(l, r),
                         qir::BinOp::Sub => b.ins().isub(l, r),
                         qir::BinOp::Mul => b.ins().imul(l, r),

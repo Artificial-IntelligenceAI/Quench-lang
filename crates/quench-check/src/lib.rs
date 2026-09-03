@@ -184,6 +184,8 @@ pub enum Value {
     /// One element. The shape is carried so the lowering can work out where it is
     /// without going back to the type.
     At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
+    /// `not 'ready'` — the opposite of a `bool`.
+    Not(Box<Value>),
     /// A top-level constant, written in where it was named.
     Const(u32),
     /// `add[*1*, *2*]` — the answer a function gave back.
@@ -1023,14 +1025,15 @@ impl<'a> Checker<'a> {
         // A value that is one call is that call's answer, whatever the type -- the same
         // way a value that is one name is that variable's. Neither is a list of pieces,
         // and reading either as one would ask the wrong question about it.
-        if let [term @ (ast::Term::Call(_) | ast::Term::Piece(ast::Piece::Call(_)))] =
-            value.terms.as_slice()
+        if let [term @ (ast::Term::Call(_)
+        | ast::Term::Piece(ast::Piece::Call(_))
+        | ast::Term::Not { .. })] = value.terms.as_slice()
         {
             let built = self.term(term)?;
             let found = self.type_of(&built, value.span)?;
             if &found != ty {
                 self.errors.push(
-                    Diagnostic::new("E0406", format!("this answers with {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                    Diagnostic::new("E0406", format!("this works out to {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
                         .primary(value.span, format!("{} `{}`", found.article(), found.name()))
                         .secondary(ty_span, format!("declared `{}` here", ty.name()))
                         .rule("nothing converts on its own — two types meet only where something says they should")
@@ -1474,14 +1477,20 @@ impl<'a> Checker<'a> {
                 None
             }
             ast::Term::Group { value, .. } => self.tree_or_leaf(value),
-            ast::Term::Not { word, .. } => {
-                self.errors.push(
-                    Diagnostic::new("E0418", "`not` is not built yet.")
-                        .primary(*word, "here")
-                        .rule("the parts of Quench arrive one at a time, and this one has not")
-                        .fix("compare with `==` or `!=` for now"),
-                );
-                None
+            ast::Term::Not { word, of } => {
+                let built = self.term(of)?;
+                let found = self.type_of(&built, of.span())?;
+                if found != Ty::Bool {
+                    self.errors.push(
+                        Diagnostic::new("E0418", format!("`not` turns a `bool` round, and this is {} `{}`.", found.article(), found.name()))
+                            .primary(of.span(), format!("{} `{}`", found.article(), found.name()))
+                            .secondary(*word, "asked to turn round here")
+                            .rule("nothing is truthy — `not` is for the type that is already true or false")
+                            .fix("compare it against something first"),
+                    );
+                    return None;
+                }
+                Some(Value::Not(Box::new(built)))
             }
             ast::Term::Piece(ast::Piece::Name(span)) => {
                 self.named_value(*span).map(|(value, _)| value)
@@ -1601,6 +1610,7 @@ impl<'a> Checker<'a> {
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
+            Value::Not(_) => Some(Ty::Bool),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
             Value::At { shape, array, .. } => {
@@ -1612,17 +1622,21 @@ impl<'a> Checker<'a> {
                 }
             }
             Value::Binary { op, lhs, rhs } => {
-                if matches!(op, OpKind::And | OpKind::Or) {
-                    self.errors.push(
-                        Diagnostic::new("E0422", format!("`{}` is not built yet.", op.written()))
-                            .primary(span, "here")
-                            .rule("the parts of Quench arrive one at a time, and this one has not")
-                            .tip("`+`, `-`, `x`, `/`, `mod`, `^` and the comparisons work.")
-                            .fix("use one of those for now"),
-                    );
-                    return None;
-                }
                 let (l, r) = (self.type_of(lhs, span)?, self.type_of(rhs, span)?);
+
+                if matches!(op, OpKind::And | OpKind::Or) {
+                    if l != Ty::Bool || r != Ty::Bool {
+                        self.errors.push(
+                            Diagnostic::new("E0422", format!("`{}` joins two things that are true or false.", op.written()))
+                                .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
+                                .rule("nothing is truthy — `and` and `or` are for `bool`, and there is no second way to be one")
+                                .tip("a comparison makes one, and so does a `bool` variable.")
+                                .fix("compare each side against something"),
+                        );
+                        return None;
+                    }
+                    return Some(Ty::Bool);
+                }
 
                 // Two things are the same or they are not, whatever they are. Which of
                 // two is *larger* only means something for numbers.

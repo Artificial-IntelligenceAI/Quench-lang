@@ -128,7 +128,13 @@ impl Builder {
     }
 
     pub fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value) -> Value {
-        self.push(Inst::Bin { op, lhs, rhs }, Ty::I64)
+        // Two of these are on `Bool` and the rest are on `I64`, which is the only place
+        // in QIR where one instruction wears two types.
+        let ty = match op {
+            BinOp::And | BinOp::Or => Ty::Bool,
+            _ => Ty::I64,
+        };
+        self.push(Inst::Bin { op, lhs, rhs }, ty)
     }
 
     pub fn add(&mut self, lhs: Value, rhs: Value) -> Value {

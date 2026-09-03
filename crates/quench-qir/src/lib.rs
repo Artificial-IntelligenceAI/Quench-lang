@@ -200,6 +200,11 @@ pub enum BinOp {
     DivFloored,
     /// The remainder that goes with [`BinOp::DivFloored`]: `-7 % 2` is `1`.
     RemFloored,
+    /// Both, and either. On `Bool`, and always asking both sides — the form
+    /// `[defaults] logic = "asks-both"` lowers to. Stopping early is control flow and
+    /// is built out of blocks instead, because that is what stopping early *is*.
+    And,
+    Or,
 }
 
 impl BinOp {

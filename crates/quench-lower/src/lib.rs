@@ -6,7 +6,7 @@
 //! Anything in this file that started to look like a judgement would belong further up.
 
 use quench_check::{Arm, Checked, Flow, Func, Local, OpKind, Place, Printed, Stmt, Ty, Value};
-use quench_conf::{Division, Overflow, Settings};
+use quench_conf::{Division, Logic, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
 
@@ -610,6 +610,34 @@ fn emit(
                 w.checked.funcs[*func as usize].returns.as_ref().map_or(qir::Ty::I64, qir_ty);
             b.call(qir::FuncId(*func), &given, ret)
         }
+        Value::Not(of) => {
+            let value = emit(b, module, of, held, w);
+            b.not(value)
+        }
+        // Stopping early is control flow, because that is what stopping early *is*: the
+        // right side has to sit in a block that only one of the two paths reaches.
+        Value::Binary { op: op @ (OpKind::And | OpKind::Or), lhs, rhs }
+            if w.settings.logic == Logic::StopsEarly =>
+        {
+            let left = emit(b, module, lhs, held, w);
+            let join = b.block(&[qir::Ty::Bool]);
+            let rest = b.block(&[]);
+
+            // `and` asks the right side when the left was true, `or` when it was false,
+            // and either way the left side is the answer when it is not asked.
+            let settled = b.const_bool(*op == OpKind::Or);
+            match op {
+                OpKind::And => b.br_if(left, (rest, &[]), (join, &[settled])),
+                _ => b.br_if(left, (join, &[settled]), (rest, &[])),
+            }
+
+            b.switch_to(rest);
+            let right = emit(b, module, rhs, held, w);
+            b.jump(join, &[right]);
+
+            b.switch_to(join);
+            b.block_param(join, 0)
+        }
         Value::Binary { op, lhs, rhs } => {
             let l = emit(b, module, lhs, held, w);
             let r = emit(b, module, rhs, held, w);
@@ -651,9 +679,9 @@ fn emit(
                 OpKind::Ge => b.cmp(qir::CmpOp::Ge, l, r),
                 OpKind::Eq => b.cmp(qir::CmpOp::Eq, l, r),
                 OpKind::Ne => b.cmp(qir::CmpOp::Ne, l, r),
-                OpKind::And | OpKind::Or => {
-                    unreachable!("refused by the checker as not built yet")
-                }
+                // Only reached under `asks-both`; stopping early was handled above.
+                OpKind::And => b.bin(qir::BinOp::And, l, r),
+                OpKind::Or => b.bin(qir::BinOp::Or, l, r),
             }
         }
     }

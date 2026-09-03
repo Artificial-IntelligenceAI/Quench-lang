@@ -870,3 +870,96 @@ START {
         "and a whole number does not: the answer to that is a fraction",
     );
 }
+
+/// The same, under settings of the caller's choosing.
+fn said_under(source: &str, settings: quench_conf::Settings) -> String {
+    let out = quench_lower::lower_under(source, settings);
+    assert!(out.ok(), "{}", report(source));
+    let module = out.module.expect("a program");
+
+    let (mut out_bytes, mut err_bytes) = (Vec::new(), Vec::new());
+    quench_interp::run_writing(
+        &module,
+        &mut quench_interp::Writing { out: &mut out_bytes, err: &mut err_bytes },
+    )
+    .expect("it runs");
+    let walked = String::from_utf8(out_bytes).expect("text");
+    let _ = err_bytes;
+
+    let (_, compiled) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+    assert_eq!(walked, compiled.out, "the engines printed different things");
+    walked
+}
+
+#[test]
+fn and_or_and_not_answer() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.bool ['t'] = [*true*];
+    var.immut.bool ['f'] = [*false*];
+    var.immut.bool ['a'] = ['t' and 'f'];
+    var.immut.bool ['o'] = ['t' or 'f'];
+    var.immut.bool ['n'] = [not 't'];
+    print.stdout['a' str:* * 'o' str:* * 'n'];
+}
+"),
+        "false true false",
+    );
+}
+
+#[test]
+fn whether_the_right_side_is_asked_is_a_setting() {
+    // Which only became a question a program could see once it could call a function.
+    // Before that, nothing inside an expression could do anything.
+    let source = "\
+fn.file.bool ['shout'] [immut.bool 'answer'] {
+    print.stdout[str:*(asked)*];
+    give ['answer'];
+}
+START {
+    var.immut.bool ['f'] = [*false*];
+    var.immut.bool ['x'] = ['f' and shout[*true*]];
+    print.stdout[str:*/* 'x'];
+}
+";
+    let early = quench_conf::Settings {
+        logic: quench_conf::Logic::StopsEarly,
+        ..quench_conf::Settings::default()
+    };
+    let both = quench_conf::Settings {
+        logic: quench_conf::Logic::AsksBoth,
+        ..quench_conf::Settings::default()
+    };
+    assert_eq!(said_under(source, early), "/false");
+    assert_eq!(said_under(source, both), "(asked)/false");
+}
+
+#[test]
+fn stopping_early_is_what_makes_a_guard_a_guard() {
+    // Quench stops rather than having undefined behaviour, so the difference between
+    // the two settings here is not speed -- it is whether the program survives.
+    let source = "\
+START {
+    var.immut.i64 ['zero'] = [*0*];
+    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* / 'zero') > *5*)];
+    print.stdout['safe'];
+}
+";
+    let early = quench_conf::Settings {
+        logic: quench_conf::Logic::StopsEarly,
+        ..quench_conf::Settings::default()
+    };
+    assert_eq!(said_under(source, early), "false");
+
+    let both = quench_conf::Settings {
+        logic: quench_conf::Logic::AsksBoth,
+        ..quench_conf::Settings::default()
+    };
+    let out = quench_lower::lower_under(source, both);
+    assert_eq!(
+        quench_interp::run(&out.module.expect("a program")).expect("it runs"),
+        quench_interp::Outcome::Trapped(quench_interp::Trap::DividedByZero),
+        "the guard is not a guard when both sides are always asked",
+    );
+}

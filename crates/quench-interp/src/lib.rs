@@ -386,6 +386,10 @@ fn evaluate(
             match op {
                 // Wrapping, because Cranelift's `iadd` and friends wrap. What a Quench
                 // program sees is a setting applied further up.
+                // Both sides were worked out before this ran, which is the whole of
+                // what `asks-both` means.
+                qir::BinOp::And => i64::from(l != 0 && r != 0),
+                qir::BinOp::Or => i64::from(l != 0 || r != 0),
                 qir::BinOp::Add => l.wrapping_add(r),
                 qir::BinOp::Sub => l.wrapping_sub(r),
                 qir::BinOp::Mul => l.wrapping_mul(r),

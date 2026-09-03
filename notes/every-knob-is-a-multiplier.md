@@ -81,3 +81,35 @@ file in the project.
 Which knobs exist. The delivery pile can be settled late and cheaply. Each addition
 to the semantic pile is a decision to test twice as much for ever, so those get
 argued one at a time.
+
+## The third semantic setting, and the one that changed pile
+
+`[defaults] logic` says whether `and` and `or` ask their right side once the left has
+settled the answer. `stops-early` is the default and `asks-both` is the other one.
+
+What makes it worth writing down here is that **it was not a semantic setting until
+functions arrived**. Before a program could call anything, nothing inside an
+expression could *do* anything: both answers produced byte-for-byte identical
+programs, and the setting would have been in the free pile with `optimise`. A call
+made the right side able to print, and the same source became two programs.
+
+So a setting can move piles under you. Not because anybody changed it — because the
+language grew a way to tell the difference.
+
+The reason to default to `stops-early` is not speed, and it is worth being precise
+about. Quench stops rather than having undefined behaviour, so under `asks-both`:
+
+```quench
+[('n' != *0*) and ((*100* / 'n') > *5*)]
+```
+
+does not merely waste a division when `'n'` is nought — it **stops the program**.
+Guarding a thing with the test that makes it safe is the idiom, and one of the two
+answers does not have it. That is a real argument for a default rather than a
+preference between two equally good answers, which is what most of these are.
+
+It costs the oracle another doubling, and the generator sweeps it like the others.
+What a generated program cannot check is the *skipping*, since nothing in one has an
+effect a skipped side could have had. What it does check is that both **shapes** — a
+flat instruction and a branch with a join — compile and run alike, which is the part
+that actually differs.

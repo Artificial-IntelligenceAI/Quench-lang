@@ -48,7 +48,7 @@ fn a_setting_it_does_not_know_is_refused_rather_than_ignored() {
     // says so.
     let out = errors("[defaults]\ndivison = \"floored\"\n");
     assert!(out.contains("`divison` is not a setting `[defaults]` has."), "{out}");
-    assert!(out.contains("`[defaults]` holds `division` and `overflow`."), "{out}");
+    assert!(out.contains("`[defaults]` holds `division`, `logic` and `overflow`."), "{out}");
 }
 
 #[test]
@@ -84,4 +84,22 @@ fn the_error_points_at_the_line_it_is_about() {
     let out = errors(text);
     assert!(out.contains("line: 5"), "the fifth line is the wrong one: {out}");
     assert!(out.contains("`dev-jit` or `interpreter`"), "{out}");
+}
+
+#[test]
+fn logic_says_whether_the_right_side_is_asked() {
+    let (settings, errors) = quench_conf::read("[defaults]\nlogic = \"asks-both\"\n");
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(settings.logic, quench_conf::Logic::AsksBoth);
+
+    let (settings, errors) = quench_conf::read("[defaults]\nlogic = \"stops-early\"\n");
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(settings.logic, quench_conf::Logic::StopsEarly);
+
+    // Stopping early is the default, because it is what makes a guard a guard.
+    assert_eq!(quench_conf::Settings::default().logic, quench_conf::Logic::StopsEarly);
+
+    let (_, errors) = quench_conf::read("[defaults]\nlogic = \"lazy\"\n");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].code, "E0705");
 }

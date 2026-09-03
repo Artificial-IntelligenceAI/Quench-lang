@@ -257,12 +257,18 @@ fn a_power_is_built_now() {
 }
 
 #[test]
-fn the_operators_that_are_not_built_say_so() {
-    for (source, which) in [
-        ("START { var.immut.bool ['b'] = [*true* and *false*]; }", "`and` is not built yet"),
-        ("START { var.immut.bool ['b'] = [*true* or *false*]; }", "`or` is not built yet"),
+fn every_operator_the_language_has_is_built() {
+    // This used to be the list of ones that were not. It is empty now.
+    for source in [
+        "START { var.immut.i64 ['n'] = [*7* + *1* - *2* \u{d7} *3* / *4*]; }",
+        "START { var.immut.i64 ['n'] = [*7* mod *3*]; }",
+        "START { var.immut.i64 ['n'] = [*2* ^ *8*]; }",
+        "START { var.immut.bool ['b'] = [*true* and *false*]; }",
+        "START { var.immut.bool ['b'] = [*true* or *false*]; }",
+        "START { var.immut.bool ['b'] = [not *true*]; }",
+        "START { var.immut.bool ['b'] = [*1* </= *2*]; }",
     ] {
-        assert!(errors(source).contains(which), "{source}\n{}", errors(source));
+        assert!(check(source).ok(), "{source}\n{}", errors(source));
     }
 }
 
@@ -674,4 +680,40 @@ fn a_chain_says_what_its_numbers_are() {
     assert!(check("START { var.immut.bool ['a'] = [e:*0.1* == e:*0.3*]; }").ok());
     // And where the chain did say, saying it again is still refused.
     assert_eq!(codes("START { var.immut.str ['a'] = [str:*twice*]; }"), ["E0107"]);
+}
+
+#[test]
+fn and_or_and_not_are_built_and_are_for_bool() {
+    assert!(check("START { var.immut.bool ['a'] = [*true*]; var.immut.bool ['b'] = ['a' and 'a']; }").ok());
+    assert!(check("START { var.immut.bool ['a'] = [*true*]; var.immut.bool ['b'] = [not 'a']; }").ok());
+
+    // Nothing is truthy, here as everywhere else.
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1*]; var.immut.bool ['b'] = ['n' and 'n']; }");
+    assert!(rendered.contains("`and` joins two things that are true or false."), "{rendered}");
+    assert!(rendered.contains("Error code: E0422"), "{rendered}");
+
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1*]; var.immut.bool ['b'] = [not 'n']; }");
+    assert!(rendered.contains("`not` turns a `bool` round, and this is an `i64`."), "{rendered}");
+    assert!(rendered.contains("Error code: E0418"), "{rendered}");
+}
+
+#[test]
+fn the_logical_operators_have_no_agreed_order() {
+    // C put `&` too loose and Python put it too tight, and both produced famous traps.
+    // The lesson is not that C chose wrong but that there was nothing to choose.
+    let source = "START {
+    var.immut.bool ['a'] = [*true*];
+    var.immut.bool ['b'] = ['a' and 'a' or 'a'];
+}";
+    let rendered = errors(source);
+    assert!(rendered.contains("`and` and `or` have no agreed order"), "{rendered}");
+    assert!(rendered.contains("Error code: E0421"), "{rendered}");
+
+    // And against a comparison, for the same reason.
+    assert_eq!(
+        codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.bool ['b'] = ['n' > *0* and 'n' < *9*]; }"),
+        ["E0421"]
+    );
+    // With brackets, it is one reading and it checks out.
+    assert!(check("START { var.immut.i64 ['n'] = [*1*]; var.immut.bool ['b'] = [('n' > *0*) and ('n' < *9*)]; }").ok());
 }

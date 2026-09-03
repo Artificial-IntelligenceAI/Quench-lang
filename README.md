@@ -150,6 +150,14 @@ Both print the same thing, which is not a coincidence — it is
 - **Arithmetic works.** `+ - x / mod` and the comparisons, with the precedence
   mathematics settled applied and everything else refused. `1 + 2 x 3` is 7;
   `10 mod 3 + 1` is an error offering both readings.
+- **`and`, `or` and `not`** join and turn round `bool`s, and have **no agreed order**
+  against each other or against a comparison, so brackets say what was meant:
+  `[('n' > *0*) and ('n' < *9*)]`. Whether the right side is asked once the left has
+  settled it is `[defaults] logic`, and it defaults to `stops-early` — not for speed.
+  Quench stops rather than having undefined behaviour, so under `asks-both`
+  `[('n' != *0*) and ((*100* / 'n') > *5*)]` does not waste a division, it **stops the
+  program**. That setting was in the free pile until functions arrived and gave the
+  right side something it could do.
 - **`^` answers by squaring**, in the runtime rather than as an instruction — a power
   needs a loop, and two engines each writing their own would be two chances to write it
   differently. `[*2* + *3* ^ *2*]` is 11. An `e` takes a negative exponent and gives a

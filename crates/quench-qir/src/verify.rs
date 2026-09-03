@@ -23,7 +23,7 @@
 //! worse message. Doing it properly needs a dominator tree, which is worth writing once
 //! there are enough passes to justify one.
 
-use crate::{Inst, Module, Term, Ty, Value};
+use crate::{BinOp, Inst, Module, Term, Ty, Value};
 use quench_diag::Diagnostic;
 use std::collections::HashSet;
 use std::fmt;
@@ -180,10 +180,15 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                         }
                     }
                     Inst::Bin { op, lhs, rhs } => {
+                        let wants = match op {
+                            BinOp::And | BinOp::Or => Ty::Bool,
+                            _ => Ty::I64,
+                        };
                         for v in [lhs, rhs] {
-                            if known(*v, &mut say) && func.ty_of(*v) != Ty::I64 {
+                            if known(*v, &mut say) && func.ty_of(*v) != wants {
                                 say(format!(
-                                    "block {i}: {op:?} wants i64 and {v:?} is {}",
+                                    "block {i}: {op:?} wants {} and {v:?} is {}",
+                                    wants.name(),
                                     func.ty_of(*v).name()
                                 ));
                             }

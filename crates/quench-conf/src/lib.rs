@@ -95,6 +95,29 @@ pub enum Overflow {
     Trap,
 }
 
+/// Whether `and` and `or` ask their right side once their left side has settled it.
+///
+/// **Semantic**, and it did not used to be. Until a program could call a function,
+/// nothing inside an expression could *do* anything, so both answers gave byte-for-byte
+/// identical programs and there was nothing here to choose. A call changed that: the
+/// right side can print, and now the same source is two programs.
+///
+/// The reason to stop early is not speed. Quench stops rather than having undefined
+/// behaviour, so `['n' != *0* and *100* / 'n' > *5*]` under [`Logic::AsksBoth`] does not
+/// merely waste a division — it **stops the program** whenever `'n'` is nought. Guarding
+/// a thing with the test that makes it safe is the idiom, and one of these two answers
+/// does not have it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Logic {
+    /// `and` asks its right side only when the left was true, and `or` only when the
+    /// left was false. What every language with these operators does, and what makes a
+    /// guard a guard.
+    #[default]
+    StopsEarly,
+    /// Both sides, always, whatever the left one said. A branch fewer, and no guards.
+    AsksBoth,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -111,6 +134,8 @@ pub enum Engine {
 pub struct Settings {
     /// `[defaults] division`
     pub division: Division,
+    /// `[defaults] logic`
+    pub logic: Logic,
     /// `[run] engine`
     pub engine: Engine,
     /// `[build] optimise`
@@ -179,6 +204,12 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 "floored" => settings.division = Division::Floored,
                 _ => errors.push(bad_value(span_of(value), key, value, &["truncated", "floored"])),
             },
+            ("defaults", "logic") => match value {
+                "stops-early" => settings.logic = Logic::StopsEarly,
+                "asks-both" => settings.logic = Logic::AsksBoth,
+                _ => errors
+                    .push(bad_value(span_of(value), key, value, &["stops-early", "asks-both"])),
+            },
             ("defaults", "overflow") => match value {
                 "wrap" => settings.overflow = Overflow::Wrap,
                 "trap" => settings.overflow = Overflow::Trap,
@@ -211,7 +242,7 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                     .primary(span_of(key), "here")
                     .rule("a setting that is not understood is refused rather than ignored, since a project that set it meant something by it")
                     .tip(match section {
-                        "defaults" => "`[defaults]` holds `division` and `overflow`.",
+                        "defaults" => "`[defaults]` holds `division`, `logic` and `overflow`.",
                         "build" => "`[build]` holds `optimise`.",
                         "run" => "`[run]` holds `engine`.",
                         _ => "that section holds nothing yet.",

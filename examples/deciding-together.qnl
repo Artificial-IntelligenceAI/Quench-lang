@@ -1,0 +1,35 @@
+# `and`, `or` and `not`, and the setting that says how far they look.
+
+fn.file.bool ['shout'] [immut.bool 'answer'] {
+    print.stdout[str:*(asked)*];
+    give ['answer'];
+}
+
+START {
+    var.immut.bool ['t'] = [*true*];
+    var.immut.bool ['f'] = [*false*];
+
+    var.immut.bool ['a'] = ['t' and 'f'];
+    var.immut.bool ['o'] = ['t' or 'f'];
+    var.immut.bool ['n'] = [not 't'];
+    print.stdout['a' str:* * 'o' str:* * 'n' \n];
+
+    # `and` and `or` have no agreed order against each other, or against a
+    # comparison, so brackets say what was meant. C put `&` too loose and Python put
+    # it too tight; there was never a right answer to inherit.
+    var.immut.i64 ['n2'] = [*5*];
+    var.immut.bool ['between'] = [('n2' > *0*) and ('n2' < *9*)];
+    print.stdout[str:*between: * 'between' \n];
+
+    # Under `logic = "stops-early"` — the default — the right side is never asked,
+    # so nothing is printed by this line. Under `asks-both` it is.
+    var.immut.bool ['x'] = ['f' and shout[*true*]];
+    print.stdout[str:*after: * 'x' \n];
+
+    # And this is why stopping early is the default. Quench stops rather than having
+    # undefined behaviour, so under `asks-both` this divides by zero and the program
+    # ends here rather than answering `false`.
+    var.immut.i64 ['zero'] = [*0*];
+    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* / 'zero') > *5*)];
+    print.stdout[str:*guarded: * 'safe' \n];
+}

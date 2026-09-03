@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Division, Overflow, Settings};
+use quench_conf::{Division, Logic, Overflow, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -64,6 +64,7 @@ pub fn settings_for(seed: u64) -> Settings {
     let mut rng = Seeded::from(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
     Settings {
         division: if rng.upto(2) == 0 { Division::Truncated } else { Division::Floored },
+        logic: if rng.upto(2) == 0 { Logic::StopsEarly } else { Logic::AsksBoth },
         overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
         ..Settings::default()
     }
@@ -193,9 +194,35 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                 flags.push(b.cmp(op, lhs, rhs));
             }
             7 => {
-                if let Some(&flag) = flags.last() {
+                let Some(&flag) = flags.last() else { continue };
+                if flags.len() < 2 || rng.upto(2) == 0 {
                     flags.push(b.not(flag));
+                    continue;
                 }
+                // Two flags joined, in whichever of the two shapes the settings ask
+                // for. They answer the same here -- a generated program has nothing in
+                // it that a skipped side could have done -- so what this checks is that
+                // both *shapes* compile and run alike, which is the part that differs.
+                let other = flags[rng.upto(flags.len() as u64 - 1)];
+                let both = rng.upto(2) == 0;
+                if settings.logic == Logic::AsksBoth {
+                    let op = if both { BinOp::And } else { BinOp::Or };
+                    flags.push(b.bin(op, other, flag));
+                    continue;
+                }
+                let join = b.block(&[Ty::Bool]);
+                let rest = b.block(&[]);
+                let settled = b.const_bool(!both);
+                if both {
+                    b.br_if(other, (rest, &[]), (join, &[settled]));
+                } else {
+                    b.br_if(other, (join, &[settled]), (rest, &[]));
+                }
+                b.switch_to(rest);
+                b.jump(join, &[flag]);
+                b.switch_to(join);
+                let answer = b.block_param(join, 0);
+                flags.push(answer);
             }
             8 => {
                 if let Some(id) = helper {
