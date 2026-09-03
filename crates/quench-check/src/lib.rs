@@ -33,9 +33,14 @@ pub enum Ty {
     /// `arr.i64 (2 3)` — one allocation, laid out row by row.
     ///
     /// One `arr` link is one allocation however many dimensions it has, which is what
-    /// makes indexing arithmetic. Two `arr` links would be an array of handles, and is
-    /// a different type that is not built yet.
-    Arr { of: Box<Ty>, shape: Vec<usize> },
+    /// makes indexing arithmetic. Two `arr` links are two allocations, with handles in
+    /// the outer one.
+    ///
+    /// `grows` is the first size having said `grow` rather than a number, and only the
+    /// first may: indexing is `(i - 1) x stride + j`, and a stride is the sizes *under*
+    /// a dimension. The outermost has nothing above it to be a stride for, so it is the
+    /// one dimension whose size the arithmetic never needs.
+    Arr { of: Box<Ty>, shape: Vec<usize>, grows: bool },
 }
 
 impl Ty {
@@ -50,8 +55,11 @@ impl Ty {
             Ty::Arr { .. } => {
                 let (mut links, mut sizes) = (0, Vec::new());
                 let mut walking = self;
-                while let Ty::Arr { of, shape } = walking {
+                while let Ty::Arr { of, shape, grows } = walking {
                     links += 1;
+                    if *grows {
+                        sizes.push("grow".to_string());
+                    }
                     sizes.extend(shape.iter().map(usize::to_string));
                     walking = of;
                 }
@@ -71,13 +79,27 @@ impl Ty {
         }
     }
 
+    /// Whether every allocation in this, from the top down, said how big it is.
+    ///
+    /// When one did not, nothing can say where one row of the thing above it ends —
+    /// which is why such an array can only be written empty and filled afterwards.
+    pub fn settled(&self) -> bool {
+        match self {
+            Ty::Arr { of, grows, .. } => !grows && of.settled(),
+            _ => true,
+        }
+    }
+
     /// How many written values one of these takes, all told and all the way down.
     ///
     /// An array of arrays is written flat like any other, so this counts through every
     /// allocation rather than stopping at the top one.
     pub fn count(&self) -> usize {
         match self {
-            Ty::Arr { of, shape } => shape.iter().product::<usize>() * of.count(),
+            // A growing allocation holds however many it has been given, so what one
+            // *takes* when it is written is a multiple of what lies under it rather
+            // than a number.
+            Ty::Arr { of, shape, .. } => shape.iter().product::<usize>() * of.count(),
             _ => 1,
         }
     }
@@ -157,6 +179,14 @@ pub struct Constant {
     pub at: Span,
 }
 
+/// One entry in a written shape: a number, or the word that says there is no number.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Size {
+    Fixed(usize),
+    /// The span of the `grow`, for pointing at when it is in the wrong place.
+    Grows(Span),
+}
+
 /// One variable.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Local {
@@ -200,6 +230,9 @@ pub enum Value {
     /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
     /// its own: it is the handle, which is what naming a variable already gives.
     Copied(Box<Value>),
+    /// How many an array holds, asked while it runs — which is what `count` becomes on
+    /// an array that grows, and what it never becomes on one that does not.
+    Count(Box<Value>),
     /// A top-level constant, written in where it was named.
     Const(u32),
     /// `add[*1*, *2*]` — the answer a function gave back.
@@ -217,8 +250,8 @@ fn boundaries(ty: &Ty) -> Vec<usize> {
     let mut stops = Vec::new();
     let mut at = 0;
     let mut walking = ty;
-    while let Ty::Arr { of, shape } = walking {
-        at += shape.len();
+    while let Ty::Arr { of, shape, grows } = walking {
+        at += shape.len() + usize::from(*grows);
         stops.push(at);
         walking = of;
     }
@@ -304,6 +337,8 @@ pub enum Stmt {
     Do { func: u32, args: Vec<Value> },
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
+    /// `add` — one more on the end of a growing array.
+    Extend { array: Value, value: Value },
     Print { to: Stream, pieces: Vec<Printed> },
 }
 
@@ -497,7 +532,8 @@ impl<'a> Checker<'a> {
         match stmt {
             ast::Stmt::Var(var) => self.declare(var),
             ast::Stmt::Print(print) => self.print(print),
-            ast::Stmt::Set(set) => self.set(set),
+            ast::Stmt::Set(set) => self.set(set, false),
+            ast::Stmt::Add(add) => self.set(add, true),
             ast::Stmt::If(conditional) => self.conditional(conditional),
             ast::Stmt::Loop(repeat) => self.repeat(repeat),
             ast::Stmt::Break(span) => self.leave(*span),
@@ -778,13 +814,43 @@ impl<'a> Checker<'a> {
 
         // Built inside out: the innermost allocation takes the sizes nothing else
         // claimed, and each link outside it wraps what is under it in one more.
-        let inner = sizes.len() - (arrays.len() - 1);
-        let mut ty = Ty::Arr { of: Box::new(element), shape: sizes[arrays.len() - 1..].to_vec() };
-        debug_assert_eq!(sizes[arrays.len() - 1..].len(), inner);
-        for size in sizes[..arrays.len() - 1].iter().rev() {
-            ty = Ty::Arr { of: Box::new(ty), shape: vec![*size] };
+        let mut ty = self.one_allocation(&sizes[arrays.len() - 1..], element, *arr)?;
+        for (n, size) in sizes[..arrays.len() - 1].iter().enumerate().rev() {
+            ty = self.one_allocation(std::slice::from_ref(size), ty, arrays[n])?;
         }
         Some(ty)
+    }
+
+    /// One `arr` link's worth of sizes, wrapped round what it holds.
+    ///
+    /// Only the first may say `grow`. Indexing is `(i - 1) x stride + j` and a stride is
+    /// the sizes *under* a dimension, so the outermost is the one dimension whose size
+    /// the arithmetic never asks for — and the only one that can be left unsaid.
+    fn one_allocation(&mut self, sizes: &[Size], of: Ty, arr: Span) -> Option<Ty> {
+        let grows = matches!(sizes.first(), Some(Size::Grows(_)));
+        let rest = if grows { &sizes[1..] } else { sizes };
+        if let Some(Size::Grows(at)) =
+            rest.iter().find(|size| matches!(size, Size::Grows(_)))
+        {
+            let at = *at;
+            self.errors.push(
+                Diagnostic::new("E0480", "only the first size of an allocation can grow.")
+                    .primary(at, "here")
+                    .secondary(arr, "this allocation")
+                    .rule("finding an element is `(i - 1) x stride + j`, and a stride is the sizes under a dimension — so every size but the outermost has to be known")
+                    .tip("`arr.arr.i64 (2 grow)` is two rows that each grow, which is what a growing inner dimension usually means.")
+                    .fix("`grow` first, or a number here"),
+            );
+            return None;
+        }
+        let fixed: Vec<usize> = rest
+            .iter()
+            .map(|size| match size {
+                Size::Fixed(n) => *n,
+                Size::Grows(_) => unreachable!("just refused above"),
+            })
+            .collect();
+        Some(Ty::Arr { of: Box::new(of), shape: fixed, grows })
     }
 
     /// One type link, understood or honestly refused.
@@ -1057,14 +1123,14 @@ impl<'a> Checker<'a> {
         shape: &[Span],
         shape_span: Option<Span>,
         arr: Span,
-    ) -> Option<Vec<usize>> {
+    ) -> Option<Vec<Size>> {
         let Some(span) = shape_span else {
             self.errors.push(
                 Diagnostic::new("E0426", "this array does not say how big it is.")
                     .primary(arr, "here")
                     .rule("an array says its size in brackets after the chain, because the size is part of the type")
-                    .tip("a growing array is not built yet, so every one has to say.")
-                    .fix("`arr.i64 (5)`, or whichever size was meant"),
+                    .tip("`grow` is a size too: it says there is no number yet, which is different from not saying.")
+                    .fix("`arr.i64 (5)`, or `arr.i64 (grow)` if it is to be filled afterwards"),
             );
             return None;
         };
@@ -1079,6 +1145,12 @@ impl<'a> Checker<'a> {
         }
         let mut sizes = Vec::new();
         for size in shape {
+            // The one size that is not a number: it says there is no number, because
+            // nobody knows one yet.
+            if self.text(*size) == "grow" {
+                sizes.push(Size::Grows(*size));
+                continue;
+            }
             match self.text(*size).parse::<usize>() {
                 Ok(0) => {
                     self.errors.push(
@@ -1089,13 +1161,13 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 }
-                Ok(n) => sizes.push(n),
+                Ok(n) => sizes.push(Size::Fixed(n)),
                 Err(_) => {
                     self.errors.push(
                         Diagnostic::new("E0429", format!("`{}` is not a size.", self.text(*size)))
                             .primary(*size, "here")
-                            .rule("a size is a whole number, written without marks, because it is part of a type")
-                            .fix("write a whole number"),
+                            .rule("a size is a whole number written without marks, or `grow` where there is no number yet")
+                            .fix("write a whole number, or `grow`"),
                     );
                     return None;
                 }
@@ -1211,8 +1283,8 @@ impl<'a> Checker<'a> {
         }
 
         // An array: its elements, juxtaposed, flat however many dimensions it has.
-        if let Ty::Arr { of, shape } = ty {
-            return self.array(value, of, shape, ty_span);
+        if let Ty::Arr { of, shape, grows } = ty {
+            return self.array(value, of, shape, *grows, ty_span);
         }
 
         match ty {
@@ -1350,6 +1422,7 @@ impl<'a> Checker<'a> {
         value: &ast::Value,
         of: &Ty,
         shape: &[usize],
+        grows: bool,
         ty_span: Span,
     ) -> Option<Value> {
         // A group cut out of a longer run is already the elements; only the whole
@@ -1376,9 +1449,50 @@ impl<'a> Checker<'a> {
 
         // Flat, however many allocations deep it is, since the type already gave the
         // shape. `arr.arr.i64 (2 3)` is six numbers, grouped three and three.
+        // What one element takes when it is written out, and what the whole allocation
+        // takes: a fixed one wants exactly that many, a growing one wants a multiple.
         let each = of.count();
-        let wanted: usize = shape.iter().product::<usize>() * each;
-        if written.len() != wanted {
+        let all = each * shape.iter().product::<usize>();
+
+        // Nothing under this said how big it is, so nothing says where one row of it
+        // ends. Such an array is written empty and filled afterwards -- and a fixed
+        // number of growing rows starts as that many empty ones.
+        if !of.settled() {
+            if !written.is_empty() {
+                self.errors.push(
+                    Diagnostic::new("E0484", "nothing here says where one row ends.")
+                        .primary(open.to(*close), "here")
+                        .secondary(ty_span, "what this holds says `grow`")
+                        .rule("elements are written flat and cut into rows, and a row of something that grows has no length to cut at")
+                        .tip("`add` is how one of these is filled, one array at a time.")
+                        .fix("write it empty, as `[[]]`"),
+                );
+                return None;
+            }
+            let rows = if grows { 0 } else { shape.iter().product::<usize>() };
+            return Some(Value::Array(vec![Value::Array(Vec::new()); rows]));
+        }
+
+        // A growing allocation takes however many were written, so long as they fill
+        // whole rows of whatever lies under it. A fixed one takes exactly its size.
+        if grows {
+            if all == 0 || written.len() % all != 0 {
+                self.errors.push(
+                    Diagnostic::new("E0481", format!(
+                        "this grows in rows of {}, and {} were written.",
+                        counted(all, "element"),
+                        counted(written.len(), "element")
+                    ))
+                    .primary(open.to(*close), format!("{} here", counted(written.len(), "element")))
+                    .secondary(ty_span, "declared `grow`")
+                    .rule("a growing array holds whole rows of whatever is under it, however many rows it has")
+                    .tip("`(grow grow)` can only be written empty, because nothing says where one row ends.")
+                    .fix(format!("write a multiple of {}", all)),
+                );
+                return None;
+            }
+        } else if written.len() != all {
+            let wanted = all;
             let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
             self.errors.push(
                 Diagnostic::new("E0431", format!(
@@ -1396,7 +1510,7 @@ impl<'a> Checker<'a> {
 
         // An array of arrays is built out of arrays, so the flat run is cut into
         // groups of what one inner allocation holds and each group becomes one.
-        if let Ty::Arr { of: inner, shape: inner_shape } = of {
+        if let Ty::Arr { of: inner, shape: inner_shape, grows: inner_grows } = of {
             let mut rows = Vec::with_capacity(written.len() / each);
             for group in written.chunks(each) {
                 let piece = ast::Value {
@@ -1407,7 +1521,7 @@ impl<'a> Checker<'a> {
                         .map(|t| t.span().to(group.last().expect("not empty").span()))
                         .unwrap_or(ty_span),
                 };
-                let built = self.array(&piece, inner, inner_shape, ty_span)?;
+                let built = self.array(&piece, inner, inner_shape, *inner_grows, ty_span)?;
                 rows.push(built);
             }
             return Some(Value::Array(rows));
@@ -1464,12 +1578,18 @@ impl<'a> Checker<'a> {
         let mut levels = Vec::new();
         let mut walking = held.clone();
         let mut spent = 0;
-        while let Ty::Arr { of, shape } = walking {
+        while let Ty::Arr { of, shape, grows } = walking {
             if spent == indices.len() {
                 break;
             }
-            levels.push(shape.clone());
-            spent += shape.len();
+            let mut dimensions = shape.clone();
+            if grows {
+                // The growing one is outermost and takes an index like any other; what
+                // it does not do is take part in a stride.
+                dimensions.insert(0, 0);
+            }
+            spent += dimensions.len();
+            levels.push((dimensions, grows));
             walking = *of;
         }
 
@@ -1510,12 +1630,14 @@ impl<'a> Checker<'a> {
         // lowering needs nothing new: it already follows a handle and indexes it.
         let mut reached = Value::Copy(local);
         let mut taken = 0;
-        for shape in levels {
-            let how_many = shape.len();
+        for (dimensions, _) in levels {
+            let how_many = dimensions.len();
             reached = Value::At {
                 array: Box::new(reached),
                 indices: built[taken..taken + how_many].to_vec(),
-                shape,
+                // The growing dimension is the outermost and stands in the shape as a
+                // nought: it is never a stride, so its size is never asked for.
+                shape: dimensions,
             };
             taken += how_many;
         }
@@ -1600,29 +1722,36 @@ impl<'a> Checker<'a> {
             self.errors.push(
                 Diagnostic::new("E0456", "`count` counts one array.")
                     .primary(call.name.to(call.close), "here")
-                    .rule("`count` takes the name of an array, and nothing else")
+                    .rule("`count` takes one array, and nothing else")
                     .fix("`count['xs']`"),
             );
             return None;
         };
-        let [ast::Term::Piece(ast::Piece::Name(of))] = one.terms.as_slice() else {
+        let [term] = one.terms.as_slice() else {
             self.errors.push(
                 Diagnostic::new("E0456", "`count` counts one array.")
                     .primary(one.span, "here")
-                    .rule("`count` takes the name of an array, and nothing else")
+                    .rule("`count` takes one array, and nothing else")
                     .fix("`count['xs']`"),
             );
             return None;
         };
 
-        let local = self.lookup(*of)?;
-        match &self.locals[local.0 as usize].ty {
-            Ty::Arr { shape, .. } => Some(Value::Number(shape.iter().product::<usize>() as i64)),
+        // Any array, not only one with a name: `count['jagged'[*2*]]` is how long the
+        // second row is, and a row of a jagged array is exactly the thing whose length
+        // nothing else can tell you.
+        let built = self.term(term)?;
+        match self.type_of(&built, one.span)? {
+            // Known here when the shape said a number, and asked while it runs when it
+            // said `grow`. The first costs nothing and the second costs one call.
+            Ty::Arr { shape, grows: false, .. } => {
+                Some(Value::Number(shape.iter().product::<usize>() as i64))
+            }
+            Ty::Arr { .. } => Some(Value::Count(Box::new(built))),
             other => {
-                let other = other.clone();
                 self.errors.push(
                     Diagnostic::new("E0457", format!("`count` was given {} `{}`.", other.article(), other.name()))
-                        .primary(*of, format!("{} `{}`", other.article(), other.name()))
+                        .primary(one.span, format!("{} `{}`", other.article(), other.name()))
                         .rule("only an array holds a number of things")
                         .tip("counting the characters of a `str` is a different question, and is not built yet.")
                         .fix("name an array"),
@@ -1805,6 +1934,7 @@ impl<'a> Checker<'a> {
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
             Value::Not(_) => Some(Ty::Bool),
+            Value::Count(_) => Some(Ty::I64),
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
@@ -1994,6 +2124,57 @@ impl<'a> Checker<'a> {
             return None;
         }
         Some(built)
+    }
+
+    /// `add ['xs'] = [*7*];` — one more on the end.
+    fn extend(&mut self, target: &ast::Place, value: &ast::Value, held: &Ty, word: Span) {
+        // The array being added to, which may be one reached through others.
+        let reached = match target {
+            ast::Place::Name(name) => match self.named_value(*name) {
+                Some((value, _)) => value,
+                None => return,
+            },
+            ast::Place::At { name, indices, close } => match self.at(*name, indices, *close) {
+                Some(value) => value,
+                None => return,
+            },
+        };
+        let Some(ty) = self.type_of(&reached, target.span()) else { return };
+        let _ = held;
+
+        let Ty::Arr { of, shape, grows: true } = ty else {
+            self.errors.push(
+                Diagnostic::new("E0482", format!("`{}` does not grow.", ty.name()))
+                    .primary(target.span(), format!("{} `{}`", ty.article(), ty.name()))
+                    .secondary(word, "asked to grow here")
+                    .rule("only an allocation whose first size says `grow` can be made longer, because every other one said how long it is")
+                    .tip("a shape is part of a type, and a type does not change while a program runs.")
+                    .fix("declare it `(grow)`, or `set` an element that is already there"),
+            );
+            return;
+        };
+
+        // One element at a time, so the thing being added is a whole element. An
+        // allocation with fixed dimensions under the growing one adds a *row*, which is
+        // several things at once and is not built -- `arr.arr` says the same shape and
+        // adds one inner array instead.
+        if !shape.is_empty() {
+            let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
+            self.errors.push(
+                Diagnostic::new("E0483", format!(
+                    "this grows in rows of ({}), and `add` adds one thing.",
+                    sizes.join(" ")
+                ))
+                .primary(target.span(), "here")
+                .rule("`add` puts one element on the end, and a row is several")
+                .tip(format!("`arr.arr.{} (grow {})` says the same shape and grows by whole arrays, which `add` can put on one at a time.", of.name(), sizes.join(" ")))
+                .fix("use a second `arr` link"),
+            );
+            return;
+        }
+
+        let Some(built) = self.value(value, &of, target.span()) else { return };
+        self.body.push(Stmt::Extend { array: reached, value: built });
     }
 
     /// Check a block with a scope of its own, and hand back what it means.
@@ -2305,7 +2486,7 @@ impl<'a> Checker<'a> {
 
     // --- changing ---------------------------------------------------------------------
 
-    fn set(&mut self, set: &ast::Set) {
+    fn set(&mut self, set: &ast::Set, adding: bool) {
         for (n, target) in set.targets.iter().enumerate() {
             let Some(local) = self.lookup(target.name()) else { continue };
             let held = self.locals[local.0 as usize].ty.clone();
@@ -2349,6 +2530,11 @@ impl<'a> Checker<'a> {
             }
 
             let Some(value) = set.values.get(n) else { continue };
+
+            if adding {
+                self.extend(target, value, &held, set.word);
+                continue;
+            }
 
             match target {
                 ast::Place::Name(span) => {

@@ -171,3 +171,66 @@ handles, and so the first that a tracing collector would have to walk rather tha
 just mark. Nothing is freed yet, so nothing depends on this today; it is written down
 because stage two is where it starts to. See
 [the-collector-earns-its-place.md](the-collector-earns-its-place.md).
+
+## A size may say `grow`
+
+```quench
+var.mut.arr.i64 (grow) ['xs'] = [[*1* *2* *3*]];
+add ['xs'] = [*4*];
+```
+
+A growing array is not a second type. It is an `arr` whose first size says there is
+no number yet, and everything already true of an `arr` stays true of it: indexing,
+`share` and `copy`, `arr.arr`, every element type, `==` on contents. There was one
+new thing to say and it is said in the one place that says how big something is.
+
+Three other spellings were tried first and each broke a rule the language already
+had:
+
+- **`dyn-arr`** abbreviates a word that does not describe it. "Dynamic" is inherited
+  jargon for *at runtime*; the size being unknown then is a consequence of growing,
+  not the thing itself. It would also have been the first hyphenated chain link.
+- **`grow`** alone names the behaviour and not the thing. *Grow what?*
+- **`grow.arr`** puts the noun back, and then `arr.grow.arr.i64 (3)` has an adjective
+  sitting between two nouns with nothing saying which it attaches to. That is a
+  precedence question in the middle of a type, in the language that refuses
+  precedence questions on principle. The chain has been binding-free because every
+  link is a complete thing, and an adjective breaks that the moment there are two
+  nouns to bind to.
+
+`(grow)` has none of those problems because **sizes are already positional**, one per
+`arr` link, outside in. `(2 grow)` cannot be read two ways.
+
+### Only the first size of an allocation
+
+```quench
+var.mut.arr.i64 (3 grow) ['xs'];    # refused
+```
+
+Finding an element is `(i - 1) × stride + j`, and a stride is the sizes *under* a
+dimension. The outermost has nothing above it to be a stride for, so it is the one
+dimension whose size the arithmetic never asks for — and therefore the only one that
+can be left unsaid. A growing inner dimension is what `arr.arr.i64 (2 grow)` says,
+and that one works.
+
+### What `grow` costs
+
+`count['xs']` folds to a number on a fixed array, because a shape is part of the type
+and a type does not change while a program runs. On a growing one it is a question,
+and costs one call. That is the whole of what a reader pays, and it is visible in
+the declaration.
+
+`count` takes any array now, not only a named one — `count['jagged'[*2*]]` is how
+long the second row is, and a row of a jagged array is exactly the thing whose length
+nothing else can tell you.
+
+### Written empty when nothing says where a row ends
+
+```quench
+var.mut.arr.arr.i64 (grow grow) ['jagged'] = [[]];
+```
+
+Elements are written flat and cut into rows. A row of something that itself grows
+has no length to cut at, so such an array is written empty and filled with `add`. A
+*fixed* number of growing rows — `(2 grow)` — starts as that many empty ones, which
+falls out of the same rule rather than being a second one.

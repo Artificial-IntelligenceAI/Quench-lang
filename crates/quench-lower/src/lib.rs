@@ -196,6 +196,11 @@ fn lower_body(
             Stmt::Loop { flow, body, live } => {
                 lower_loop(b, module, flow, body, *live, held, w, loops);
             }
+            Stmt::Extend { array, value } => {
+                let value = emit(b, module, value, held, w);
+                let handle = emit(b, module, array, held, w);
+                b.call_host(qir::Host::ArrayPush, &[handle, value]);
+            }
             Stmt::Give(value) => {
                 let answer = match value {
                     Some(value) => emit(b, module, value, held, w),
@@ -678,6 +683,11 @@ fn emit(
             let ret =
                 w.checked.funcs[*func as usize].returns.as_ref().map_or(qir::Ty::I64, qir_ty);
             b.call(qir::FuncId(*func), &given, ret)
+        }
+        // Asked while it runs, because the shape said `grow` and so nobody knew.
+        Value::Count(of) => {
+            let handle = emit(b, module, of, held, w);
+            b.call_host(qir::Host::ArrayLen, &[handle])
         }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);

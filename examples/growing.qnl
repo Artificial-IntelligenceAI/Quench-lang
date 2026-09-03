@@ -1,0 +1,34 @@
+# A size may say `grow` instead of a number, which is a thing a size is allowed
+# to say. Everything else about an array stays exactly as it was.
+
+START {
+    var.mut.arr.i64 (grow) ['xs'] = [[*1* *2* *3*]];
+    add ['xs'] = [*4*];
+    add ['xs'] = [*5*];
+    print.stdout[str:*xs = * 'xs' str:*, count = * count['xs'] \n];
+
+    # `count` folds to a number on a fixed array, because a shape is part of the
+    # type. On a growing one it is a question, asked while the program runs.
+    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+        print.stdout['xs'['i']];
+    }
+    print.stdout[\n];
+
+    # Two `arr` links, both growing: rows of different lengths, which is the thing
+    # fixed shapes cannot say at all. It starts empty, because nothing says where
+    # one row would end.
+    var.mut.arr.arr.i64 (grow grow) ['jagged'] = [[]];
+    var.mut.arr.i64 (grow) ['short'] = [[*1* *2*]];
+    var.mut.arr.i64 (grow) ['long']  = [[*7* *8* *9* *10*]];
+    add ['jagged'] = [share 'short'];
+    add ['jagged'] = [share 'long'];
+    add ['jagged'[*1*]] = [*3*];
+    print.stdout[str:*jagged = * 'jagged' \n];
+    print.stdout[str:*rows = * count['jagged'] str:*, row 2 holds * count['jagged'[*2*]] \n];
+
+    # And a fixed number of growing rows starts as that many empty ones.
+    var.mut.arr.arr.i64 (2 grow) ['two'] = [[]];
+    add ['two'[*1*]] = [*7*];
+    add ['two'[*2*]] = [*8*];
+    print.stdout[str:*two = * 'two' \n];
+}

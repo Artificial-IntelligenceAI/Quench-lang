@@ -235,7 +235,9 @@ impl<'a> Parser<'a> {
         }
         let open = self.bump().span;
         let mut shape = Vec::new();
-        while self.peek().kind == Kind::Number {
+        // Numbers, and the one word that stands where a number would: `grow` says
+        // there is no number yet, which is a thing a size is allowed to say.
+        while matches!(self.peek().kind, Kind::Number | Kind::Word) {
             shape.push(self.bump().span);
         }
         let close = self.expect(Kind::CloseGroup, "a shape")?;
@@ -307,6 +309,32 @@ impl<'a> Parser<'a> {
             "set" => self.set().map(Stmt::Set),
             "if" => self.conditional().map(Stmt::If),
             "loop" => self.repeat().map(Stmt::Loop),
+            // `add ['xs'] = [*7*];` — the same shape as `set`, because it is the same
+            // sentence with a different verb: this one makes the array longer.
+            "add" => {
+                let word = self.bump().span;
+                self.expect(Kind::OpenList, "`add`")?;
+                let mut targets = Vec::new();
+                loop {
+                    targets.push(self.place("`add`")?);
+                    if self.eat(Kind::Comma).is_none() {
+                        break;
+                    }
+                }
+                self.expect(Kind::CloseList, "`add`")?;
+                self.expect(Kind::Equals, "`add`")?;
+                self.expect(Kind::OpenList, "`add`")?;
+                let mut values = Vec::new();
+                loop {
+                    values.push(self.value()?);
+                    if self.eat(Kind::Comma).is_none() {
+                        break;
+                    }
+                }
+                self.expect(Kind::CloseList, "`add`")?;
+                let end = self.expect(Kind::Semicolon, "a statement")?;
+                Some(Stmt::Add(Set { word, targets, values, span: word.to(end) }))
+            }
             "give" => {
                 let word = self.bump().span;
                 // `give;` from a function that gives nothing back. The word is still
@@ -336,9 +364,9 @@ impl<'a> Parser<'a> {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var`, `set`, `print`, `if`, `loop` or `break`")
+                        .rule("a statement begins with `var`, `set`, `add`, `print`, `if`, `loop` or `break`")
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var`, `set`, `print`, `if`, `loop` or `break`?"),
+                        .fix("did you mean `var`, `set`, `add`, `print`, `if`, `loop` or `break`?"),
                 );
                 None
             }
@@ -484,24 +512,28 @@ impl<'a> Parser<'a> {
     }
 
     /// `set ['x', 'xs'[*1*]] = [*5*, *9*];`
+    /// One thing a value can be put into: a name, or one element of an array.
+    fn place(&mut self, what: &'static str) -> Option<ast::Place> {
+        let name = self.expect(Kind::Name, what)?;
+        if self.peek().kind != Kind::OpenList {
+            return Some(ast::Place::Name(name));
+        }
+        self.bump();
+        let mut indices = Vec::new();
+        while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            indices.push(self.term()?);
+        }
+        let close = self.expect(Kind::CloseList, "an index")?;
+        Some(ast::Place::At { name, indices, close })
+    }
+
     fn set(&mut self) -> Option<ast::Set> {
         let word = self.bump().span;
         self.expect(Kind::OpenList, "`set`")?;
 
         let mut targets = Vec::new();
         loop {
-            let name = self.expect(Kind::Name, "`set`")?;
-            if self.peek().kind == Kind::OpenList {
-                self.bump();
-                let mut indices = Vec::new();
-                while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
-                    indices.push(self.term()?);
-                }
-                let close = self.expect(Kind::CloseList, "an index")?;
-                targets.push(ast::Place::At { name, indices, close });
-            } else {
-                targets.push(ast::Place::Name(name));
-            }
+            targets.push(self.place("`set`")?);
             if self.eat(Kind::Comma).is_none() {
                 break;
             }

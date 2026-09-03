@@ -551,6 +551,12 @@ extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn array_push(_rt: *mut Runtime, handle: i64, value: i64) -> i64 {
+    HEAP.with(|heap| heap.borrow_mut()[handle as usize].push(value));
+    0
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn array_copy(_rt: *mut Runtime, handle: i64) -> i64 {
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
@@ -733,6 +739,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_array_len", array_len as *const u8);
     builder.symbol("quench_print_array", print_array as *const u8);
     builder.symbol("quench_array_copy", array_copy as *const u8);
+    builder.symbol("quench_array_push", array_push as *const u8);
     builder.symbol("quench_array_equal", array_equal as *const u8);
     builder.symbol("quench_exact_read", exact_read as *const u8);
     builder.symbol("quench_exact_add", exact_add as *const u8);
@@ -786,6 +793,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ArrayLen, "quench_array_len"),
         (qir::Host::PrintArray, "quench_print_array"),
         (qir::Host::ArrayCopy, "quench_array_copy"),
+        (qir::Host::ArrayPush, "quench_array_push"),
         (qir::Host::ArrayEqual, "quench_array_equal"),
         (qir::Host::ExactRead, "quench_exact_read"),
         (qir::Host::ExactAdd, "quench_exact_add"),

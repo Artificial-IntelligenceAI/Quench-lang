@@ -289,6 +289,9 @@ pub enum Host {
     ArrayGet,
     /// How many elements it has.
     ArrayLen,
+    /// `(handle, value)` — one more on the end. The only thing that changes how long an
+    /// array is once it exists, which is why a fixed one never reaches it.
+    ArrayPush,
     /// `(handle)` — a new array holding the same things. What `copy` costs, said out
     /// loud at the place that pays it.
     ArrayCopy,
@@ -344,6 +347,7 @@ impl Host {
             Host::ArraySet => "array-set",
             Host::ArrayGet => "array-get",
             Host::ArrayLen => "array-len",
+            Host::ArrayPush => "array-push",
             Host::ArrayCopy => "array-copy",
             Host::ArrayEqual => "array-equal",
             Host::PrintArray => "print-array",
@@ -371,6 +375,7 @@ impl Host {
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
+            Host::ArrayPush => &[Ty::Handle, Ty::I64],
             Host::ArrayCopy => &[Ty::Handle],
             // The last two are which [`Elements`] it holds and how many allocations
             // deep it goes, always constants by the time they arrive here.
@@ -397,6 +402,7 @@ impl Host {
     pub fn takes_an_element(self) -> Option<usize> {
         match self {
             Host::ArraySet => Some(2),
+            Host::ArrayPush => Some(1),
             _ => None,
         }
     }

@@ -139,7 +139,12 @@ Both print the same thing, which is not a coincidence — it is
   and the innermost takes what is left. Both are written flat and they print
   differently (`[1 2 3 4 5 6]` against `[[1 2 3] [4 5 6]]`), because only one of them
   can be taken apart: an index may stop where an allocation ends, and hands back the
-  array that lives there. Holds any
+  array that lives there. **A size may say `grow`** instead of a
+  number — `arr.i64 (grow)`, `arr.arr.i64 (grow grow)` for rows of different lengths —
+  which is not a second type but one more thing a size is allowed to say. `add ['xs'] =
+  [*4*];` puts one on the end. Only the *first* size of an allocation may grow, because
+  every other one is a stride. `count` folds to a number on a fixed array and costs one
+  call on a growing one, which is the whole of what `grow` costs a reader. Holds any
   built type — `arr.bool`, `arr.str`, `arr.e` — and crosses into and out of functions,
   where the **call site** says `share` or `copy` so a reader knows what happens to their
   array without opening the function. The

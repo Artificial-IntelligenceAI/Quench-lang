@@ -1202,3 +1202,75 @@ START {
         "true false",
     );
 }
+
+#[test]
+fn an_array_that_says_grow_can_be_made_longer() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.i64 (grow) ['xs'] = [[*1* *2* *3*]];
+    add ['xs'] = [*4*];
+    add ['xs'] = [*5*];
+    print.stdout['xs' str:* * count['xs']];
+}
+"),
+        "[1 2 3 4 5] 5",
+    );
+}
+
+#[test]
+fn count_is_asked_when_the_shape_did_not_say() {
+    // It folds to a constant on a fixed array and costs one call on a growing one,
+    // which is the whole of what `grow` costs a reader.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.i64 (grow) ['xs'] = [[]];
+    loop.temp.range.i64 ['i'] = [*1*, *4*] {
+        add ['xs'] = ['i' \u{d7} 'i'];
+    }
+    var.mut.i64 ['sum'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+        set ['sum'] = ['sum' + 'xs'['i']];
+    }
+    print.stdout['xs' str:* * 'sum'];
+}
+"),
+        "[1 4 9 16] 30",
+    );
+}
+
+#[test]
+fn rows_of_different_lengths() {
+    // The thing fixed shapes cannot say at all.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.i64 (grow grow) ['jagged'] = [[]];
+    var.mut.arr.i64 (grow) ['a'] = [[*1* *2*]];
+    var.mut.arr.i64 (grow) ['b'] = [[*7* *8* *9* *10*]];
+    add ['jagged'] = [share 'a'];
+    add ['jagged'] = [share 'b'];
+    add ['jagged'[*1*]] = [*3*];
+    print.stdout['jagged' str:* * count['jagged'] str:* * count['jagged'[*2*]]];
+}
+"),
+        "[[1 2 3] [7 8 9 10]] 2 4",
+    );
+}
+
+#[test]
+fn a_fixed_number_of_growing_rows_starts_as_that_many_empty_ones() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.i64 (2 grow) ['two'] = [[]];
+    add ['two'[*1*]] = [*7*];
+    add ['two'[*2*]] = [*8*];
+    add ['two'[*2*]] = [*9*];
+    print.stdout['two'];
+}
+"),
+        "[[7] [8 9]]",
+    );
+}

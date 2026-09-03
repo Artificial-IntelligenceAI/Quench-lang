@@ -303,7 +303,8 @@ fn a_shape_is_written_without_marks_because_it_is_part_of_a_type() {
 fn an_array_has_to_say_how_big_it_is() {
     let rendered = errors("START { var.immut.arr.i64 ['xs'] = [[*1*]]; }");
     assert!(rendered.contains("does not say how big it is"), "{rendered}");
-    assert!(rendered.contains("a growing array is not built yet"), "{rendered}");
+    assert!(rendered.contains("`grow` is a size too"), "{rendered}");
+    assert!(rendered.contains("`arr.i64 (grow)`"), "{rendered}");
 }
 
 #[test]
@@ -797,4 +798,47 @@ fn an_array_can_be_printed() {
     // It used to reach an `unreachable!` in the lowering, which is the worst answer a
     // language with this one's selling point could give.
     assert!(check("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs' \\n]; }").ok());
+}
+
+#[test]
+fn a_size_may_say_grow_and_only_the_first_may() {
+    assert!(check("START { var.mut.arr.i64 (grow) ['xs'] = [[*1*]]; }").ok());
+    assert!(check("START { var.mut.arr.arr.i64 (grow grow) ['j'] = [[]]; }").ok());
+    assert!(check("START { var.mut.arr.arr.i64 (2 grow) ['j'] = [[]]; }").ok());
+
+    // Finding an element is `(i - 1) x stride + j`, and a stride is the sizes under a
+    // dimension -- so the outermost is the only one whose size is never asked for.
+    let rendered = errors("START { var.mut.arr.i64 (3 grow) ['xs'] = [[*1*]]; }");
+    assert!(rendered.contains("only the first size of an allocation can grow."), "{rendered}");
+    assert!(rendered.contains("Error code: E0480"), "{rendered}");
+}
+
+#[test]
+fn only_something_that_grows_can_be_added_to() {
+    let rendered = errors("START { var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]]; add ['xs'] = [*4*]; }");
+    assert!(rendered.contains("`arr.i64 (3)` does not grow."), "{rendered}");
+    assert!(rendered.contains("Error code: E0482"), "{rendered}");
+
+    // A shape is part of a type, and a type does not change while a program runs.
+    assert!(rendered.contains("a shape is part of a type"), "{rendered}");
+}
+
+#[test]
+fn what_grows_under_something_can_only_be_written_empty() {
+    let rendered = errors("START { var.mut.arr.arr.i64 (grow grow) ['j'] = [[*1* *2*]]; }");
+    assert!(rendered.contains("nothing here says where one row ends."), "{rendered}");
+    assert!(rendered.contains("Error code: E0484"), "{rendered}");
+}
+
+#[test]
+fn count_counts_any_array_and_folds_where_it_can() {
+    // A row of a jagged array is exactly the thing whose length nothing else can say.
+    assert!(check("START {
+    var.mut.arr.arr.i64 (grow grow) ['j'] = [[]];
+    print.stdout[count['j'] str:* * count['j'[*1*]] \\n];
+}").ok());
+
+    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
+    let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
+    assert_eq!(*value, quench_check::Value::Number(6), "a fixed shape is known here");
 }

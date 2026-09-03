@@ -85,6 +85,8 @@ pub enum Stmt {
     Print(Print),
     Var(Var),
     Set(Set),
+    /// `add ['xs'] = [*7*];` — one more on the end of a growing array.
+    Add(Set),
     If(If),
     Loop(Loop),
     /// `break;` — leave the innermost loop.
@@ -199,6 +201,7 @@ impl Stmt {
             Stmt::Print(p) => p.span,
             Stmt::Var(v) => v.span,
             Stmt::Set(s) => s.span,
+            Stmt::Add(s) => s.span,
             Stmt::If(i) => i.span,
             Stmt::Loop(l) => l.span,
             Stmt::Break(s) => *s,

@@ -360,6 +360,11 @@ fn evaluate(
                 qir::Host::ArrayLen => {
                     return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
                 }
+                qir::Host::ArrayPush => {
+                    let (h, value) =
+                        (slots[args[0].0 as usize] as usize, slots[args[1].0 as usize]);
+                    heap[h].push(value);
+                }
                 qir::Host::ArrayCopy => {
                     let of = heap[slots[args[0].0 as usize] as usize].clone();
                     heap.push(of);
