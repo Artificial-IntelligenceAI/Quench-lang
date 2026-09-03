@@ -11,3 +11,4 @@ repository.workspace = true
 quench-diag = { path = "../quench-diag" }
 quench-parse = { path = "../quench-parse" }
 quench-qir = { path = "../quench-qir" }
+quench-num = { path = "../quench-num" }

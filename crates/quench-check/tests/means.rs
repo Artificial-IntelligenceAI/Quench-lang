@@ -621,3 +621,50 @@ fn start_has_nobody_to_answer() {
     // But leaving early is a thing you do on purpose, and works.
     assert!(check("START { give; }").ok());
 }
+
+#[test]
+fn an_exact_number_is_a_type_now() {
+    let out = check("START { var.immut.e ['a'] = [*-3/4*]; }");
+    assert!(out.ok(), "{}", errors("START { var.immut.e ['a'] = [*-3/4*]; }"));
+    assert_eq!(out.locals()[0].ty, quench_check::Ty::Exact);
+    assert_eq!(out.locals()[0].ty.name(), "e");
+
+    // Whole, ratio and decimal, and the decimal is exact.
+    assert!(check("START { var.immut.e ['a'] = [*12*]; }").ok());
+    assert!(check("START { var.immut.e ['a'] = [*0.1*]; }").ok());
+    assert_eq!(codes("START { var.immut.e ['a'] = [*hello*]; }"), ["E0474"]);
+}
+
+#[test]
+fn an_i64_and_an_e_do_not_mix() {
+    // They are both numbers and they are not the same number, and nothing in Quench
+    // converts on its own.
+    let source = "START {
+    var.immut.e ['a'] = [*1*];
+    var.immut.i64 ['b'] = [*2*];
+    var.immut.e ['c'] = ['a' + 'b'];
+}";
+    let rendered = errors(source);
+    assert!(rendered.contains("an `e` and an `i64`"), "{rendered}");
+    assert!(rendered.contains("Error code: E0420"), "{rendered}");
+}
+
+#[test]
+fn an_exact_division_leaves_no_remainder_to_ask_about() {
+    let rendered = errors("START { var.immut.e ['a'] = [*7*]; var.immut.e ['b'] = ['a' mod *2*]; }");
+    assert!(rendered.contains("`mod` asks what a division left over, and an `e` division leaves nothing."), "{rendered}");
+    assert!(rendered.contains("Error code: E0476"), "{rendered}");
+}
+
+#[test]
+fn a_chain_says_what_its_numbers_are() {
+    // `*0.1*` is one tenth under an `e` chain and a mistake under an `i64` one -- the
+    // same rule that makes `*1000*` a number under `i64` and four characters under `str`.
+    assert!(check("START { var.immut.e ['a'] = [*0.1* + *0.2*]; }").ok());
+    assert_eq!(codes("START { var.immut.i64 ['a'] = [*0.1* + *0.2*]; }"), ["E0407"]);
+
+    // Where the chain cannot say -- a comparison under a `bool` -- the value says it.
+    assert!(check("START { var.immut.bool ['a'] = [e:*0.1* == e:*0.3*]; }").ok());
+    // And where the chain did say, saying it again is still refused.
+    assert_eq!(codes("START { var.immut.str ['a'] = [str:*twice*]; }"), ["E0107"]);
+}

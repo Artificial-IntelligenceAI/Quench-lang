@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 quench-qir = { path = "../quench-qir" }
+quench-num = { path = "../quench-num" }
 
 [dev-dependencies]
 quench-dev = { path = "../quench-dev" }

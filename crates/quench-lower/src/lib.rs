@@ -125,6 +125,7 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
         Ty::I64 => qir::Ty::I64,
         Ty::Bool => qir::Ty::Bool,
         Ty::Str => qir::Ty::Text,
+        Ty::Exact => qir::Ty::Exact,
         Ty::Arr { .. } => qir::Ty::Handle,
     }
 }
@@ -233,6 +234,7 @@ fn lower_body(
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::I64 => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
+                                Ty::Exact => qir::Host::PrintExact,
                                 Ty::Arr { .. } => {
                                     unreachable!("refused by the checker: an array is not printed")
                                 }
@@ -472,6 +474,36 @@ fn lower_if(
     !reached
 }
 
+/// Arithmetic on exact numbers, which is a call rather than an instruction.
+///
+/// Both engines call the same code, so however large the numbers get they cannot answer
+/// differently — which is the one thing an `e` could have cost the oracle and does not.
+fn exactly(b: &mut qir::Builder, op: OpKind, l: qir::Value, r: qir::Value) -> qir::Value {
+    let host = match op {
+        OpKind::Add => qir::Host::ExactAdd,
+        OpKind::Sub => qir::Host::ExactSub,
+        OpKind::Mul => qir::Host::ExactMul,
+        OpKind::Div => qir::Host::ExactDiv,
+        // Six comparisons, one call: an `e` against an `e` is the sign of their
+        // difference, and every comparison is that sign against zero.
+        _ => {
+            let sign = b.call_host(qir::Host::ExactCompare, &[l, r]);
+            let zero = b.const_i64(0);
+            let how = match op {
+                OpKind::Lt => qir::CmpOp::Lt,
+                OpKind::Gt => qir::CmpOp::Gt,
+                OpKind::Le => qir::CmpOp::Le,
+                OpKind::Ge => qir::CmpOp::Ge,
+                OpKind::Eq => qir::CmpOp::Eq,
+                OpKind::Ne => qir::CmpOp::Ne,
+                _ => unreachable!("refused by the checker, or handled above"),
+            };
+            return b.cmp(how, sign, zero);
+        }
+    };
+    b.call_host(host, &[l, r])
+}
+
 /// A value of this type, standing for one that is never looked at.
 fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qir::Value {
     match ty {
@@ -481,6 +513,9 @@ fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qi
             b.const_text(at)
         }
         qir::Ty::I64 | qir::Ty::Handle => b.const_i64(0),
+        // Never looked at, and so never read. Making one would mean calling into the
+        // runtime for a number the checker has already promised nobody wants.
+        qir::Ty::Exact => b.const_i64(0),
     }
 }
 
@@ -527,6 +562,13 @@ fn emit(
             b.const_text(at)
         }
         Value::Number(n) => b.const_i64(*n),
+        // Read by the runtime, from the text it was written with -- because what it
+        // reads to does not fit in anything the IR can carry.
+        Value::Exact(written) => {
+            let at = module.intern(written);
+            let text = b.const_text(at);
+            b.call_host(qir::Host::ExactRead, &[text])
+        }
         Value::Bool(yes) => b.const_bool(*yes),
         // Values do not change, so copying one is naming the same value again rather
         // than doing anything.
@@ -568,6 +610,13 @@ fn emit(
         Value::Binary { op, lhs, rhs } => {
             let l = emit(b, module, lhs, held, w);
             let r = emit(b, module, rhs, held, w);
+
+            // An `e` is arithmetic the runtime does, because the answer does not fit in
+            // a register and the two engines must not each have their own idea of it.
+            if b.ty_of(l) == qir::Ty::Exact {
+                return exactly(b, *op, l, r);
+            }
+
             let floored = w.settings.division == Division::Floored;
             match op {
                 // Whether a sum that does not fit rounds or stops is the project's

@@ -139,6 +139,14 @@ Both print the same thing, which is not a coincidence — it is
   `i64` wears none either. Counted from one, because an inclusive loop with an
   unsigned counter walks `[1, count]` exactly while `[0, count - 1]` wraps on an
   empty one.
+- **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
+  three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
+  exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit
+  number squares to a 64-digit one with nothing lost. An `i64` and an `e` do not mix,
+  because nothing converts on its own; `mod` is refused, because an exact division
+  leaves nothing over. Every engine calls the *same* arithmetic, so the one addition
+  that could have made them disagree cannot. See
+  [notes/e-is-big-and-exact.md](notes/e-is-big-and-exact.md).
 - **Arithmetic works.** `+ - x / mod` and the comparisons, with the precedence
   mathematics settled applied and everything else refused. `1 + 2 x 3` is 7;
   `10 mod 3 + 1` is an error offering both readings.

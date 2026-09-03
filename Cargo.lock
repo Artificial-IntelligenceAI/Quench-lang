@@ -315,6 +315,7 @@ name = "quench-check"
 version = "0.0.0"
 dependencies = [
  "quench-diag",
+ "quench-num",
  "quench-parse",
  "quench-qir",
 ]
@@ -348,6 +349,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "quench-conf",
+ "quench-num",
  "quench-qir",
 ]
 
@@ -370,6 +372,7 @@ name = "quench-interp"
 version = "0.0.0"
 dependencies = [
  "quench-dev",
+ "quench-num",
  "quench-qir",
 ]
 

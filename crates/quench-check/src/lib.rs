@@ -23,6 +23,13 @@ pub enum Ty {
     I64,
     Str,
     Bool,
+    /// `e` — a number held exactly, however large it grows.
+    ///
+    /// Not a size. Every other number type in Quench says how many bits it has, and
+    /// this one says instead that it never rounds and never overflows: `*1*` divided by
+    /// `*3*` is a third, and a third times three is one. What that costs is that an `e`
+    /// lives on the heap and a `b64` lives in a register.
+    Exact,
     /// `arr.i64 (2 3)` — one allocation, laid out row by row.
     ///
     /// One `arr` link is one allocation however many dimensions it has, which is what
@@ -37,6 +44,7 @@ impl Ty {
             Ty::I64 => "i64".to_string(),
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
+            Ty::Exact => "e".to_string(),
             Ty::Arr { of, shape } => {
                 let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
                 format!("arr.{} ({})", of.name(), sizes.join(" "))
@@ -50,7 +58,7 @@ impl Ty {
     /// write "a i64" in them.
     pub fn article(&self) -> &'static str {
         match self {
-            Ty::I64 | Ty::Arr { .. } => "an",
+            Ty::I64 | Ty::Arr { .. } | Ty::Exact => "an",
             Ty::Str | Ty::Bool => "a",
         }
     }
@@ -68,6 +76,7 @@ impl Ty {
             "i64" => Some(Ty::I64),
             "str" => Some(Ty::Str),
             "bool" => Some(Ty::Bool),
+            "e" => Some(Ty::Exact),
             _ => None,
         }
     }
@@ -164,6 +173,9 @@ pub enum Value {
     Text(String),
     Number(i64),
     Bool(bool),
+    /// An `e`, kept as the text it was written with. Reading it is the runtime's job,
+    /// because the answer does not fit in anything the IR can carry.
+    Exact(String),
     /// The value another variable holds.
     Copy(LocalId),
     Binary { op: OpKind, lhs: Box<Value>, rhs: Box<Value> },
@@ -352,6 +364,7 @@ pub fn check(source: &str) -> Checked {
         constants: Vec::new(),
         known: HashMap::new(),
         at_top: false,
+        reading: Ty::I64,
         in_start: false,
         body: Vec::new(),
         errors,
@@ -424,6 +437,10 @@ struct Checker<'a> {
     /// True while a top-level constant is being read, where the chain carries a
     /// visibility and carries no answer about changing.
     at_top: bool,
+    /// Which number type a bare written value in a sum is read as. A chain that says
+    /// `e` makes `*0.1*` one tenth; a chain that says nothing about numbers leaves it
+    /// `i64`, and a value that wants otherwise says so itself with `e:*0.1*`.
+    reading: Ty,
     /// True while `START` is being read. It answers with `nothing` like any other
     /// function that does, but for a different reason, and so gets a different sentence.
     in_start: bool,
@@ -1042,7 +1059,15 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        let built = self.tree(value)?;
+        // The chain says what its numbers are, which is the same rule that makes
+        // `*1000*` a number under `i64` and four characters under `str`.
+        let outer = std::mem::replace(&mut self.reading, match ty {
+            Ty::Exact => Ty::Exact,
+            _ => Ty::I64,
+        });
+        let built = self.tree(value);
+        self.reading = outer;
+        let built = built?;
         let found = self.type_of(&built, value.span)?;
         if &found != ty {
             self.errors.push(
@@ -1086,6 +1111,36 @@ impl<'a> Checker<'a> {
 
         match ty {
             Ty::Arr { .. } => unreachable!("handled above"),
+            // `*12*`, `*-3/4*`, `*0.1*`. A decimal point is exact here, which is the
+            // whole reason to write one: `0.1` is one tenth, not the `b64` nearest it.
+            Ty::Exact => match value.terms.as_slice() {
+                [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
+                    let written = unmarked(self.text(*mark));
+                    match quench_num::Exact::parse(&written) {
+                        Some(_) => Some(Value::Exact(written)),
+                        None => {
+                            self.errors.push(
+                                Diagnostic::new("E0474", format!("`{written}` is not an exact number."))
+                                    .primary(*mark, "here")
+                                    .rule("an `e` is written `*12*`, `*-3/4*` or `*0.1*`, and all three are exact")
+                                    .tip("`*0.1*` is one tenth here, rather than the nearest a `b64` gets to it.")
+                                    .fix("write a whole number, a ratio, or a decimal"),
+                            );
+                            None
+                        }
+                    }
+                }
+                _ => {
+                    self.errors.push(
+                        Diagnostic::new("E0475", "an `e` is one written value, not several.")
+                            .primary(value.span, "here")
+                            .secondary(ty_span, "declared `e` here")
+                            .rule("pieces side by side build text; a number is written once")
+                            .fix("write it as one value, or put an operator between them"),
+                    );
+                    None
+                }
+            },
             Ty::Str => {
                 let mut out = String::new();
                 for term in &value.terms {
@@ -1433,6 +1488,20 @@ impl<'a> Checker<'a> {
             }
             ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
                 let digits = unmarked(self.text(*mark));
+                if self.reading == Ty::Exact {
+                    return match quench_num::Exact::parse(&digits) {
+                        Some(_) => Some(Value::Exact(digits)),
+                        None => {
+                            self.errors.push(
+                                Diagnostic::new("E0474", format!("`{digits}` is not an exact number."))
+                                    .primary(*mark, "here")
+                                    .rule("an `e` is written `*12*`, `*-3/4*` or `*0.1*`, and all three are exact")
+                                    .fix("write a whole number, a ratio, or a decimal"),
+                            );
+                            None
+                        }
+                    };
+                }
                 match digits.parse::<i64>() {
                     Ok(n) => Some(Value::Number(n)),
                     Err(_) => match digits.as_str() {
@@ -1443,21 +1512,54 @@ impl<'a> Checker<'a> {
                                 Diagnostic::new("E0407", format!("`{digits}` is not a whole number."))
                                     .primary(*mark, "here")
                                     .rule("a written value in a sum is read as a number")
-                                    .fix("write a whole number"),
+                                    .tip("`e:*0.1*` is how a value says its own type where the chain does not.")
+                                    .fix("write a whole number, or say `e:` in front of it"),
                             );
                             None
                         }
                     },
                 }
             }
-            ast::Term::Piece(ast::Piece::Written { ty: Some(span), .. }) => {
-                self.errors.push(
-                    Diagnostic::new("E0409", "this value says its type twice.")
-                        .primary(*span, "said here")
-                        .rule("a declaration's chain already says the type, so its values do not repeat it")
-                        .fix("remove it"),
-                );
-                None
+            // `e:*0.1*` — where the chain does not say what a number is, the value can.
+            // Which is the same thing a `print` list has always let a value do.
+            ast::Term::Piece(ast::Piece::Written { ty: Some(span), mark }) => {
+                let word = self.text(*span);
+                let digits = unmarked(self.text(*mark));
+                match Ty::simple(word) {
+                    Some(Ty::Exact) => match quench_num::Exact::parse(&digits) {
+                        Some(_) => Some(Value::Exact(digits)),
+                        None => {
+                            self.errors.push(
+                                Diagnostic::new("E0474", format!("`{digits}` is not an exact number."))
+                                    .primary(*mark, "here")
+                                    .rule("an `e` is written `*12*`, `*-3/4*` or `*0.1*`, and all three are exact")
+                                    .fix("write a whole number, a ratio, or a decimal"),
+                            );
+                            None
+                        }
+                    },
+                    Some(Ty::I64) => match digits.parse::<i64>() {
+                        Ok(n) => Some(Value::Number(n)),
+                        Err(_) => {
+                            self.errors.push(
+                                Diagnostic::new("E0407", format!("`{digits}` is not a whole number."))
+                                    .primary(*mark, "here")
+                                    .rule("a written value in a sum is read as a number")
+                                    .fix("write a whole number"),
+                            );
+                            None
+                        }
+                    },
+                    _ => {
+                        self.errors.push(
+                            Diagnostic::new("E0409", format!("`{word}` has nothing to do in a sum."))
+                                .primary(*span, "said here")
+                                .rule("a value in a sum says a number type or says nothing, and the chain says the rest")
+                                .fix("`e:` for an exact number, or nothing at all"),
+                        );
+                        None
+                    }
+                }
             }
             ast::Term::Piece(ast::Piece::At { name, indices, close }) => {
                 self.at(*name, indices, *close)
@@ -1495,6 +1597,7 @@ impl<'a> Checker<'a> {
         match value {
             Value::Text(_) => Some(Ty::Str),
             Value::Number(_) => Some(Ty::I64),
+            Value::Exact(_) => Some(Ty::Exact),
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
@@ -1537,16 +1640,31 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
-                if l != Ty::I64 || r != Ty::I64 {
+                if l != r || !matches!(l, Ty::I64 | Ty::Exact) {
                     self.errors.push(
                         Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
                             .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
                             .rule("arithmetic and ordering are for numbers, and nothing converts on its own")
-                            .fix("use numbers on both sides"),
+                            .tip("an `i64` and an `e` are both numbers and are not the same number, so neither becomes the other.")
+                            .fix("use the same kind of number on both sides"),
                     );
                     return None;
                 }
-                Some(if is_comparison(*op) { Ty::Bool } else { Ty::I64 })
+
+                // A remainder is what is left when a division does not go exactly, and
+                // an exact division always goes exactly. There is nothing left over.
+                if l == Ty::Exact && *op == OpKind::Mod {
+                    self.errors.push(
+                        Diagnostic::new("E0476", "`mod` asks what a division left over, and an `e` division leaves nothing.")
+                            .primary(span, "here")
+                            .rule("an `e` divided by an `e` is an `e`, exactly, so there is no remainder to ask about")
+                            .tip("`mod` is for the number types that round, which is every one of them but this.")
+                            .fix("use `i64` if you want whole-number division"),
+                    );
+                    return None;
+                }
+
+                Some(if is_comparison(*op) { Ty::Bool } else { l })
             }
         }
     }
@@ -1579,15 +1697,10 @@ impl<'a> Checker<'a> {
     /// One piece that has to be known now: text or an escape, but not a name.
     fn literal(&mut self, piece: &ast::Piece) -> Option<String> {
         match piece {
-            ast::Piece::Written { ty: Some(span), .. } => {
-                self.errors.push(
-                    Diagnostic::new("E0409", "this value says its type twice.")
-                        .primary(*span, "said here")
-                        .rule("a declaration's chain already says the type, so its values do not repeat it")
-                        .fix("remove it"),
-                );
-                None
-            }
+            // The parser already said this one: a value with no operators in it is a
+            // value whose chain supplied the type, and it complains where it sees that.
+            // Saying it twice would be one mistake becoming two.
+            ast::Piece::Written { ty: Some(_), .. } => None,
             ast::Piece::Written { ty: None, mark } => Some(unmarked(self.text(*mark))),
             ast::Piece::Escape(span) => escape(self.text(*span)).map(str::to_string).or_else(|| {
                 self.errors.push(
@@ -2097,6 +2210,23 @@ impl<'a> Checker<'a> {
                     let word = self.text(*span);
                     match Ty::simple(word) {
                         Some(Ty::Arr { .. }) => unreachable!("`arr` is not a simple type"),
+                        Some(Ty::Exact) => {
+                            let written = unmarked(self.text(*mark));
+                            match quench_num::Exact::parse(&written) {
+                                Some(_) => {
+                                    pieces.push(Printed::Value {
+                                        value: Value::Exact(written),
+                                        ty: Ty::Exact,
+                                    })
+                                }
+                                None => self.errors.push(
+                                    Diagnostic::new("E0474", format!("`{written}` is not an exact number."))
+                                        .primary(*mark, "here")
+                                        .rule("an `e` is written `*12*`, `*-3/4*` or `*0.1*`, and all three are exact")
+                                        .fix("write a whole number, a ratio, or a decimal"),
+                                ),
+                            }
+                        }
                         Some(Ty::Str) => pieces.push(Printed::Text(unmarked(self.text(*mark)))),
                         Some(Ty::Bool) => match unmarked(self.text(*mark)).as_str() {
                             "true" | "false" => {

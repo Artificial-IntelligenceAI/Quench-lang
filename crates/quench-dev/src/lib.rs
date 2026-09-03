@@ -299,7 +299,7 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         qir::Ty::Text => types::I64,
         // A handle into the heap, which is an index and so an integer as well. The
         // generated code never dereferences one; it hands it back to the runtime.
-        qir::Ty::Handle => types::I64,
+        qir::Ty::Handle | qir::Ty::Exact => types::I64,
     }
 }
 
@@ -351,6 +351,96 @@ thread_local! {
     /// to put a writer; tolerable because a worker in the oracle owns its thread.
     static SINK: std::cell::RefCell<Option<(Vec<u8>, Vec<u8>)>> =
         const { std::cell::RefCell::new(None) };
+
+    /// Every exact number the program has made. An `e` value is an index into this.
+    ///
+    /// Allocated and never freed, like the heap above. The arithmetic itself is
+    /// `quench_num`'s, which is the same code the interpreter calls — so the two cannot
+    /// answer differently, however large the numbers get.
+    static EXACTS: std::cell::RefCell<Vec<quench_num::Exact>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Put an exact number away, and give back the handle to it.
+fn keep(value: quench_num::Exact) -> i64 {
+    EXACTS.with(|exacts| {
+        let mut exacts = exacts.borrow_mut();
+        exacts.push(value);
+        exacts.len() as i64 - 1
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_read(rt: *mut Runtime, index: i64) -> i64 {
+    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
+    let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
+    let text = std::str::from_utf8(bytes).expect("the source was text");
+    let read = quench_num::Exact::parse(text)
+        .expect("refused by the checker: an `e` that is not a number");
+    keep(read)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_add(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let answer = EXACTS.with(|e| {
+        let e = e.borrow();
+        e[a as usize].add(&e[b as usize])
+    });
+    keep(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_sub(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let answer = EXACTS.with(|e| {
+        let e = e.borrow();
+        e[a as usize].sub(&e[b as usize])
+    });
+    keep(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_mul(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let answer = EXACTS.with(|e| {
+        let e = e.borrow();
+        e[a as usize].mul(&e[b as usize])
+    });
+    keep(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_div(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let answer = EXACTS.with(|e| {
+        let e = e.borrow();
+        e[a as usize].div(&e[b as usize])
+    });
+    match answer {
+        Ok(value) => keep(value),
+        // Nothing sensible to hand back, so zero -- and the generated code is about to
+        // notice the flag and stop before it can use this.
+        Err(_) => {
+            stop(rt, qir::Trap::DividedByZero);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    EXACTS.with(|e| {
+        let e = e.borrow();
+        match e[a as usize].cmp(&e[b as usize]) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn print_exact(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
+    let shown = EXACTS.with(|e| e.borrow()[value as usize].to_string());
+    write_out(stream, shown.as_bytes());
+    0
 }
 
 /// Write down why the program is stopping, for the generated code to notice.
@@ -506,6 +596,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_array_set", array_set as *const u8);
     builder.symbol("quench_array_get", array_get as *const u8);
     builder.symbol("quench_array_len", array_len as *const u8);
+    builder.symbol("quench_exact_read", exact_read as *const u8);
+    builder.symbol("quench_exact_add", exact_add as *const u8);
+    builder.symbol("quench_exact_sub", exact_sub as *const u8);
+    builder.symbol("quench_exact_mul", exact_mul as *const u8);
+    builder.symbol("quench_exact_div", exact_div as *const u8);
+    builder.symbol("quench_exact_compare", exact_compare as *const u8);
+    builder.symbol("quench_print_exact", print_exact as *const u8);
     let mut jit = JITModule::new(builder);
 
     // The text, owned here and pointed at by a table whose address the code will carry.
@@ -545,6 +642,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ArraySet, "quench_array_set"),
         (qir::Host::ArrayGet, "quench_array_get"),
         (qir::Host::ArrayLen, "quench_array_len"),
+        (qir::Host::ExactRead, "quench_exact_read"),
+        (qir::Host::ExactAdd, "quench_exact_add"),
+        (qir::Host::ExactSub, "quench_exact_sub"),
+        (qir::Host::ExactMul, "quench_exact_mul"),
+        (qir::Host::ExactDiv, "quench_exact_div"),
+        (qir::Host::ExactCompare, "quench_exact_compare"),
+        (qir::Host::PrintExact, "quench_print_exact"),
     ] {
         let mut sig = jit.make_signature();
         sig.params.push(AbiParam::new(types::I64)); // the table

@@ -125,6 +125,13 @@ pub enum Ty {
     /// A handle, not a pointer — the same reason [`Ty::Text`] is an index. What a handle
     /// *is* belongs to whichever runtime is holding the heap.
     Handle,
+    /// A number held exactly, however large it grows. An `e`.
+    ///
+    /// A handle like [`Ty::Handle`] is, and for the same reason: what an exact number
+    /// *is* belongs to whichever runtime is holding it, and no two engines may hold it
+    /// differently in any way a program can see. They do not — every engine hands the
+    /// arithmetic to the same code, which is why `e` cannot make them disagree.
+    Exact,
     /// A piece of text the program was written with.
     ///
     /// A `Text` value is an index into [`Module::text`], not a pointer — QIR may not
@@ -142,6 +149,7 @@ impl Ty {
             Ty::Bool => "bool",
             Ty::Text => "text",
             Ty::Handle => "handle",
+            Ty::Exact => "exact",
         }
     }
 }
@@ -267,6 +275,22 @@ pub enum Host {
     ArrayGet,
     /// How many elements it has.
     ArrayLen,
+
+    /// `(text)` — read an exact number from a piece of text the program was written
+    /// with. `12`, `-3/4` and `0.1` are all exact, and the last is the point of the
+    /// decimal point: one tenth, rather than the `b64` nearest to it.
+    ExactRead,
+    /// `(a, b)` — exactly, and reduced.
+    ExactAdd,
+    ExactSub,
+    ExactMul,
+    /// `(a, b)` — exactly. Can stop, on a divisor of zero.
+    ExactDiv,
+    /// `(a, b)` — `-1`, `0` or `1`. One host rather than six, because a comparison of
+    /// exact numbers is a comparison of the answer against zero and always was.
+    ExactCompare,
+    /// `(stream, exact)` — a whole number wears no denominator.
+    PrintExact,
 }
 
 impl Host {
@@ -279,6 +303,13 @@ impl Host {
             Host::ArraySet => "array-set",
             Host::ArrayGet => "array-get",
             Host::ArrayLen => "array-len",
+            Host::ExactRead => "exact-read",
+            Host::ExactAdd => "exact-add",
+            Host::ExactSub => "exact-sub",
+            Host::ExactMul => "exact-mul",
+            Host::ExactDiv => "exact-div",
+            Host::ExactCompare => "exact-compare",
+            Host::PrintExact => "print-exact",
         }
     }
 
@@ -292,6 +323,12 @@ impl Host {
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
+            Host::ExactRead => &[Ty::Text],
+            Host::ExactAdd | Host::ExactSub | Host::ExactMul | Host::ExactDiv => {
+                &[Ty::Exact, Ty::Exact]
+            }
+            Host::ExactCompare => &[Ty::Exact, Ty::Exact],
+            Host::PrintExact => &[Ty::I64, Ty::Exact],
         }
     }
 
@@ -300,13 +337,18 @@ impl Host {
     /// What it costs is a check afterwards in compiled code, so it is worth knowing
     /// which calls need one rather than guarding all of them.
     pub fn can_stop(self) -> bool {
-        matches!(self, Host::ArrayGet | Host::ArraySet)
+        matches!(self, Host::ArrayGet | Host::ArraySet | Host::ExactDiv)
     }
 
     /// What it gives back. Most give an `i64` nothing is expected to use.
     pub fn result(self) -> Ty {
         match self {
             Host::ArrayNew => Ty::Handle,
+            Host::ExactRead
+            | Host::ExactAdd
+            | Host::ExactSub
+            | Host::ExactMul
+            | Host::ExactDiv => Ty::Exact,
             _ => Ty::I64,
         }
     }

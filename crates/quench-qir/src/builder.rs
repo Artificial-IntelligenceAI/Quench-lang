@@ -54,6 +54,13 @@ impl Builder {
         BlockId(0)
     }
 
+    /// What a value already built is. Which is how the lowering knows whether a `+` is
+    /// an instruction or a call into the runtime, without carrying the type down beside
+    /// every operand.
+    pub fn ty_of(&self, value: Value) -> Ty {
+        self.value_tys[value.0 as usize]
+    }
+
     /// The nth parameter of the function.
     pub fn param(&self, n: usize) -> Value {
         self.blocks[0].params[n]

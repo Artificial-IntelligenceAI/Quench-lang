@@ -39,7 +39,13 @@ impl Parsed {
 pub fn parse(source: &str) -> Parsed {
     let lexed = quench_lex::lex(source);
     let mut parser =
-        Parser { source, tokens: lexed.tokens, at: 0, errors: lexed.errors };
+        Parser {
+            source,
+            tokens: lexed.tokens,
+            at: 0,
+            errors: lexed.errors,
+            typed_in_a_value: Vec::new(),
+        };
     let program = parser.program();
     Parsed { program, errors: parser.errors }
 }
@@ -49,6 +55,9 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     at: usize,
     errors: Vec<Diagnostic>,
+    /// Types written on a value where a chain was going to supply one. Whether that is
+    /// a mistake depends on the whole value, so it is decided once the value ends.
+    typed_in_a_value: Vec<(Span, Span)>,
 }
 
 impl<'a> Parser<'a> {
@@ -552,7 +561,7 @@ impl<'a> Parser<'a> {
         let values_start = self.expect(Kind::OpenList, "a declaration")?;
         let mut values = Vec::new();
         loop {
-            values.push(self.value()?);
+            values.push(self.value_of_a_declaration()?);
             if self.eat(Kind::Comma).is_none() {
                 break;
             }
@@ -590,6 +599,31 @@ impl<'a> Parser<'a> {
     }
 
     /// One value: terms, and whatever sits between them.
+    /// One value, and afterwards the question the pieces could not answer on their own:
+    /// whether a type written on one of them was already said by the chain.
+    ///
+    /// It was, unless operators were written — `[e:*0.1* == e:*0.3*]` under a `bool`
+    /// chain is a comparison of two numbers the chain said nothing about, and the only
+    /// place that can say is the value.
+    fn value_of_a_declaration(&mut self) -> Option<ast::Value> {
+        let before = self.typed_in_a_value.len();
+        let value = self.value();
+        let said: Vec<(Span, Span)> = self.typed_in_a_value.drain(before..).collect();
+        if let Some(value) = &value {
+            if !value.has_operators() {
+                for (ty, mark) in said {
+                    self.errors.push(
+                        Diagnostic::new("E0107", "this value says its type twice.")
+                            .primary(ty, "said here")
+                            .rule("a declaration's chain already says the type, so its values do not repeat it")
+                            .fix(format!("`{}`", self.text(mark))),
+                    );
+                }
+            }
+        }
+        value
+    }
+
     fn value(&mut self) -> Option<ast::Value> {
         let from = self.peek().span;
         let mut terms = Vec::new();
@@ -723,12 +757,7 @@ impl<'a> Parser<'a> {
                 self.expect(Kind::Colon, "a typed value")?;
                 let mark = self.expect(Kind::Written, "a typed value")?;
                 if !typed {
-                    self.errors.push(
-                        Diagnostic::new("E0107", "this value says its type twice.")
-                            .primary(ty, "said here")
-                            .rule("a declaration's chain already says the type, so its values do not repeat it")
-                            .fix(format!("`{}`", self.text(mark))),
-                    );
+                    self.typed_in_a_value.push((ty, mark));
                 }
                 Some(Piece::Written { ty: Some(ty), mark })
             }

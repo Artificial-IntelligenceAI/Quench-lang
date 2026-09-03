@@ -176,6 +176,9 @@ fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> 
     // Allocated and never freed, which is the first stage of the collector and is all
     // an array needs in order to exist. A handle is an index into this.
     let mut heap: Vec<Vec<i64>> = Vec::new();
+    // Exact numbers, allocated and never freed -- the first stage of the collector,
+    // same as the arrays above and for the same reason.
+    let mut exacts: Vec<quench_num::Exact> = Vec::new();
 
     loop {
         let top = stack.len() - 1;
@@ -195,7 +198,7 @@ fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> 
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots, module, writing, &mut heap)?;
+            let value = evaluate(inst, &stack[top].slots, module, writing, &mut heap, &mut exacts)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
@@ -245,6 +248,7 @@ fn evaluate(
     module: &qir::Module,
     writing: &mut Writing<'_>,
     heap: &mut Vec<Vec<i64>>,
+    exacts: &mut Vec<quench_num::Exact>,
 ) -> Result<i64, Trap> {
     Ok(match inst {
         qir::Inst::ConstI64(n) => *n,
@@ -289,6 +293,48 @@ fn evaluate(
                 }
                 qir::Host::ArrayLen => {
                     return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
+                }
+                qir::Host::ExactRead => {
+                    let at = slots[args[0].0 as usize] as usize;
+                    let text = &module.text[at];
+                    let read = quench_num::Exact::parse(text)
+                        .expect("refused by the checker: an `e` that is not a number");
+                    exacts.push(read);
+                    return Ok(exacts.len() as i64 - 1);
+                }
+                qir::Host::ExactAdd
+                | qir::Host::ExactSub
+                | qir::Host::ExactMul
+                | qir::Host::ExactDiv => {
+                    let (a, b) = (
+                        exacts[slots[args[0].0 as usize] as usize].clone(),
+                        exacts[slots[args[1].0 as usize] as usize].clone(),
+                    );
+                    let answer = match host {
+                        qir::Host::ExactAdd => a.add(&b),
+                        qir::Host::ExactSub => a.sub(&b),
+                        qir::Host::ExactMul => a.mul(&b),
+                        // The one exact division that has no answer. Nothing else does:
+                        // a rational divided by a rational is a rational, always.
+                        _ => a.div(&b).map_err(|_| Trap::DividedByZero)?,
+                    };
+                    exacts.push(answer);
+                    return Ok(exacts.len() as i64 - 1);
+                }
+                qir::Host::ExactCompare => {
+                    let (a, b) = (
+                        &exacts[slots[args[0].0 as usize] as usize],
+                        &exacts[slots[args[1].0 as usize] as usize],
+                    );
+                    return Ok(match a.cmp(b) {
+                        std::cmp::Ordering::Less => -1,
+                        std::cmp::Ordering::Equal => 0,
+                        std::cmp::Ordering::Greater => 1,
+                    });
+                }
+                qir::Host::PrintExact => {
+                    let value = &exacts[slots[args[1].0 as usize] as usize];
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
                 }
                 qir::Host::PrintBool => {
                     let to = writing.to(slots[args[0].0 as usize]);

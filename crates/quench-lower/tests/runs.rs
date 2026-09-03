@@ -758,3 +758,79 @@ START {
         "42 21",
     );
 }
+
+#[test]
+fn an_exact_number_never_rounds() {
+    // A third times three is one. Which is the whole of what `e` is for.
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['third'] = [*1* / *3*];
+    var.immut.e ['back'] = ['third' \u{d7} *3*];
+    print.stdout['third' str:* * 'back'];
+}
+"),
+        "1/3 1",
+    );
+}
+
+#[test]
+fn the_one_every_language_is_famous_for() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['sum'] = [e:*0.1* + e:*0.2*];
+    var.immut.bool ['right'] = [e:*0.1* + e:*0.2* == e:*0.3*];
+    print.stdout['sum' str:* * 'right'];
+}
+"),
+        "3/10 true",
+        "a decimal point is exact here, which is the reason to write one",
+    );
+}
+
+#[test]
+fn an_exact_number_is_as_big_as_it_needs_to_be() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['huge'] = [*99999999999999999999999999999999*];
+    var.immut.e ['squared'] = ['huge' \u{d7} 'huge'];
+    print.stdout['squared'];
+}
+"),
+        "9999999999999999999999999999999800000000000000000000000000000001",
+    );
+}
+
+#[test]
+fn a_whole_exact_number_wears_no_denominator() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['a'] = [*6* / *3*];
+    var.immut.e ['b'] = [*-3* / *4*];
+    var.immut.e ['c'] = [*0.5* + *0.5*];
+    print.stdout['a' str:* * 'b' str:* * 'c'];
+}
+"),
+        "2 -3/4 1",
+    );
+}
+
+#[test]
+fn exact_numbers_compare_exactly() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['third'] = [*1* / *3*];
+    var.immut.e ['half'] = [*1* / *2*];
+    print.stdout['third' str:*<* 'half' str:*: *];
+    var.immut.bool ['less'] = ['third' < 'half'];
+    var.immut.bool ['same'] = ['third' == 'third'];
+    print.stdout['less' str:* * 'same'];
+}
+"),
+        "1/3<1/2: true true",
+    );
+}
