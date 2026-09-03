@@ -181,7 +181,7 @@ Both print the same thing, which is not a coincidence — it is
   twice. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
   or stops. See
   [notes/what-a-float-is-allowed-to-do.md](notes/what-a-float-is-allowed-to-do.md).
-- **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
+- **`e` never rounds.** `var.immut.e ['third'] = [*1* div *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit
   number squares to a 64-digit one with nothing lost. An `i64` and an `e` do not mix,
@@ -197,18 +197,23 @@ Both print the same thing, which is not a coincidence — it is
   `[('n' > *0*) and ('n' < *9*)]`. Whether the right side is asked once the left has
   settled it is `[defaults] logic`, and it defaults to `stops-early` — not for speed.
   Quench stops rather than having undefined behaviour, so under `asks-both`
-  `[('n' != *0*) and ((*100* / 'n') > *5*)]` does not waste a division, it **stops the
+  `[('n' != *0*) and ((*100* div 'n') > *5*)]` does not waste a division, it **stops the
   program**. That setting was in the free pile until functions arrived and gave the
   right side something it could do.
 - **`^` answers by squaring**, in the runtime rather than as an instruction — a power
   needs a loop, and two engines each writing their own would be two chances to write it
   differently. `[*2* + *3* ^ *2*]` is 11. An `e` takes a negative exponent and gives a
   ratio; an `i64` stops, because the answer to that is a fraction and this is not one.
-- **The operators**: `+` `-`, `x`/`×` for multiply (never `*`, which is the
-  written-value mark), `/`/`÷`, `mod`, `^`/`xx` for an exponent, and `<` `>` `</=`
-  `>/=` `==` `!=`. Two spellings were not available rather than not chosen: `**`
-  lexes as an *empty written value*, and `=` would have meant a declaration outside
-  the brackets and a comparison inside them.
+- **The operators**: `+` `-`, `x`/`×` for multiply, `div`/`÷`, `mod`, `^`/`xx` for an
+  exponent, and `<` `>` `</==` `>/==` `==` `!=`. Three characters were not available
+  rather than not chosen: `*` is the written-value mark, `**` lexes as an *empty*
+  written value, and a lone `=` would have meant a declaration outside the brackets and
+  a comparison inside them.
+- **`</==` reads as its three pieces** — `<` less than, `/` or, `==` equal to — and
+  that is what division had to become a word for. `/` cannot mean both *or* and
+  *divide* in one expression, and one of the two had a spare word available. It was
+  `</=` for a while, inherited from Luarust, which composed as *less than or assign*
+  and meant nothing at all.
 - **A declaration says whether it can change**: `var.immut.i64` or `var.mut.i64`,
   and silence is neither. The same rule as visibility, applied where it had not
   been — it was the one place left where not writing something still meant

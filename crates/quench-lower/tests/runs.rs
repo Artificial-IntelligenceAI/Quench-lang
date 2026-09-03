@@ -172,7 +172,7 @@ fn arithmetic_comes_out_the_same_in_both_engines() {
     assert_eq!(said("START { var.immut.i64 ['n'] = [*7* + *3*]; print.stdout['n']; }"), "10");
     assert_eq!(said("START { var.immut.i64 ['n'] = [*7* - *3*]; print.stdout['n']; }"), "4");
     assert_eq!(said("START { var.immut.i64 ['n'] = [*7* x *3*]; print.stdout['n']; }"), "21");
-    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* / *3*]; print.stdout['n']; }"), "2");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* div *3*]; print.stdout['n']; }"), "2");
     assert_eq!(said("START { var.immut.i64 ['n'] = [*7* mod *3*]; print.stdout['n']; }"), "1");
 }
 
@@ -194,7 +194,7 @@ fn a_comparison_prints_as_a_word() {
 #[test]
 fn the_division_setting_reaches_the_answer() {
     use quench_conf::{Division, Settings};
-    let source = "START { var.immut.i64 ['n'] = [*0* - *7*]; var.immut.i64 ['q'] = ['n' / *2*]; print.stdout['q']; }";
+    let source = "START { var.immut.i64 ['n'] = [*0* - *7*]; var.immut.i64 ['q'] = ['n' div *2*]; print.stdout['q']; }";
 
     let truncated = quench_lower::lower_under(source, Settings::default());
     let floored = quench_lower::lower_under(
@@ -280,7 +280,7 @@ fn stopping_is_agreed_on_as_much_as_answering() {
     // Not merely *that* it stopped -- which stop it was. An engine that said "something
     // went wrong" could not be compared with one that said what.
     assert_eq!(
-        ended("START { var.immut.i64 ['z'] = [*0*]; var.immut.i64 ['q'] = [*1* / 'z']; print.stdout['q']; }"),
+        ended("START { var.immut.i64 ['z'] = [*0*]; var.immut.i64 ['q'] = [*1* div 'z']; print.stdout['q']; }"),
         Outcome::Trapped(Trap::DividedByZero)
     );
     assert_eq!(
@@ -306,7 +306,7 @@ fn the_one_division_that_does_not_fit() {
     let source = "START {
         var.immut.i64 ['least'] = [*-9223372036854775808*];
         var.immut.i64 ['minus'] = [*0* - *1*];
-        var.immut.i64 ['q'] = ['least' / 'minus'];
+        var.immut.i64 ['q'] = ['least' div 'minus'];
         print.stdout['q'];
     }";
     assert_eq!(ended(source), Outcome::Trapped(Trap::DivisionOverflowed));
@@ -318,7 +318,7 @@ fn a_program_that_stops_stops_where_it_stopped() {
     let source = "START {
         print.stdout[str:*before* \\n];
         var.immut.i64 ['z'] = [*0*];
-        var.immut.i64 ['q'] = [*1* / 'z'];
+        var.immut.i64 ['q'] = [*1* div 'z'];
         print.stdout[str:*after* \\n];
     }";
     let module = lower(source).module.expect("a program");
@@ -659,7 +659,7 @@ fn a_function_may_call_itself() {
     assert_eq!(
         said("\
 fn.file.i64 ['factorial'] [immut.i64 'n'] {
-    if 'n' </= *1* { give [*1*]; } else { give ['n' \u{d7} factorial['n' - *1*]]; }
+    if 'n' </== *1* { give [*1*]; } else { give ['n' \u{d7} factorial['n' - *1*]]; }
 }
 START {
     print.stdout[factorial[*10*]];
@@ -765,7 +765,7 @@ fn an_exact_number_never_rounds() {
     assert_eq!(
         said("\
 START {
-    var.immut.e ['third'] = [*1* / *3*];
+    var.immut.e ['third'] = [*1* div *3*];
     var.immut.e ['back'] = ['third' \u{d7} *3*];
     print.stdout['third' str:* * 'back'];
 }
@@ -808,8 +808,8 @@ fn a_whole_exact_number_wears_no_denominator() {
     assert_eq!(
         said("\
 START {
-    var.immut.e ['a'] = [*6* / *3*];
-    var.immut.e ['b'] = [*-3* / *4*];
+    var.immut.e ['a'] = [*6* div *3*];
+    var.immut.e ['b'] = [*-3* div *4*];
     var.immut.e ['c'] = [*0.5* + *0.5*];
     print.stdout['a' str:* * 'b' str:* * 'c'];
 }
@@ -823,8 +823,8 @@ fn exact_numbers_compare_exactly() {
     assert_eq!(
         said("\
 START {
-    var.immut.e ['third'] = [*1* / *3*];
-    var.immut.e ['half'] = [*1* / *2*];
+    var.immut.e ['third'] = [*1* div *3*];
+    var.immut.e ['half'] = [*1* div *2*];
     print.stdout['third' str:*<* 'half' str:*: *];
     var.immut.bool ['less'] = ['third' < 'half'];
     var.immut.bool ['same'] = ['third' == 'third'];
@@ -942,7 +942,7 @@ fn stopping_early_is_what_makes_a_guard_a_guard() {
     let source = "\
 START {
     var.immut.i64 ['zero'] = [*0*];
-    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* / 'zero') > *5*)];
+    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* div 'zero') > *5*)];
     print.stdout['safe'];
 }
 ";
@@ -1375,8 +1375,8 @@ fn infinity_and_not_a_number_are_answers_a_float_can_reach() {
 START {
     var.immut.b64 ['one'] = [*1*];
     var.immut.b64 ['zero'] = [*0*];
-    var.immut.b64 ['big'] = ['one' / 'zero'];
-    var.immut.b64 ['none'] = ['zero' / 'zero'];
+    var.immut.b64 ['big'] = ['one' div 'zero'];
+    var.immut.b64 ['none'] = ['zero' div 'zero'];
     var.immut.bool ['itself'] = ['none' == 'none'];
     print.stdout['big' str:* * 'none' str:* * 'itself'];
 }
@@ -1392,7 +1392,7 @@ fn no_number_says_whether_a_float_may_reach_one() {
 START {
     var.immut.b64 ['one'] = [*1*];
     var.immut.b64 ['zero'] = [*0*];
-    var.immut.b64 ['big'] = ['one' / 'zero'];
+    var.immut.b64 ['big'] = ['one' div 'zero'];
     print.stdout['big'];
 }
 ";

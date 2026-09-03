@@ -22,7 +22,7 @@ overflow = "wrap"
 # anything, so both answers gave identical programs. `stops-early` means `and` asks its
 # right side only when the left was true, and `or` only when it was false. The reason
 # it is the default is not speed -- Quench stops rather than having undefined
-# behaviour, so under `asks-both` a guard like `('n' != *0*) and ((*100* / 'n') > *5*)`
+# behaviour, so under `asks-both` a guard like `('n' != *0*) and ((*100* div 'n') > *5*)`
 # does not merely waste a division, it stops the program.
 logic = "stops-early"
 

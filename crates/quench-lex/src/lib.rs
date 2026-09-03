@@ -62,14 +62,16 @@ impl<'a> Lexer<'a> {
                 '+' => self.single(Kind::Plus),
                 '-' => self.single(Kind::Minus),
                 '\u{d7}' => self.wide(Kind::Times, '\u{d7}'),
-                '/' => self.single(Kind::Slash),
+                // `/` on its own is nothing. It is the `or` inside `</==` and `>/==`,
+                // and division is a word, which is what freed it to be that.
+                '/' => self.stray_slash(),
                 '^' => self.single(Kind::Power),
                 '\u{f7}' => self.wide(Kind::Slash, '\u{f7}'),
                 '\u{2260}' => self.wide(Kind::NotEqual, '\u{2260}'),
-                // `</=` and `>/=` carry a `/` that is part of the operator rather than a
-                // division. Nothing else begins this way, so one look ahead settles it.
-                '<' => self.maybe_slash_equals(Kind::LessEqual, Kind::Less),
-                '>' => self.maybe_slash_equals(Kind::GreaterEqual, Kind::Greater),
+                // `</==` reads as its three pieces: less than, *or*, equal to. Three
+                // characters of look-ahead settles it, and nothing else begins this way.
+                '<' => self.maybe_or_equal(Kind::LessEqual, Kind::Less),
+                '>' => self.maybe_or_equal(Kind::GreaterEqual, Kind::Greater),
                 '!' => self.bang(),
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
@@ -111,15 +113,31 @@ impl<'a> Lexer<'a> {
         self.tokens.push(Token { kind, span: Span::new(start, self.at) });
     }
 
-    /// `<` and `>` on their own, or `</=` and `>/=` when the rest follows.
-    fn maybe_slash_equals(&mut self, both: Kind, alone: Kind) {
+    /// `<` and `>` on their own, or `</==` and `>/==` when the rest follows.
+    fn maybe_or_equal(&mut self, both: Kind, alone: Kind) {
         let start = self.at;
-        if self.source[self.at + 1..].starts_with("/=") {
-            self.at += 3;
+        if self.source[self.at + 1..].starts_with("/==") {
+            self.at += 4;
             self.tokens.push(Token { kind: both, span: Span::new(start, self.at) });
         } else {
             self.single(alone);
         }
+    }
+
+    /// A `/` that is not the `or` of a comparison.
+    ///
+    /// It used to be division, which is a word now — and that is what made it free to
+    /// mean `or` in `</==`, where reading it as a division would have been nonsense.
+    fn stray_slash(&mut self) {
+        let start = self.at;
+        self.at += 1;
+        self.errors.push(
+            Diagnostic::new("E0006", "`/` on its own is not an operator.")
+                .primary(Span::new(start, self.at), "here")
+                .rule("`/` is the `or` inside `</==` and `>/==`, and nothing else")
+                .tip("division is a word, which is what let `/` mean `or` at all.")
+                .fix("`div` for division, or `\u{f7}`"),
+        );
     }
 
     /// `!=`. A `!` on its own is not anything.

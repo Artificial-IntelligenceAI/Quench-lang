@@ -718,6 +718,7 @@ impl<'a> Parser<'a> {
                 match self.text(token.span) {
                     "x" => Mul,
                     "xx" => Pow,
+                    "div" => Div,
                     "mod" => Mod,
                     "and" => And,
                     "or" => Or,

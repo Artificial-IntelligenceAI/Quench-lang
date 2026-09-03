@@ -359,16 +359,15 @@ fn a_hyphen_is_still_part_of_a_word_when_it_is_inside_one() {
 #[test]
 fn the_operators_that_need_tokens_have_them() {
     use Kind::*;
-    let cases: [(&str, Kind); 12] = [
+    let cases: [(&str, Kind); 11] = [
         ("+", Plus),
         ("-", Minus),
         ("\u{d7}", Times),
-        ("/", Slash),
         ("\u{f7}", Slash),
         ("<", Less),
         (">", Greater),
-        ("</=", LessEqual),
-        (">/=", GreaterEqual),
+        ("</==", LessEqual),
+        (">/==", GreaterEqual),
         ("!=", NotEqual),
         ("^", Power),
         ("==", EqualTo),
@@ -397,7 +396,7 @@ fn the_operators_that_are_words_need_no_tokens() {
 fn the_slash_in_a_comparison_is_not_a_division() {
     use Kind::*;
     assert_eq!(
-        kinds("[*a* </= *b*]"),
+        kinds("[*a* </== *b*]"),
         [OpenList, Written, LessEqual, Written, CloseList, End]
     );
     assert_eq!(
@@ -405,11 +404,22 @@ fn the_slash_in_a_comparison_is_not_a_division() {
         [OpenList, Written, Less, Written, CloseList, End],
         "and a lone `<` is still a lone `<`"
     );
+    // Division is a word now, which is what let `/` mean `or` in the line above.
     assert_eq!(
-        kinds("[*a* / *b*]"),
-        [OpenList, Written, Slash, Written, CloseList, End],
-        "and a lone `/` is still a division"
+        kinds("[*a* div *b*]"),
+        [OpenList, Written, Word, Written, CloseList, End],
+        "and division is a word"
     );
+}
+
+#[test]
+fn a_slash_on_its_own_is_nothing() {
+    // It was division until `</==` wanted it for `or`, and two meanings for one
+    // character in one expression is exactly the thing this language does not do.
+    let out = lex("[*a* / *b*]");
+    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
+    assert_eq!(out.errors[0].code, "E0006");
+    assert!(out.errors[0].message.contains("`/` on its own is not an operator"), "{:#?}", out.errors);
 }
 
 #[test]

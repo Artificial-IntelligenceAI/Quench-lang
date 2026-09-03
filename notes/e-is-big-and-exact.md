@@ -8,7 +8,7 @@ not one — exactness is why it never rounds, and unboundedness is what it is *f
 `e` is a type you can write now:
 
 ```quench
-var.immut.e ['third'] = [*1* / *3*];        # a third, and it stays a third
+var.immut.e ['third'] = [*1* div *3*];        # a third, and it stays a third
 var.immut.e ['back']  = ['third' × *3*];    # exactly one
 var.immut.bool ['ok'] = [e:*0.1* + e:*0.2* == e:*0.3*];   # true
 ```

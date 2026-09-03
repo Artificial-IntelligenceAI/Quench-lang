@@ -20,9 +20,9 @@ START {
     # `infinity` and `not-a-number` are values of the type, under the default
     # `[defaults] no-number = "carries-on"`.
     var.immut.b64 ['zero'] = [*0*];
-    var.immut.b64 ['big'] = ['a' / 'zero'];
+    var.immut.b64 ['big'] = ['a' div 'zero'];
     print.stdout['a' str:* / 0 = * 'big' \n];
-    var.immut.b64 ['none'] = ['zero' / 'zero'];
+    var.immut.b64 ['none'] = ['zero' div 'zero'];
     var.immut.bool ['itself'] = ['none' == 'none'];
     print.stdout['none' str:*, equal to itself: * 'itself' \n];
 }

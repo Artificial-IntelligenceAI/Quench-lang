@@ -112,7 +112,7 @@ impl Exact {
     }
 
     pub fn add(&self, other: &Exact) -> Exact {
-        // a/b + c/d = (a·d + c·b) / (b·d). Reducing afterwards is what keeps the
+        // a/b + c/d = (a·d + c·b) div (b·d). Reducing afterwards is what keeps the
         // denominator from growing without bound over a long run of additions.
         let numerator = self
             .numerator

@@ -45,7 +45,7 @@ no-number = "stops"        # stop, in the same place in every engine
 ```
 
 **Semantic**, so it multiplies the oracle like `division`, `overflow` and `logic`.
-`*1.0* / *0.0*` is `infinity` under one and a stop under the other.
+`*1.0* div *0.0*` is `infinity` under one and a stop under the other.
 
 `carries-on` is the default, and the argument is different from the one for
 `overflow = wrap`. It is not that it is free (though it is): **`b64` *is* IEEE 754

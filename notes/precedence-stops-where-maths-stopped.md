@@ -93,7 +93,7 @@ Suggested fix(s):
 | divide | `/` or `÷` |
 | remainder | `mod` |
 | exponent | `^` or `xx` — multiplying twice |
-| compare | `<` `>` `</=` `>/=` `==` `!=` `≠` |
+| compare | `<` `>` `</==` `>/==` `==` `!=` `≠` |
 
 `x`, `xx`, `mod` and `eq-to` need no tokens at all: Quench reserves no words, so an
 operator spelled with letters costs nothing, and `x` is still available as a variable's
@@ -149,3 +149,37 @@ the types being different, said out loud at the point it matters.
 
 A *fractional* exponent stops for an `e` too. The square root of two is the oldest
 number known not to be a ratio, and `e` holds ratios.
+
+## `</==`, and why division is a word
+
+```quench
+['a' </== 'b']     # `<` less than, `/` or, `==` equal to
+['a' div 'b']      # and division, which used to be `/`
+```
+
+It was `</=` for a long time, carried over from Luarust with the error format, and
+nobody looked at it. Read as its pieces it says *less than, or divide, or assign* —
+because in Quench `/` divided and `=` assigned. Every piece of it was wrong.
+
+`</==` fixes that by making each piece mean what it says, which needs `/` to mean
+**or** — and `/` cannot mean *or* and *divide* in the same expression. So one of the
+two had to move, and division was the one with a word available: `div`, beside `mod`,
+where it reads like what it is.
+
+Two things fall out that are worth having.
+
+**A lone `/` is now nothing**, and says so rather than being read as something:
+
+```text
+`/` on its own is not an operator.
+Rule(s) broken: `/` is the `or` inside `</==` and `>/==`, and nothing else
+Tip(s): division is a word, which is what let `/` mean `or` at all.
+Suggested fix(s): `div` for division, or `÷`
+```
+
+**And `div` beside `mod` makes an asymmetry visible that was always there.** They
+look alike and they do not bind alike: `[*a* div *b* + *c*]` is `(a div b) + c`,
+because mathematics settled where division sits, and `[*a* mod *b* + *c*]` is an
+error, because nothing ever settled where `mod` does. That was true when division was
+`/` and nobody could see it. Now the two are the same shape on the page and the
+difference is the language's, not the punctuation's.
