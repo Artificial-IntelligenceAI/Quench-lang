@@ -116,10 +116,11 @@ var.immut.str ['c'] = [str:*twice*];
 ";
     let out = parse(source);
     let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
-    // `wobble ['x'];` is not among them: a bare word before a bracket is a call, so the
-    // parser understands it perfectly and the checker is what says nothing is called
-    // that -- which is a better sentence than the parser could have written.
-    assert_eq!(codes, ["E0105", "E0106", "E0107"], "{:#?}", out.errors);
+    // `wobble ['x'];` is among them now. It used to be a call -- a bare word before a
+    // bracket -- and the checker was what said nothing was called that. A call says
+    // `call`, so this is a statement beginning with a word that starts no statement,
+    // and the parser is where that is noticed.
+    assert_eq!(codes, ["E0105", "E0106", "E0104", "E0107"], "{:#?}", out.errors);
 }
 
 #[test]
@@ -242,7 +243,7 @@ fn a_while_loop_wears_no_brackets_around_its_question() {
 #[test]
 fn a_bare_word_before_a_bracket_is_a_call() {
     // And a quoted one before it is an index. Names being quoted is what settles this.
-    let source = "START {\nvar.immut.i64 ['n'] = [count['xs']];\n}\n";
+    let source = "START {\nvar.immut.i64 ['n'] = [call count['xs']];\n}\n";
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
     let Stmt::Var(var) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
@@ -292,15 +293,13 @@ fn a_call_separates_its_arguments_with_commas() {
     // Juxtaposition builds one value out of pieces, which is why it cannot also
     // separate two of them.
     //
-    // The parser does not know this is a call rather than an index -- both are a name
-    // between marks and a bracketed list, and which one it is depends on what the name
-    // was declared as. So what it produces is the list, and the checker decides.
-    let source = "START {\nprint.stdout['add'[*1* + *2*, *3*]];\n}\n";
+    let source = "START {\nprint.stdout[call 'add'[*1* + *2*, *3*]];\n}\n";
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
     let Stmt::Print(print) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
-    let quench_parse::Piece::At { indices, .. } = &print.pieces[0] else { panic!() };
-    assert_eq!(indices.len(), 2);
-    assert_eq!(indices[0].terms.len(), 2, "`*1*` and `*2*`");
-    assert!(indices[0].has_operators());
+    let quench_parse::Piece::Call(call) = &print.pieces[0] else { panic!() };
+    assert!(call.marked, "a writer's own function wears marks");
+    assert_eq!(call.args.len(), 2);
+    assert_eq!(call.args[0].terms.len(), 2, "`*1*` and `*2*`");
+    assert!(call.args[0].has_operators());
 }

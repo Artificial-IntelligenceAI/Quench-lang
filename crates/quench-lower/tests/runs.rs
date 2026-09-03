@@ -632,7 +632,7 @@ fn count_bounds_a_loop_over_an_array() {
 START {
     var.immut.arr.i64 (4) ['xs'] = [[*7* *8* *9* *10*]];
     var.mut.i64 ['sum'] = [*0*];
-    loop.temp.range.i64 ['n'] = [*1*, count['xs']] {
+    loop.temp.range.i64 ['n'] = [*1*, call count['xs']] {
         set ['sum'] = ['sum' + 'xs'['n']];
     }
     print.stdout['sum'];
@@ -650,7 +650,7 @@ fn.file.i64 ['add'] [immut.i64 'a', immut.i64 'b'] {
     give ['a' + 'b'];
 }
 START {
-    print.stdout['add'[*1*, *2*]];
+    print.stdout[call 'add'[*1*, *2*]];
 }
 "),
         "3",
@@ -662,10 +662,10 @@ fn a_function_may_call_itself() {
     assert_eq!(
         said("\
 fn.file.i64 ['factorial'] [immut.i64 'n'] {
-    if 'n' <== *1* { give [*1*]; } else { give ['n' x 'factorial'['n' - *1*]]; }
+    if 'n' <== *1* { give [*1*]; } else { give ['n' x call 'factorial'['n' - *1*]]; }
 }
 START {
-    print.stdout['factorial'[*10*]];
+    print.stdout[call 'factorial'[*10*]];
 }
 "),
         "3628800",
@@ -678,13 +678,13 @@ fn two_functions_may_call_each_other() {
     assert_eq!(
         said("\
 fn.file.bool ['even'] [immut.i64 'n'] {
-    if 'n' == *0* { give [*true*]; } else { give ['odd'['n' - *1*]]; }
+    if 'n' == *0* { give [*true*]; } else { give [call 'odd'['n' - *1*]]; }
 }
 fn.file.bool ['odd'] [immut.i64 'n'] {
-    if 'n' == *0* { give [*false*]; } else { give ['even'['n' - *1*]]; }
+    if 'n' == *0* { give [*false*]; } else { give [call 'even'['n' - *1*]]; }
 }
 START {
-    print.stdout['even'[*10*] str:* * 'odd'[*10*]];
+    print.stdout[call 'even'[*10*] str:* * call 'odd'[*10*]];
 }
 "),
         "true false",
@@ -699,7 +699,7 @@ fn.file.nothing ['greet'] [immut.str 'name'] {
     print.stdout[str:*Hello, * 'name' str:*!*];
 }
 START {
-    'greet'[*Tankun*];
+    call 'greet'[*Tankun*];
 }
 "),
         "Hello, Tankun!",
@@ -717,7 +717,7 @@ fn.file.nothing ['upto'] [immut.i64 'stop'] {
     }
 }
 START {
-    'upto'[*3*];
+    call 'upto'[*3*];
     give;
 }
 "),
@@ -736,7 +736,7 @@ fn.file.bool ['past'] [immut.i64 'n'] {
     give ['n' > 'LIMIT'];
 }
 START {
-    print.stdout['NAME' str:* * 'LIMIT' str:* * 'past'[*42*]];
+    print.stdout['NAME' str:* * 'LIMIT' str:* * call 'past'[*42*]];
 }
 "),
         "Quench 10 true",
@@ -755,7 +755,7 @@ fn.file.i64 ['doubled'] [mut.i64 'n'] {
 }
 START {
     var.immut.i64 ['mine'] = [*21*];
-    print.stdout['doubled'['mine'] str:* * 'mine'];
+    print.stdout[call 'doubled'['mine'] str:* * 'mine'];
 }
 "),
         "42 21",
@@ -917,7 +917,7 @@ fn.file.bool ['shout'] [immut.bool 'answer'] {
 }
 START {
     var.immut.bool ['f'] = [*false*];
-    var.immut.bool ['x'] = ['f' and 'shout'[*true*]];
+    var.immut.bool ['x'] = ['f' and call 'shout'[*true*]];
     print.stdout[str:*/* 'x'];
 }
 ";
@@ -1093,22 +1093,22 @@ fn an_array_crosses_into_a_function_and_the_call_says_how() {
         said("\
 fn.file.i64 ['total'] [immut.arr.i64 (4) 'xs'] {
     var.mut.i64 ['sum'] = [*0*];
-    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+    loop.temp.range.i64 ['i'] = [*1*, call count['xs']] {
         set ['sum'] = ['sum' + 'xs'['i']];
     }
     give ['sum'];
 }
 fn.file.nothing ['zero_it'] [mut.arr.i64 (4) 'xs'] {
-    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+    loop.temp.range.i64 ['i'] = [*1*, call count['xs']] {
         set ['xs'['i']] = [*0*];
     }
 }
 START {
     var.mut.arr.i64 (4) ['xs'] = [[*1* *2* *3* *4*]];
-    print.stdout['total'[share 'xs'] str:* *];
-    'zero_it'[copy 'xs'];
+    print.stdout[call 'total'[share 'xs'] str:* *];
+    call 'zero_it'[copy 'xs'];
     print.stdout['xs' str:* *];
-    'zero_it'[share 'xs'];
+    call 'zero_it'[share 'xs'];
     print.stdout['xs'];
 }
 "),
@@ -1129,7 +1129,7 @@ fn.file.arr.i64 (3) ['triple'] [immut.i64 'n'] {
     give [share 'out'];
 }
 START {
-    print.stdout['triple'[*5*]];
+    print.stdout[call 'triple'[*5*]];
 }
 "),
         "[5 10 15]",
@@ -1209,7 +1209,7 @@ START {
     var.mut.arr.i64 (grow) ['xs'] = [[*1* *2* *3*]];
     add ['xs'] = [*4*];
     add ['xs'] = [*5*];
-    print.stdout['xs' str:* * count['xs']];
+    print.stdout['xs' str:* * call count['xs']];
 }
 "),
         "[1 2 3 4 5] 5",
@@ -1228,7 +1228,7 @@ START {
         add ['xs'] = ['i' x 'i'];
     }
     var.mut.i64 ['sum'] = [*0*];
-    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+    loop.temp.range.i64 ['i'] = [*1*, call count['xs']] {
         set ['sum'] = ['sum' + 'xs'['i']];
     }
     print.stdout['xs' str:* * 'sum'];
@@ -1250,7 +1250,7 @@ START {
     add ['jagged'] = [share 'a'];
     add ['jagged'] = [share 'b'];
     add ['jagged'[*1*]] = [*3*];
-    print.stdout['jagged' str:* * count['jagged'] str:* * count['jagged'[*2*]]];
+    print.stdout['jagged' str:* * call count['jagged'] str:* * call count['jagged'[*2*]]];
 }
 "),
         "[[1 2 3] [7 8 9 10]] 2 4",
@@ -1318,7 +1318,7 @@ fn.file.str ['greet'] [immut.str 'name'] {
 START {
     var.immut.str ['name'] = [*Tankun*];
     var.immut.str ['hello'] = [*Hello, * 'name'];
-    print.stdout['hello' str:*/* 'greet'[*Claude*]];
+    print.stdout['hello' str:*/* call 'greet'[*Claude*]];
 }
 "),
         "Hello, Tankun/Hello, Claude!",

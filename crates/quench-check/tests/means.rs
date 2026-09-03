@@ -588,7 +588,7 @@ fn a_temp_counter_is_gone_afterwards_and_a_perm_one_is_not() {
 fn count_is_answered_where_the_shape_was_written() {
     // A shape never changes, so this is a number long before anything runs -- which is
     // why a loop bounded by `count` costs nothing at all.
-    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
+    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [call count['m']]; }");
     assert!(out.ok());
     let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
     assert_eq!(
@@ -597,8 +597,11 @@ fn count_is_answered_where_the_shape_was_written() {
         "every element, however many dimensions"
     );
 
-    assert_eq!(codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [count['n']]; }"), ["E0457"]);
-    assert_eq!(codes("START { var.immut.i64 ['c'] = [size['n']]; }"), ["E0455"]);
+    assert_eq!(codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [call count['n']]; }"), ["E0457"]);
+    // Without `call` in front of it this is not a call at all, and the parser says so
+    // before any of it is looked up.
+    assert_eq!(codes("START { var.immut.i64 ['c'] = [size['n']]; }"), ["E0109"]);
+    assert_eq!(codes("START { var.immut.i64 ['c'] = [call size['n']]; }"), ["E0455"]);
 }
 
 #[test]
@@ -636,13 +639,10 @@ START { }
 #[test]
 fn a_call_is_checked_against_what_was_declared() {
     let one = "fn.file.i64 ['twice'] [immut.i64 'n'] { give ['n' + 'n']; }\n";
-    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = ['twice'[*1*, *2*]]; }}")), ["E0470"]);
-    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = ['twice'[*a*]]; }}")), ["E0407"]);
-    // E0411 rather than E0406, because a call and an index are written the same way
-    // and so are refused the same way: `['ns'[*1*]]` under a `str` chain has always
-    // said this, and a call saying something else would be the odd one.
-    assert_eq!(codes(&format!("{one}START {{ var.immut.str ['x'] = ['twice'[*1*]]; }}")), ["E0411"]);
-    assert!(check(&format!("{one}START {{ var.immut.i64 ['x'] = ['twice'[*21*]]; }}")).ok());
+    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = [call 'twice'[*1*, *2*]]; }}")), ["E0470"]);
+    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = [call 'twice'[*a*]]; }}")), ["E0407"]);
+    assert_eq!(codes(&format!("{one}START {{ var.immut.str ['x'] = [call 'twice'[*1*]]; }}")), ["E0406"]);
+    assert!(check(&format!("{one}START {{ var.immut.i64 ['x'] = [call 'twice'[*21*]]; }}")).ok());
 }
 
 #[test]
@@ -651,10 +651,10 @@ fn a_function_written_underneath_can_still_be_called() {
     // functions call each other and one call itself.
     assert!(check("\
 fn.file.bool ['even'] [immut.i64 'n'] {
-    if 'n' == *0* { give [*true*]; } else { give ['odd'['n' - *1*]]; }
+    if 'n' == *0* { give [*true*]; } else { give [call 'odd'['n' - *1*]]; }
 }
 fn.file.bool ['odd'] [immut.i64 'n'] {
-    if 'n' == *0* { give [*false*]; } else { give ['even'['n' - *1*]]; }
+    if 'n' == *0* { give [*false*]; } else { give [call 'even'['n' - *1*]]; }
 }
 START { }
 ").ok());
@@ -892,10 +892,10 @@ fn count_counts_any_array_and_folds_where_it_can() {
     // A row of a jagged array is exactly the thing whose length nothing else can say.
     assert!(check("START {
     var.mut.arr.arr.i64 (grow grow) ['j'] = [[]];
-    print.stdout[count['j'] str:* * count['j'[*1*]] \\n];
+    print.stdout[call count['j'] str:* * call count['j'[*1*]] \\n];
 }").ok());
 
-    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
+    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [call count['m']]; }");
     let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
     assert_eq!(
         *value,
@@ -920,71 +920,76 @@ START {
     assert!(codes(source).is_empty(), "{}", errors(source));
 }
 
+
 #[test]
-fn a_function_is_named_with_whatever_any_other_name_holds() {
-    // There was a rule here that a function's name had to be writable as a bare word,
-    // because a call was one. A call is a name between marks now, like every other
-    // place a name appears, so the rule went with it.
+fn a_call_says_that_it_is_one() {
+    // Without `call`, a name before a bracket is an index and a bare word before one is
+    // nothing at all -- so a reader never has to find a declaration to know whether a
+    // line hands control somewhere else.
+    let one = "fn.file.i64 ['double'] [immut.i64 'n'] { give ['n' x *2*]; }\n";
+    let bare = errors(&format!("{one}START {{ var.immut.i64 ['x'] = [double[*2*]]; }}"));
+    assert!(bare.contains("`double` is not something to index"), "{bare}");
+    assert!(bare.contains("call double[…]"), "{bare}");
+    assert!(bare.contains("Error code: E0109"), "{bare}");
+
+    // A name between marks without `call` is an index, and this one is not an array.
+    let indexed = errors(&format!("{one}START {{ var.immut.i64 ['x'] = ['double'[*2*]]; }}"));
+    assert!(indexed.contains("is not declared"), "{indexed}");
+
+    assert!(check(&format!("{one}START {{ var.immut.i64 ['x'] = [call 'double'[*2*]]; }}")).ok());
+}
+
+#[test]
+fn marks_after_call_say_who_made_the_thing_being_called() {
+    // `call count[...]` came with Quench and `call 'count'[...]` did not, so nothing the
+    // language provides has to be held back from a writer who wanted that name.
     let source = "\
-fn.file.i64 ['\u{1f525}'] [immut.i64 'n'] { give ['n' x *100*]; }
-fn.file.nothing ['a name with spaces'] [immut.i64 'n'] { print.stdout['n']; }
-fn.file.i64 ['\u{e17}\u{e27}\u{e35}\u{e04}\u{e39}\u{e13}'] [immut.i64 'n'] { give ['n' x *2*]; }
+fn.file.i64 ['count'] [immut.i64 'n'] { give ['n' + *1*]; }
 START {
-    var.immut.i64 ['a'] = ['\u{1f525}'[*3*]];
-    var.immut.i64 ['b'] = ['\u{e17}\u{e27}\u{e35}\u{e04}\u{e39}\u{e13}'[*21*]];
-    'a name with spaces'[*7*];
-    print.stdout['a' 'b'];
+    var.immut.arr.i64 (2) ['xs'] = [*7* *9*];
+    var.immut.i64 ['mine'] = [call 'count'[*1*]];
+    var.immut.i64 ['theirs'] = [call count['xs']];
+    print.stdout['mine' 'theirs'];
+}
+";
+    assert!(codes(source).is_empty(), "{}", errors(source));
+
+    // And each says the other kind is the one it is not.
+    let missing = errors("START { var.immut.i64 ['x'] = [call 'nowt'[*1*]]; }");
+    assert!(missing.contains("a function the writer declared"), "{missing}");
+    let unknown = errors("START { var.immut.i64 ['x'] = [call nowt[*1*]]; }");
+    assert!(unknown.contains("something the language provides"), "{unknown}");
+}
+
+#[test]
+fn a_function_and_a_variable_may_share_a_name() {
+    // Nothing at a use site is ambiguous any more: `call 'total'[*1*]` is the function
+    // and `'total'[*1*]` is the array, and both say which on the line where they are.
+    let source = "\
+fn.file.i64 ['total'] [immut.i64 'n'] { give ['n' x *100*]; }
+START {
+    var.immut.arr.i64 (2) ['total'] = [*7* *9*];
+    var.immut.i64 ['called'] = [call 'total'[*3*]];
+    var.immut.i64 ['indexed'] = ['total'[*2*]];
+    print.stdout['called' 'indexed'];
 }
 ";
     assert!(codes(source).is_empty(), "{}", errors(source));
 }
 
 #[test]
-fn a_bare_word_before_a_bracket_is_the_language_and_nothing_else() {
-    // Which is what a reader gets for the marks: `count[...]` came with Quench and
-    // `'count'[...]` did not, and neither has to be looked up to be told apart.
-    let source = "fn.file.i64 ['double'] [immut.i64 'n'] { give ['n' x *2*]; }\
-START { var.immut.i64 ['x'] = [double[*2*]]; }";
-    let rendered = errors(source);
-    assert!(rendered.contains("there is nothing called `double`"), "{rendered}");
-    assert!(rendered.contains("`'double'[…]`"), "{rendered}");
-    assert!(rendered.contains("Error code: E0455"), "{rendered}");
-
-    // And a bare word that names nothing at all says which of the two it is.
-    let nothing = errors("START { var.immut.i64 ['x'] = [wibble[*2*]]; }");
-    assert!(nothing.contains("the language provides"), "{nothing}");
-}
-
-#[test]
-fn a_name_is_a_function_or_a_variable_and_not_both() {
-    // Nothing at a use site could tell them apart: `'tenth'[*1*]` is a call when the
-    // name is a function's and an index when it is a variable's, so it cannot be both.
+fn a_function_is_named_with_whatever_any_other_name_holds() {
+    // There was a rule here that a function's name had to be writable as a bare word,
+    // because a call was one. A call says `call` and wears marks now, so the rule went.
     let source = "\
-fn.file.i64 ['tenth'] [immut.i64 'n'] { give ['n']; }
-START { var.immut.arr.i64 (2) ['tenth'] = [*7* *9*]; }
-";
-    let rendered = errors(source);
-    assert!(rendered.contains("`'tenth'` is already a function"), "{rendered}");
-    assert!(rendered.contains("`'tenth'[…]` cannot be a call and an index"), "{rendered}");
-    assert!(rendered.contains("Error code: E0492"), "{rendered}");
-
-    // A parameter is a name like any other.
-    let param = errors("fn.file.i64 ['f'] [immut.i64 'f'] { give ['f']; } START { }");
-    assert!(param.contains("Error code: E0492"), "{param}");
-}
-
-#[test]
-fn nothing_is_reserved_now_that_a_call_wears_marks() {
-    // `count` had to be kept from being a function's name, because a call was a bare
-    // word and the two would have collided. They cannot collide any more, so nothing
-    // the language provides needs holding back from a writer.
-    let source = "\
-fn.file.i64 ['count'] [immut.i64 'n'] { give ['n' + *1*]; }
+fn.file.i64 ['\u{1f525}'] [immut.i64 'n'] { give ['n' x *100*]; }
+fn.file.nothing ['a name with spaces'] [immut.i64 'n'] { print.stdout['n']; }
+fn.file.i64 ['\u{e17}\u{e27}\u{e35}\u{e04}\u{e39}\u{e13}'] [immut.i64 'n'] { give ['n' x *2*]; }
 START {
-    var.immut.arr.i64 (2) ['xs'] = [*7* *9*];
-    var.immut.i64 ['mine'] = ['count'[*1*]];
-    var.immut.i64 ['theirs'] = [count['xs']];
-    print.stdout['mine' 'theirs'];
+    var.immut.i64 ['a'] = [call '\u{1f525}'[*3*]];
+    var.immut.i64 ['b'] = [call '\u{e17}\u{e27}\u{e35}\u{e04}\u{e39}\u{e13}'[*21*]];
+    call 'a name with spaces'[*7*];
+    print.stdout['a' 'b'];
 }
 ";
     assert!(codes(source).is_empty(), "{}", errors(source));

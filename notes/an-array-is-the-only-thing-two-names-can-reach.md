@@ -215,12 +215,12 @@ and that one works.
 
 ### What `grow` costs
 
-`count['xs']` folds to a number on a fixed array, because a shape is part of the type
+`call count['xs']` folds to a number on a fixed array, because a shape is part of the type
 and a type does not change while a program runs. On a growing one it is a question,
 and costs one call. That is the whole of what a reader pays, and it is visible in
 the declaration.
 
-`count` takes any array now, not only a named one — `count['jagged'[*2*]]` is how
+`count` takes any array now, not only a named one — `call count['jagged'[*2*]]` is how
 long the second row is, and a row of a jagged array is exactly the thing whose length
 nothing else can tell you.
 

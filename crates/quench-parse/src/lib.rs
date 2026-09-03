@@ -293,21 +293,11 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) -> Option<Stmt> {
         let token = self.peek();
-        // `'greet'[*x*];` — a function called for what it does rather than its answer.
-        // Its name is between marks like every other name a writer gives, so this is
-        // the one statement that does not begin with a word.
-        if token.kind == Kind::Name
-            && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
-        {
-            let (name, args, close) = self.reaching()?;
-            self.expect(Kind::Semicolon, "a statement")?;
-            return Some(Stmt::Do(ast::Call { name, args, close }));
-        }
         if token.kind != Kind::Word {
             self.errors.push(
                 Diagnostic::new("E0103", "a statement begins with a word.")
                     .primary(token.span, format!("found {}", token.kind.describe()))
-                    .rule("every statement starts by saying what it is — `var`, `print`, or a call")
+                    .rule("every statement starts by saying what it is — `var`, `print`, `call`")
                     .fix("start the line with what it does"),
             );
             return None;
@@ -358,9 +348,9 @@ impl<'a> Parser<'a> {
                 let end = self.expect(Kind::Semicolon, "a statement")?;
                 Some(Stmt::Give(ast::Give { word, value: Some(value), span: word.to(end) }))
             }
-            word if self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
-                && !matches!(word, "var" | "set" | "print" | "if" | "loop") =>
-            {
+            // `call 'greet'[*x*];` — written for what it does rather than its answer,
+            // and beginning with a word like every other statement.
+            "call" => {
                 let call = self.invocation()?;
                 self.expect(Kind::Semicolon, "a statement")?;
                 Some(Stmt::Do(call))
@@ -374,9 +364,9 @@ impl<'a> Parser<'a> {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var`, `set`, `add`, `print`, `if`, `loop` or `break`")
+                        .rule("a statement begins with `var`, `set`, `add`, `print`, `call`, `if`, `loop` or `break`")
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var`, `set`, `add`, `print`, `if`, `loop` or `break`?"),
+                        .fix("did you mean `var`, `set`, `add`, `print`, `call`, `if`, `loop` or `break`?"),
                 );
                 None
             }
@@ -402,10 +392,8 @@ impl<'a> Parser<'a> {
                 pieces.push(ast::Piece::At { name, indices, close });
                 continue;
             }
-            // And a bare word before one is a call, for the same reason it is elsewhere.
-            if self.peek().kind == Kind::Word
-                && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
-            {
+            // And `call` before one is a call, for the same reason it is elsewhere.
+            if self.peek().kind == Kind::Word && self.text(self.peek().span) == "call" {
                 let ast::Term::Call(call) = self.term()? else {
                     unreachable!("just matched a call")
                 };
@@ -440,8 +428,20 @@ impl<'a> Parser<'a> {
     }
 
     fn invocation(&mut self) -> Option<ast::Call> {
+        let word = self.bump().span;
+        let named = self.peek();
+        if !matches!(named.kind, Kind::Name | Kind::Word) {
+            self.errors.push(
+                Diagnostic::new("E0110", "a `call` says what it calls.")
+                    .primary(named.span, format!("found {}", named.kind.describe()))
+                    .rule("`call` is followed by a name and the values it is given")
+                    .fix("`call 'double'[*2*]`"),
+            );
+            return None;
+        }
+        let marked = named.kind == Kind::Name;
         let name = self.bump().span;
-        self.bump();
+        self.expect(Kind::OpenList, "a call")?;
         let mut args = Vec::new();
         while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
             args.push(self.value()?);
@@ -450,7 +450,7 @@ impl<'a> Parser<'a> {
             }
         }
         let close = self.expect(Kind::CloseList, "a call")?;
-        Some(ast::Call { name, args, close })
+        Some(ast::Call { word, name, marked, args, close })
     }
 
     /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.
@@ -777,19 +777,29 @@ impl<'a> Parser<'a> {
             let close = self.expect(Kind::CloseList, "an array")?;
             return Some(ast::Term::Elements { open, of, close });
         }
-        // A bare word before a bracket is a call to something Quench provides. A name
-        // between marks before one is a call to something the writer made, or an index
-        // -- and which of those it is depends on what the name was declared as, so the
-        // parser leaves it alone.
-        if token.kind == Kind::Word
-            && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
-        {
+        // `call 'double'[*2*]` — a call says that it is one, so a reader never has to
+        // find a declaration to know whether a line hands control somewhere else.
+        if token.kind == Kind::Word && self.text(token.span) == "call" {
             return self.invocation().map(ast::Term::Call);
         }
+        // A name before a bracket without it is an index, whichever kind of name.
         if token.kind == Kind::Name && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
         {
             let (name, indices, close) = self.reaching()?;
             return Some(ast::Term::At { name, indices, close });
+        }
+        if token.kind == Kind::Word
+            && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+        {
+            let word = self.text(token.span).to_string();
+            self.errors.push(
+                Diagnostic::new("E0109", format!("`{word}` is not something to index."))
+                    .primary(token.span, "here")
+                    .rule("a name before a bracket is an index, and a name is written between marks")
+                    .tip("`call` is how a call says it is one, whoever made the thing being called.")
+                    .fix(format!("`call {word}[…]` to call it, or `'{word}'[…]` to index it")),
+            );
+            return None;
         }
         if token.kind == Kind::OpenGroup {
             let open = self.bump().span;

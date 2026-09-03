@@ -1150,16 +1150,6 @@ impl<'a> Checker<'a> {
                         .fix("rename one of them"),
                 );
             }
-            if let Some(&which) = self.named.get(&text) {
-                let at = self.signatures[which as usize].at;
-                self.errors.push(
-                    Diagnostic::new("E0492", format!("`'{text}'` is already a function."))
-                        .secondary(at, "declared here, as a function")
-                        .primary(*name, "and named again here, as a parameter")
-                        .rule("one name means one thing, and a parameter is a name like any other")
-                        .fix("rename one of them"),
-                );
-            }
         }
 
         self.statements(body)
@@ -1176,18 +1166,6 @@ impl<'a> Checker<'a> {
             // Checked before the type is, so that declaring `'x'` twice is reported as
             // declaring it twice even when the second one also names a type that is not
             // built. The name is what collided.
-            if let Some(&which) = self.named.get(&name) {
-                let at = self.signatures[which as usize].at;
-                self.errors.push(
-                    Diagnostic::new("E0492", format!("`'{name}'` is already a function."))
-                        .secondary(at, "declared here, as a function")
-                        .primary(*name_span, "and declared again here, as a variable")
-                        .rule(format!("one name means one thing, and `'{name}'[…]` cannot be a call and an index at once"))
-                        .tip("a function and a variable are written the same way wherever they are used, so nothing there could tell them apart.")
-                        .fix("rename one of them"),
-                );
-                continue;
-            }
             if let Some(before) = self.seen(&name) {
                 let first = &self.locals[before.0 as usize];
                 self.errors.push(
@@ -1868,21 +1846,13 @@ impl<'a> Checker<'a> {
     }
 
     /// `'xs'[…]` — one element.
-    /// `'xs'[…]` — an index when the name is a variable's, a call when it is a
-    /// function's.
+    /// `'xs'[…]` — an index, always. A call says `call`.
     ///
-    /// The parser hands both here because it cannot tell them apart: both are a name
-    /// between marks and a bracketed list. What settles it is what the name was
-    /// declared as, and a name cannot be declared as both -- that is what makes this a
-    /// lookup rather than a guess.
+    /// The parser hands the bracket's contents over as a comma-separated list, because
+    /// that is the one shape that covers both this and a call's arguments. An index
+    /// writes its dimensions side by side instead, so there is exactly one value here
+    /// however many dimensions it has, and the commas are what this refuses.
     fn reached(&mut self, name: Span, given: &[ast::Value], close: Span) -> Option<Value> {
-        let word = self.named(name);
-        if let Some(&which) = self.named.get(&word) {
-            return self.called(which, name, given, close);
-        }
-
-        // An index. Its dimensions are written side by side, matching the shape they
-        // index into, so there is exactly one value here however many dimensions it has.
         let [one] = given else {
             if given.is_empty() {
                 return self.at(name, &[], close);
@@ -1912,22 +1882,16 @@ impl<'a> Checker<'a> {
         self.at(name, &one.terms, close)
     }
 
-    /// A call to a function the writer declared, whatever it was written like.
-    fn called(
-        &mut self,
-        which: u32,
-        name: Span,
-        args: &[ast::Value],
-        close: Span,
-    ) -> Option<Value> {
-        let args = self.arguments(which, name, args, close)?;
+    /// A call to a function the writer declared.
+    fn called(&mut self, which: u32, call: &ast::Call) -> Option<Value> {
+        let args = self.arguments(which, call.name, &call.args, call.close)?;
         if self.signatures[which as usize].returns.is_none() {
             let said = self.signatures[which as usize].name.clone();
             let at = self.signatures[which as usize].at;
             self.errors.push(
                 Diagnostic::new("E0471", format!("`'{said}'` gives `nothing` back, and this wants a value."))
                     .secondary(at, "declared `nothing` here")
-                    .primary(name.to(close), "and its answer is wanted here")
+                    .primary(call.word.to(call.close), "and its answer is wanted here")
                     .rule("`nothing` means there is no answer, and there is no value to stand in for one")
                     .fix("call it on its own line, or have it give something back"),
             );
@@ -2080,36 +2044,38 @@ impl<'a> Checker<'a> {
         Some(Value::Binary { op: op.kind, lhs: Box::new(lhs), rhs: Box::new(rhs) })
     }
 
-    /// `count['xs']` — how many elements an array holds, all told.
+    /// `call count['xs']` — how many elements an array holds, all told.
     ///
     /// The answer is known here, because a shape is written down in the declaration and
     /// never changes. So this is a number by the time anything runs, and a loop bounded
     /// by it costs nothing at all.
     fn call(&mut self, call: &ast::Call) -> Option<Value> {
+        // Marks say who made it: the writer's own function is a name between them, and
+        // what the language provides is a bare word. Which is the whole of the
+        // difference between `call count['xs']` and `call 'count'['xs']`, and why both
+        // may be written in one program.
+        if call.marked {
+            let name = self.named(call.name);
+            let Some(&which) = self.named.get(&name) else {
+                self.errors.push(
+                    Diagnostic::new("E0455", format!("there is nothing called `'{name}'`."))
+                        .primary(call.name, "here")
+                        .rule("a name between marks after `call` is a function the writer declared")
+                        .tip("a bare word there is one of Quench's own, which is how a reader tells them apart.")
+                        .fix("check the spelling, or declare it with `fn`"),
+                );
+                return None;
+            };
+            return self.called(which, call);
+        }
         if self.text(call.name) != "count" {
             let name = self.text(call.name).to_string();
-            // A bare word is Quench's own. Anything the writer named is written between
-            // marks everywhere it appears, and a call is the one place that used to be
-            // an exception.
-            let (rule, tip, fix) = if self.named.contains_key(&name) {
-                (
-                    "a name the writer gave is written between marks, at a call as everywhere else",
-                    "a bare word before a bracket is one of Quench's own, which is how a reader tells them apart.",
-                    format!("`'{name}'[…]`"),
-                )
-            } else {
-                (
-                    "a bare word before a bracket calls something the language provides, and this names none of them",
-                    "`count` is the one that comes with the language.",
-                    format!("`'{name}'[…]` if you declared it with `fn`"),
-                )
-            };
             self.errors.push(
                 Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
                     .primary(call.name, "here")
-                    .rule(rule)
-                    .tip(tip)
-                    .fix(fix),
+                    .rule("a bare word after `call` is something the language provides, and this names none of them")
+                    .tip("`count` is the one that comes with the language.")
+                    .fix(format!("`call '{name}'[…]` if you declared it with `fn`")),
             );
             return None;
         }
@@ -2119,7 +2085,7 @@ impl<'a> Checker<'a> {
                 Diagnostic::new("E0456", "`count` counts one array.")
                     .primary(call.name.to(call.close), "here")
                     .rule("`count` takes one array, and nothing else")
-                    .fix("`count['xs']`"),
+                    .fix("`call count['xs']`"),
             );
             return None;
         };
@@ -2128,12 +2094,12 @@ impl<'a> Checker<'a> {
                 Diagnostic::new("E0456", "`count` counts one array.")
                     .primary(one.span, "here")
                     .rule("`count` takes one array, and nothing else")
-                    .fix("`count['xs']`"),
+                    .fix("`call count['xs']`"),
             );
             return None;
         };
 
-        // Any array, not only one with a name: `count['jagged'[*2*]]` is how long the
+        // Any array, not only one with a name: `call count['jagged'[*2*]]` is how long the
         // second row is, and a row of a jagged array is exactly the thing whose length
         // nothing else can tell you.
         let built = self.term(term)?;
@@ -2712,34 +2678,26 @@ impl<'a> Checker<'a> {
 
     /// A call written for what it does rather than for its answer.
     fn perform(&mut self, call: &ast::Call) {
-        let name = self.named(call.name);
-        if name == "count" {
+        if !call.marked && self.text(call.name) == "count" {
             self.errors.push(
                 Diagnostic::new("E0469", "`count` answers a question and does nothing else.")
-                    .primary(call.name.to(call.close), "here")
+                    .primary(call.word.to(call.close), "here")
                     .rule("a call written on its own is written for what it does, and this does nothing")
                     .fix("use the answer, or remove the line"),
             );
             return;
         }
-        let Some(&which) = self.named.get(&name) else {
-            // A name between marks that is not a function is a variable, and a variable
-            // written on its own line does nothing at all.
-            let (rule, fix) = match self.seen(&name) {
-                Some(_) => (
-                    "a call written on its own is written for what it does, and naming a variable does nothing",
-                    "remove the line, or `set` it",
-                ),
-                None => (
-                    "a call written on its own names a function, and this names nothing",
-                    "check the spelling, or declare it with `fn`",
-                ),
-            };
+        let name = if call.marked {
+            self.named(call.name)
+        } else {
+            self.text(call.name).to_string()
+        };
+        let Some(&which) = self.named.get(&name).filter(|_| call.marked) else {
             self.errors.push(
-                Diagnostic::new("E0455", format!("there is nothing called `'{name}'`."))
+                Diagnostic::new("E0455", format!("there is nothing called `{}`.", self.text(call.name)))
                     .primary(call.name, "here")
-                    .rule(rule)
-                    .fix(fix),
+                    .rule("a call written on its own names a function the writer declared, between marks")
+                    .fix("check the spelling, or declare it with `fn`"),
             );
             return;
         };

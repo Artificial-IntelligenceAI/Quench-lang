@@ -52,7 +52,7 @@ It does not break it, and the reason is already written in the error it replaces
 The rule is against **silent** conversion — a number wandering into a `str` because
 something guessed. A `print` is exempt today because showing is not joining. A `stitch`
 is exempt for a stronger reason: the word is in the source. It is a request, said out
-loud, the way `count['xs']` asks for a length rather than an array quietly becoming a
+loud, the way `call count['xs']` asks for a length rather than an array quietly becoming a
 number.
 
 So the rule reads: nothing converts on its own, and `stitch` is how a program says *do
@@ -63,7 +63,7 @@ will point at this one, and the answer to them is that theirs has nowhere to say
 
 ### Is a `str` bytes, or is it characters?
 
-`count['café']` is 5 or it is 4. `count['🔥']` is 4 or it is 1. Nothing can be built on
+`call count['café']` is 5 or it is 4. `call count['🔥']` is 4 or it is 1. Nothing can be built on
 top of `str` until that is settled: length, indexing, slicing, searching, and any loop
 that walks it all mean something different under each answer.
 

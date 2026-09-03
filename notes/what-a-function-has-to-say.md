@@ -68,30 +68,37 @@ a reference yet.
 thing to say, and saying it by leaving brackets off would be saying it with an
 absence again.
 
-## Calls cost no new syntax
+## A call says `call`
 
 ```quench
-'add'[*1*, *2*]      # a call, if `'add'` was declared with `fn`
-'xs'[*2*]            # an index, if `'xs'` was declared with `var`
-count['xs']          # a call to something the language provides
+call 'add'[*1*, *2*]      # a call to a function the writer declared
+call count['xs']          # a call to something the language provides
+'xs'[*2*]                 # an index, and no call at all
 ```
 
-The first two are the same syntax. Which one a reader is looking at depends on what
-the name was declared as, and a name cannot be declared as both — that is what makes
-this a lookup rather than a guess, and it is why a function and a variable share one
-namespace.
+Three writings, three meanings, and each says which it is on its own line. That is the
+whole of the rule, and it took two goes to arrive at.
 
-It was not always so. A call used to be a bare word before a bracket, which told it
-apart from an index without any lookup at all. What that cost was a rule nothing else
-in the language needed: a function's name was the only one written *twice*, once
-between marks where it was declared and once bare at every call, so it was the only
-one that could not hold a space or an emoji. Marks everywhere is one rule instead of
-two.
+A call was first a bare word before a bracket — `add[*1*, *2*]` — which told it apart
+from an index without any lookup at all. What that cost was a rule nothing else in the
+language needed: a function's name was the only one written *twice*, once between marks
+where it was declared and once bare at every call. So it was the only name that could
+not hold a space or an emoji, and there was an error saying so.
 
-And it buys something the bare word was too busy to do. A bare word before a bracket
-now means exactly one thing — **this came with Quench** — so `count['xs']` and
-`'count'['xs']` are visibly different at every use, and nothing the language provides
-has to be held back from a writer who wanted that name.
+Marks at the call fixed that and broke something else. `'total'[*1*]` was then a call
+or an index depending on how `'total'` was declared, which meant a reader could not
+tell what a line did without finding a declaration elsewhere — and it forced functions
+and variables into one namespace, since nothing at the use site could separate them.
+
+`call` is what makes the question local. And it leaves the marks free to say the only
+other thing worth saying at a call, which is **who made the thing being called**. A bare
+word after `call` is Quench's own; a name between marks is the writer's. So
+`call count['xs']` and `call 'count'['xs']` may both appear in one program, a function
+and a variable may share a name, and nothing the language provides has to be held back
+from a writer who wanted it.
+
+Which is the same argument as `immut`, as `share` and `copy`, as `nothing`: a meaning
+carried by an absence is one somebody has to go and look up.
 
 Arguments are separated by commas, because juxtaposition already means something:
 pieces side by side build one value. It cannot also separate two. An index writes its

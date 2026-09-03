@@ -108,7 +108,13 @@ pub struct Give {
 /// `add[*1*, *2*]` — a bare word before a bracket.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Call {
+    /// The `call` that says it is one.
+    pub word: Span,
     pub name: Span,
+    /// Whether the name was written between marks. A writer's own function is, and
+    /// something the language provides is not, which is the only difference between
+    /// `call count['xs']` and `call 'count'['xs']`.
+    pub marked: bool,
     /// One value per argument, separated by commas.
     pub args: Vec<Value>,
     pub close: Span,

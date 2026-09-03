@@ -77,15 +77,15 @@ is the only honest answer available.
 
 ## Both bounds, once, before the first pass
 
-`[*1*, count['xs']]` is worked out before the loop begins and never asked again. A
+`[*1*, call count['xs']]` is worked out before the loop begins and never asked again. A
 loop whose end moved underneath it is a loop nobody can read, and the cost of
 promising otherwise is that every pass pays for the question.
 
-`count['xs']` is not even a question at runtime. A shape is written into the
+`call count['xs']` is not even a question at runtime. A shape is written into the
 declaration and never changes, so the checker answers it and the loop is bounded by
-a constant. A bare word before a bracket is a call; a quoted one before a bracket is
-an index. That distinction was already in the language — names wear quotes — so
-calls cost no new syntax.
+a constant — which is the one call in the language that usually is not one by the time
+anything runs. The `call` in front of it is there because every call says so, and the
+bare `count` because it came with Quench rather than with the writer.
 
 ## `break`, and nothing under it
 

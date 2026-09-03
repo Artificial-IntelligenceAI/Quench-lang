@@ -97,12 +97,15 @@ Both print the same thing, which is not a coincidence — it is
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
 - **A name holds whatever a line holds, and wears marks everywhere.** The marks do the
   delimiting, so there is no identifier grammar to break: `'ผลลัพธ์'`, `'🔥'`,
-  `'a name with spaces'` and `'it\'s'` are all names, and all of them are fine names
-  for a *function* too, because a call wears the marks like every other use of a name.
-  Which leaves the bare word free to mean one thing: **`count['xs']` came with Quench
-  and `'count'['xs']` did not.** A reader tells them apart without looking either up.
-  The price is that a name is a function or a variable and never both, since nothing at
-  a use site could say which was meant.
+  `'a name with spaces'` and `'it\'s'` are all names, and all of them are fine names for
+  a *function* too, because a call wears the marks like every other use of a name.
+- **A call says `call`.** `call 'double'[*2*]`, never `'double'[*2*]` — because a name
+  before a bracket is otherwise an index, and which one a line meant would depend on a
+  declaration somewhere else. Quench asks for the word for the same reason it asks for
+  `immut`, `share` and `nothing`: **a meaning carried by an absence is one a reader has
+  to go and look up.** The marks then say only who made the thing being called —
+  `call count['xs']` came with Quench, `call 'count'['xs']` did not — so a function and
+  a variable may share a name, and nothing the language provides is reserved.
 - **Precedence stops where mathematics stopped.** `x` binds tighter than `+`, and
   comparison looser than both, because that was settled before computers existed.
   Everything programming invented — `mod` infix, `and` against `or`, bitwise — has no
@@ -127,10 +130,10 @@ Both print the same thing, which is not a coincidence — it is
   with something must answer on **every way out**, and an `if` counts only when it has
   an `else`: there is nothing honest to invent for the path that falls off the bottom.
   Parameters are declarations with `var` taken off, and `[]` is written even when empty.
-  Calls cost no new syntax — `'add'[*1*, *2*]` is a call and `'xs'[*2*]` is an index,
-  and they are told apart by what the name was declared as rather than by how it was
-  written. Arguments take commas, because juxtaposition already builds one value out of
-  pieces and cannot also separate two. See
+  `call 'add'[*1*, *2*]` is a call and `'xs'[*2*]` is an index, told apart on the line
+  rather than by a declaration elsewhere. Arguments take commas, because juxtaposition
+  already builds one value out of pieces and cannot also separate two; an index writes
+  its dimensions side by side instead, matching the shape it indexes into. See
   [notes/what-a-function-has-to-say.md](notes/what-a-function-has-to-say.md).
 - **Constants outside, functions at the top, variables inside.**
   `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is
