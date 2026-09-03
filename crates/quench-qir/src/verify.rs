@@ -158,6 +158,14 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                             ));
                         }
                     }
+                    Inst::ConstHandle(at) => {
+                        if *at as usize >= module.tables.len() {
+                            say(format!(
+                                "block {i}: names table {at}, and the module holds {}",
+                                module.tables.len()
+                            ));
+                        }
+                    }
                     Inst::CallHost { host, args } => {
                         let wants = host.params();
                         if args.len() != wants.len() {

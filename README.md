@@ -116,7 +116,11 @@ Both print the same thing, which is not a coincidence — it is
   [notes/what-a-function-has-to-say.md](notes/what-a-function-has-to-say.md).
 - **Constants outside, functions at the top, variables inside.**
   `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is
-  written in wherever it is named — so `set` on one is refused and so is indexing one.
+  written in wherever it is named — so `set` on one is refused. A constant *array* does
+  have somewhere it lives: a table in the module beside the text, which every engine
+  lays out before the entry runs, so its handle is known while compiling and naming it
+  costs nothing. There is one of it, so `share` names that one and `copy` gives you one
+  you may change.
   No `mut`/`immut` link either: `const` is already that answer, which is the whole
   reason it is a different word from `var`. This is where `file` / `program` / `export`
   finally mean something, and they are required.

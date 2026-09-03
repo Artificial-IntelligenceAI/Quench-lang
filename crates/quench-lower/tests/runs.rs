@@ -1274,3 +1274,36 @@ START {
         "[[7] [8 9]]",
     );
 }
+
+#[test]
+fn a_constant_array_lives_in_the_module() {
+    assert_eq!(
+        said("\
+const.export.arr.i64 (3) ['PRIMES'] = [[*2* *3* *5*]];
+const.file.arr.arr.i64 (2 2) ['GRID'] = [[*1* *2* *3* *4*]];
+START {
+    print.stdout['PRIMES' str:* * 'GRID' str:* * 'GRID'[*2* *1*]];
+}
+"),
+        "[2 3 5] [[1 2] [3 4]] 3",
+    );
+}
+
+#[test]
+fn there_is_one_of_a_constant_array() {
+    // Which is what makes `share` mean something on one: it is written into the module
+    // once, so every name for it is a name for the same thing.
+    assert_eq!(
+        said("\
+const.file.arr.i64 (3) ['PRIMES'] = [[*2* *3* *5*]];
+START {
+    var.immut.arr.i64 (3) ['a'] = [share 'PRIMES'];
+    var.mut.arr.i64 (3) ['mine'] = [copy 'PRIMES'];
+    set ['mine'[*1*]] = [*99*];
+    var.immut.bool ['same'] = ['a' == 'PRIMES'];
+    print.stdout['same' str:* * 'mine' str:* * 'PRIMES'];
+}
+"),
+        "true [99 3 5] [2 3 5]",
+    );
+}

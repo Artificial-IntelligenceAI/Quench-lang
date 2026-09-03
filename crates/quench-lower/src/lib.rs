@@ -63,11 +63,20 @@ pub fn lower_under(source: &str, settings: Settings) -> Lowered {
 fn build(checked: &Checked, settings: Settings) -> qir::Module {
     let mut module = qir::Module::new();
 
+    // Constant arrays go into the module before any function does, because a handle to
+    // one is its place in that list and the code that names it needs the number.
+    let mut tables: Vec<Option<u32>> = vec![None; checked.constants.len()];
+    for (n, constant) in checked.constants.iter().enumerate() {
+        if matches!(constant.ty, Ty::Arr { .. }) {
+            tables[n] = Some(lay_out(&mut module, &constant.value));
+        }
+    }
+
     // Functions are added in the order they were checked, so a function's place in
     // `checked.funcs` is its id here -- which is what lets a body call something
     // written underneath it, and lets one call itself.
     for (n, func) in checked.funcs.iter().enumerate() {
-        let built = lower_func(&mut module, func, checked, settings);
+        let built = lower_func(&mut module, func, checked, &tables, settings);
         let id = module.add(built);
         debug_assert_eq!(id.0 as usize, n, "a function's place is its id");
     }
@@ -78,10 +87,33 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
     module
 }
 
+/// Put a constant array into the module, and say which table it is.
+///
+/// Inner arrays go in first, so that the handles the outer one holds are already
+/// decided by the time it is written — the layout being fixed is what makes a handle
+/// something the compiler can know.
+fn lay_out(module: &mut qir::Module, value: &Value) -> u32 {
+    let Value::Array(elements) = value else {
+        unreachable!("refused by the checker: a constant array is written out")
+    };
+    let mut slots = Vec::with_capacity(elements.len());
+    for element in elements {
+        slots.push(match element {
+            Value::Number(n) => *n,
+            Value::Bool(yes) => i64::from(*yes),
+            Value::Text(text) => i64::from(module.intern(text)),
+            Value::Array(_) => i64::from(lay_out(module, element)),
+            _ => unreachable!("refused by the checker: a constant is worked out here"),
+        });
+    }
+    module.table(slots)
+}
+
 fn lower_func(
     module: &mut qir::Module,
     func: &Func,
     checked: &Checked,
+    tables: &[Option<u32>],
     settings: Settings,
 ) -> qir::Function {
     let params: Vec<qir::Ty> =
@@ -106,7 +138,7 @@ fn lower_func(
         held[n] = Some(b.param(n));
     }
 
-    let w = Where { locals: &func.locals, checked, ret, settings };
+    let w = Where { locals: &func.locals, checked, ret, tables, settings };
     let mut loops = Vec::new();
     let answered = lower_body(&mut b, module, &func.body, &mut held, &w, &mut loops);
 
@@ -139,6 +171,8 @@ struct Where<'a> {
     /// What the function being lowered answers with, for ending a block that nothing
     /// ever reaches.
     ret: qir::Ty,
+    /// Which table each constant became, for the ones that are arrays.
+    tables: &'a [Option<u32>],
     settings: Settings,
 }
 
@@ -674,8 +708,15 @@ fn emit(
         // A constant has no storage: its value is written in here, wherever it was
         // named. Which is the whole of what the word means.
         Value::Const(which) => {
-            let constant = w.checked.constants[*which as usize].value.clone();
-            emit(b, module, &constant, held, w)
+            let constant = &w.checked.constants[*which as usize];
+            // An array's value is its place in the module's tables, which was decided
+            // before any of this was written. So a constant array costs nothing at all
+            // where it is named -- which is what `const` ought to mean.
+            if let Ty::Arr { .. } = constant.ty {
+                return b.const_handle(w.tables[*which as usize].expect("laid out above"));
+            }
+            let value = constant.value.clone();
+            emit(b, module, &value, held, w)
         }
         Value::Call { func, args } => {
             let given: Vec<qir::Value> =

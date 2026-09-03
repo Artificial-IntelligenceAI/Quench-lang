@@ -1,3 +1,7 @@
+# A constant array lives in the module, beside the text -- so its handle is
+# known before anything runs, and naming it costs nothing at all.
+const.file.arr.i64 (3) ['PRIMES'] = [[*2* *3* *5*]];
+
 START {
     var.immut.arr.i64 (5) ['xs'] = [[*10* *20* *30* *40* *50*]];
     print.stdout[str:*xs[1] = * 'xs'[*1*] str:*, xs[5] = * 'xs'[*5*] \n];
@@ -38,4 +42,10 @@ START {
     var.mut.arr.i64 (3) ['second'] = [share 'rows'[*2*]];
     set ['second'[*1*]] = [*99*];
     print.stdout[str:*rows = * 'rows' \n];
+
+    # There is one of a constant array, so `share` names that one and `copy` gives
+    # you one you may change. Nothing can change the constant itself.
+    var.mut.arr.i64 (3) ['primes_copy'] = [copy 'PRIMES'];
+    set ['primes_copy'[*1*]] = [*99*];
+    print.stdout[str:*PRIMES = * 'PRIMES' str:*, copy = * 'primes_copy' \n];
 }

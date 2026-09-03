@@ -234,3 +234,41 @@ Elements are written flat and cut into rows. A row of something that itself grow
 has no length to cut at, so such an array is written empty and filled with `add`. A
 *fixed* number of growing rows — `(2 grow)` — starts as that many empty ones, which
 falls out of the same rule rather than being a second one.
+
+## A constant array lives in the module
+
+```quench
+const.file.arr.i64 (3) ['PRIMES'] = [[*2* *3* *5*]];
+```
+
+This was refused for a while, and the refusal said *not built yet*, which was the
+wrong word for it. The reasoning in that error was right — a constant is written in
+wherever it is named, and an array is a thing rather than a value — and the answer
+was already in the codebase and went unnoticed: **`Module::text`**.
+
+Every `str` a program is written with lives in a table in the module. Every engine
+lays that table out before the entry function is called — the interpreter reads it
+straight, the Dev JIT builds a `Piece` table whose address it bakes into the code.
+**No code runs before `START` to make that happen.** It is data in the artefact, not
+a program.
+
+A constant array is that with numbers in it. `Module::tables` sits beside
+`Module::text`, and every engine lays those into its heap in order before anything
+runs — so **table `i` is handle `i`**, and the handle is known while compiling. A
+constant array is therefore a *constant*: it costs nothing at all where it is named,
+which is what the word should have meant from the start.
+
+Everything else falls out rather than being decided:
+
+- there is **one** of it, so `share` names that one and `copy` gives you one you may
+  change;
+- **indexing works**, because it does have somewhere it lives;
+- **`set` is refused**, because a program does not rewrite what it was written with;
+- a **nested** one works too, because an inner table's handle is known by the time
+  the outer table is written — inner tables are laid out first.
+
+Two are refused with reasons rather than promises. A constant array cannot say
+`grow`: what is written down is however many were written. And an array of `e` is
+not built, because every other element is a number, a nought-or-one or which piece
+of text — all known before anything runs — while an `e` slot holds a handle the
+runtime makes.

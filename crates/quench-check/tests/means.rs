@@ -627,20 +627,43 @@ START { }
 }
 
 #[test]
-fn a_constant_has_nowhere_to_live() {
-    // Which is what makes it a constant: it is written in wherever it is named, so
-    // there is no storage to change or to index.
+fn a_program_does_not_rewrite_what_it_was_written_with() {
     let source = "const.file.i64 ['A'] = [*1*];\nSTART { set ['A'] = [*2*]; }";
     let rendered = errors(source);
     assert!(rendered.contains("`'A'` is a constant."), "{rendered}");
-    assert!(rendered.contains("and wanted somewhere it lives, here"), "{rendered}");
+    assert!(rendered.contains("and changed here"), "{rendered}");
     assert!(rendered.contains("Error code: E0472"), "{rendered}");
 
     assert_eq!(codes("const.file.mut.i64 ['A'] = [*1*];\nSTART { }"), ["E0473"]);
-    assert_eq!(codes("const.file.arr.i64 (2) ['A'] = [[*1* *2*]];\nSTART { }"), ["E0460"]);
 
     // Named as a value, it is that value -- and it needs no storage to be one.
     assert!(check("const.file.i64 ['A'] = [*1*];\nSTART { print.stdout['A' \\n]; }").ok());
+}
+
+#[test]
+fn a_constant_array_lives_in_the_module() {
+    // Beside the text, which every engine lays out before anything runs -- so its
+    // handle is known here and naming it costs nothing at all.
+    for source in [
+        "const.file.arr.i64 (2) ['A'] = [[*1* *2*]];\nSTART { }",
+        "const.file.arr.str (2) ['A'] = [[*a* *b*]];\nSTART { }",
+        "const.file.arr.arr.i64 (2 2) ['A'] = [[*1* *2* *3* *4*]];\nSTART { }",
+    ] {
+        assert!(check(source).ok(), "{source}\n{}", errors(source));
+    }
+
+    // It has somewhere it lives, so it is indexed like any other array.
+    assert!(check("const.file.arr.i64 (2) ['A'] = [[*1* *2*]];\nSTART { print.stdout['A'[*1*] \\n]; }").ok());
+    // What nothing can do is change it.
+    assert_eq!(
+        codes("const.file.arr.i64 (2) ['A'] = [[*1* *2*]];\nSTART { set ['A'[*1*]] = [*9*]; }"),
+        ["E0472"]
+    );
+
+    // What is written down is however many were written, so it cannot grow.
+    assert_eq!(codes("const.file.arr.i64 (grow) ['A'] = [[*1*]];\nSTART { }"), ["E0460"]);
+    // And an `e` slot holds a handle the runtime makes, not a number the module carries.
+    assert_eq!(codes("const.file.arr.e (2) ['A'] = [[*1/2* *3*]];\nSTART { }"), ["E0485"]);
 }
 
 #[test]

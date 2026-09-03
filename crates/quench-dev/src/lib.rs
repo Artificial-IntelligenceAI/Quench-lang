@@ -85,6 +85,9 @@ pub struct Compiled {
     /// What the generated code indexes into. Boxed so its address is fixed, because that
     /// address was compiled into the code.
     _pieces: Box<[Piece]>,
+    /// The module's constant tables. Laid into the heap at the start of every run, so
+    /// that table `i` is handle `i` and the compiled code needs no lookup for one.
+    _tables: Vec<Vec<i64>>,
     /// The block whose address the code carries. Boxed for the same reason, and read
     /// afterwards to find out whether the program stopped.
     runtime: Box<Runtime>,
@@ -103,7 +106,7 @@ impl Compiled {
     /// `None` if there is no such function, or if it takes arguments.
     pub fn call(&self, name: &str) -> Option<i64> {
         let (_, code) = self.callable.iter().find(|(known, _)| known == name)?;
-        HEAP.with(|heap| heap.borrow_mut().clear());
+        HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
         unsafe { (*rt).stopped = 0 };
         // Safe for the same reasons `run` is: the signature was checked at compile time
@@ -140,7 +143,7 @@ impl Compiled {
     /// A program that stopped returns whatever was on hand at the time, which means
     /// nothing — [`Compiled::outcome`] is the one that says so.
     pub fn run(&self) -> i64 {
-        HEAP.with(|heap| heap.borrow_mut().clear());
+        HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
         // The flag is per-run, so a program that stopped does not make the next one look
         // as though it did.
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
@@ -844,7 +847,15 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .filter(|(_, f)| f.params.is_empty() && f.ret == qir::Ty::I64)
         .map(|(i, f)| (f.name.clone(), jit.get_finalized_function(declared[i].0)))
         .collect();
-    Ok(Compiled { _jit: jit, _text: text, _pieces: pieces, runtime, entry, callable })
+    Ok(Compiled {
+        _jit: jit,
+        _text: text,
+        _pieces: pieces,
+        _tables: module.tables.clone(),
+        runtime,
+        entry,
+        callable,
+    })
 }
 
 /// Lower one QIR function into one Cranelift function.
@@ -889,7 +900,9 @@ fn lower(
             let v = match inst {
                 qir::Inst::ConstI64(n) => b.ins().iconst(types::I64, *n),
                 qir::Inst::ConstBool(t) => b.ins().iconst(types::I8, i64::from(*t)),
-                qir::Inst::ConstText(at) => b.ins().iconst(types::I64, i64::from(*at)),
+                qir::Inst::ConstText(at) | qir::Inst::ConstHandle(at) => {
+                    b.ins().iconst(types::I64, i64::from(*at))
+                }
                 qir::Inst::CallHost { host, args } => {
                     let which = hosts
                         .iter()

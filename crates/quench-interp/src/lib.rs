@@ -241,7 +241,10 @@ fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> 
     let mut stack = vec![Frame::new(module, entry, &[])];
     // Allocated and never freed, which is the first stage of the collector and is all
     // an array needs in order to exist. A handle is an index into this.
-    let mut heap: Vec<Vec<i64>> = Vec::new();
+    // The module's constant tables, laid out before anything runs — so table `i` is
+    // handle `i`, and nothing has to look one up. The same thing the text table is,
+    // with numbers in it.
+    let mut heap: Vec<Vec<i64>> = module.tables.clone();
     // Exact numbers, allocated and never freed -- the first stage of the collector,
     // same as the arrays above and for the same reason.
     let mut exacts: Vec<quench_num::Exact> = Vec::new();
@@ -321,6 +324,7 @@ fn evaluate(
         qir::Inst::ConstBool(t) => i64::from(*t),
         // A text value is the index of the text, not a pointer to it.
         qir::Inst::ConstText(at) => i64::from(*at),
+        qir::Inst::ConstHandle(at) => i64::from(*at),
         qir::Inst::CallHost { host, args } => {
             match host {
                 qir::Host::ArrayNew => {

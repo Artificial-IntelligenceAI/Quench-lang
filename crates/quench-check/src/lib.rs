@@ -258,6 +258,15 @@ fn boundaries(ty: &Ty) -> Vec<usize> {
     stops
 }
 
+/// Whether an exact number turns up anywhere inside this.
+fn holds_an_exact(ty: &Ty) -> bool {
+    match ty {
+        Ty::Exact => true,
+        Ty::Arr { of, .. } => holds_an_exact(of),
+        _ => false,
+    }
+}
+
 /// Whether every way out of this body ends in a `give`.
 ///
 /// An `if` counts only when it has an `else` and every arm gives, because otherwise
@@ -595,13 +604,27 @@ impl<'a> Checker<'a> {
             let local = &self.locals[local.0 as usize];
             let (name, ty, at) = (local.name.clone(), local.ty.clone(), local.at);
 
-            if matches!(ty, Ty::Arr { .. }) {
+            // A constant array lives in the module, beside the text — every engine
+            // lays those out before anything runs, so its handle is known here. What
+            // it may not do is grow: a shape that says `grow` says there is no number
+            // yet, and a table is a number of things written down.
+            if !ty.settled() {
                 self.errors.push(
-                    Diagnostic::new("E0460", "a constant array is not built yet.")
+                    Diagnostic::new("E0460", "a constant array cannot grow.")
                         .primary(at, "here")
-                        .rule("a constant is written in wherever it is named, and an array is a thing rather than a value")
-                        .tip("an array wants somewhere to live, and a constant has nowhere.")
-                        .fix("declare it inside `START` with `var` for now"),
+                        .rule("a constant is written into the module before anything runs, and what is written down is however many were written")
+                        .tip("`grow` says there is no number yet, and a constant is the answer to a question nobody is going to ask again.")
+                        .fix("give it a size, or declare it inside a function with `var`"),
+                );
+                continue;
+            }
+            if holds_an_exact(&ty) {
+                self.errors.push(
+                    Diagnostic::new("E0485", "a constant array of `e` is not built yet.")
+                        .primary(at, "here")
+                        .rule("a table holds what each slot holds, and an `e` slot holds a handle the runtime makes rather than a number the module can carry")
+                        .tip("every other element type is a number, a nought-or-one, or which piece of text — all of them known before anything runs.")
+                        .fix("declare it inside a function with `var` for now"),
                 );
                 continue;
             }
@@ -1559,8 +1582,15 @@ impl<'a> Checker<'a> {
 
     /// `'xs'[…]` — one element.
     fn at(&mut self, name: Span, indices: &[ast::Term], close: Span) -> Option<Value> {
-        let local = self.lookup(name)?;
-        let held = self.locals[local.0 as usize].ty.clone();
+        // A constant array has somewhere it lives — the module's tables — so it is
+        // indexed like any other. What it does not have is a way to be changed, and
+        // that is `set`'s business rather than this one's.
+        let (base, held) = self.named_value(name)?;
+        let declared = match &base {
+            Value::Copy(local) => self.locals[local.0 as usize].at,
+            Value::Const(which) => self.constants[*which as usize].at,
+            _ => name,
+        };
         if !matches!(held, Ty::Arr { .. }) {
             self.errors.push(
                 Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
@@ -1602,7 +1632,7 @@ impl<'a> Checker<'a> {
                     indices.len()
                 ))
                 .primary(name.to(close), format!("{} here", indices.len()))
-                .secondary(self.locals[local.0 as usize].at, format!("declared `{}`", held.name()))
+                .secondary(declared, format!("declared `{}`", held.name()))
                 .rule("an index gives one number for each dimension, and may stop where one allocation ends")
                 .tip("stopping early hands back the array that lives there, rather than an element of it.")
                 .fix(format!("give {} of them", stops.join(" or "))),
@@ -1628,7 +1658,7 @@ impl<'a> Checker<'a> {
 
         // One `At` per allocation walked through, which is one `array-get` each. The
         // lowering needs nothing new: it already follows a handle and indexes it.
-        let mut reached = Value::Copy(local);
+        let mut reached = base;
         let mut taken = 0;
         for (dimensions, _) in levels {
             let how_many = dimensions.len();
@@ -2704,10 +2734,10 @@ impl<'a> Checker<'a> {
             self.errors.push(
                 Diagnostic::new("E0472", format!("`'{name}'` is a constant."))
                     .secondary(at, "declared here")
-                    .primary(span, "and wanted somewhere it lives, here")
-                    .rule("a constant is written in wherever it is named, so there is no storage to index or change")
-                    .tip("that is what makes it a constant rather than a variable that nobody assigns to.")
-                    .fix("declare a `var` inside the function, from this"),
+                    .primary(span, "and changed here")
+                    .rule("a constant is what a program was written with, and a program does not rewrite what it was written with")
+                    .tip("an array constant lives in the module and can be read and indexed; what nothing can do is change it.")
+                    .fix("`copy` it into a `var.mut` first, and change that"),
             );
             return None;
         }

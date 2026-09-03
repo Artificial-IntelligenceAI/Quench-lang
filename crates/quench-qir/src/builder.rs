@@ -116,6 +116,12 @@ impl Builder {
         self.push(Inst::ConstText(at), Ty::Text)
     }
 
+    /// A handle to one of the module's tables. Its index is the handle, because the
+    /// tables are laid into the heap in order before anything runs.
+    pub fn const_handle(&mut self, at: u32) -> Value {
+        self.push(Inst::ConstHandle(at), Ty::Handle)
+    }
+
     /// Write something, somewhere.
     pub fn print(&mut self, host: Host, to: Stream, what: Value) -> Value {
         let stream = self.const_i64(to as i64);

@@ -493,6 +493,9 @@ pub fn show_array(shown: &[String]) -> String {
 pub enum Inst {
     ConstI64(i64),
     ConstBool(bool),
+    /// A handle to one of [`Module::tables`], which is its index — the layout is fixed
+    /// before anything runs, so there is nothing to look up.
+    ConstHandle(u32),
     /// A piece of text, by index into [`Module::text`].
     ConstText(u32),
     Bin { op: BinOp, lhs: Value, rhs: Value },
@@ -577,6 +580,16 @@ pub struct Module {
     /// Held here rather than inside instructions so that a module is one thing to send
     /// somewhere, and so the same text written twice is stored once.
     pub text: Vec<String>,
+    /// Runs of values the program was written with, one per constant array.
+    ///
+    /// Beside [`Module::text`] and for the same reason: something a program was written
+    /// with rather than something it works out. Every engine lays these into its heap
+    /// before the entry function is called, in order — so **table `i` is handle `i`**,
+    /// and a constant array is a constant rather than a call.
+    ///
+    /// A table may hold the handles of other tables, which is how a constant array of
+    /// arrays works: those are known too, being the indices of tables laid out first.
+    pub tables: Vec<Vec<i64>>,
 }
 
 impl Module {
@@ -619,6 +632,15 @@ impl Module {
     }
 
     /// Add a piece of text, or find it if the module already has it.
+    /// Put a run of values in the module, and say which handle it will be.
+    pub fn table(&mut self, values: Vec<i64>) -> u32 {
+        if let Some(at) = self.tables.iter().position(|held| *held == values) {
+            return at as u32;
+        }
+        self.tables.push(values);
+        self.tables.len() as u32 - 1
+    }
+
     pub fn intern(&mut self, text: &str) -> u32 {
         if let Some(at) = self.text.iter().position(|held| held == text) {
             return at as u32;
