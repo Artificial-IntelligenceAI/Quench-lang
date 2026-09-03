@@ -424,7 +424,7 @@ stops). Each is threaded all the way through — the generator picks a configura
 seed, both engines carry the choice as **separate QIR instructions** rather than as a
 mode they interpret, and a disagreement names the settings it happened under. So the
 oracle proves sixteen languages rather than one, three ways of running each, since it
-sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 15 seconds.
+sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 28 seconds.
 
 `logic` is the one worth reading the note for: it was **not** a semantic setting until
 functions arrived, because before a program could call anything, nothing inside an
@@ -453,8 +453,14 @@ So the methods are not trusted, they are tested against each other:
   out, because this machine has fast cores and slow ones and a fixed share leaves the
   fast ones waiting.
 
-Where it stands: **200,000 programs across two engines in 5.5 seconds**, 36,000 a
-second, on ten cores. One worker manages 8,000, so the cores are worth 4.6x.
+Where it stands: **200,000 programs across two engines in 28 seconds**, 7,100 a second,
+on ten cores. One worker manages 1,200, so the cores are worth 6x.
+
+It was four times that rate a day ago, and the slowdown is the point: what a generated
+program *does* has grown. It was arithmetic and loops; it now allocates arrays, reads
+`e` and decimals, joins text, and prints — and every one of those is compared, so every
+one of them costs. A fast oracle that generates a narrow program proves less per second
+than a slow one that generates a wide one.
 
 Any disagreement is a bug in at least one engine, and the seed that produced it is
 kept so it can be replayed.

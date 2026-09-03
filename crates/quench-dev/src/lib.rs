@@ -618,6 +618,64 @@ extern "C" fn print_decimal(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
     0
 }
 
+/// Put a new piece of text away, and give back which piece it is.
+fn keep_text(written: String) -> i64 {
+    HEAP.with(|h| h.borrow_mut().text(written))
+}
+
+/// Called by compiled code. Not called by anything else.
+///
+/// The `say_*` family: what the matching `print_*` would have written, kept rather than
+/// let out. Each is the same expression as the one it mirrors.
+extern "C" fn say_i64(rt: *mut Runtime, value: i64) -> i64 {
+    maybe_collect(rt);
+    keep_text(value.to_string())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_u64(rt: *mut Runtime, value: i64) -> i64 {
+    maybe_collect(rt);
+    keep_text((value as u64).to_string())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_bool(rt: *mut Runtime, value: i64) -> i64 {
+    maybe_collect(rt);
+    keep_text(if value != 0 { "true" } else { "false" }.to_string())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_float(rt: *mut Runtime, bits: i64, width: i64) -> i64 {
+    maybe_collect(rt);
+    let shown = match width {
+        64 => quench_num::show_f64(f64::from_bits(bits as u64)),
+        _ => quench_num::show_f32(f32::from_bits(bits as u32)),
+    };
+    keep_text(shown)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_exact(rt: *mut Runtime, value: i64) -> i64 {
+    maybe_collect(rt);
+    let shown = HEAP.with(|h| h.borrow().exactly(value).to_string());
+    keep_text(shown)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_decimal(rt: *mut Runtime, value: i64) -> i64 {
+    maybe_collect(rt);
+    let shown = HEAP.with(|h| h.borrow().decimally(value).to_string());
+    keep_text(shown)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn say_array(rt: *mut Runtime, handle: i64, kind: i64, depth: i64) -> i64 {
+    let elements = qir::Elements::from_code(kind).expect("the lowering wrote this");
+    let written = shown(rt, handle, elements, depth);
+    maybe_collect(rt);
+    keep_text(written)
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
     match trouble {
@@ -1011,6 +1069,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_decimal_div", decimal_div as *const u8);
     builder.symbol("quench_decimal_compare", decimal_compare as *const u8);
     builder.symbol("quench_print_decimal", print_decimal as *const u8);
+    builder.symbol("quench_say_i64", say_i64 as *const u8);
+    builder.symbol("quench_say_u64", say_u64 as *const u8);
+    builder.symbol("quench_say_bool", say_bool as *const u8);
+    builder.symbol("quench_say_float", say_float as *const u8);
+    builder.symbol("quench_say_exact", say_exact as *const u8);
+    builder.symbol("quench_say_decimal", say_decimal as *const u8);
+    builder.symbol("quench_say_array", say_array as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
     builder.symbol("quench_to_b16", to_b16 as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
@@ -1082,6 +1147,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::DecimalDiv, "quench_decimal_div"),
         (qir::Host::DecimalCompare, "quench_decimal_compare"),
         (qir::Host::PrintDecimal, "quench_print_decimal"),
+        (qir::Host::SayI64, "quench_say_i64"),
+        (qir::Host::SayU64, "quench_say_u64"),
+        (qir::Host::SayBool, "quench_say_bool"),
+        (qir::Host::SayFloat, "quench_say_float"),
+        (qir::Host::SayExact, "quench_say_exact"),
+        (qir::Host::SayDecimal, "quench_say_decimal"),
+        (qir::Host::SayArray, "quench_say_array"),
         (qir::Host::PrintFloat, "quench_print_float"),
         (qir::Host::ToB16, "quench_to_b16"),
         (qir::Host::TextCompare, "quench_text_compare"),

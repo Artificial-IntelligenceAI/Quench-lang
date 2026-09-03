@@ -569,6 +569,45 @@ fn evaluate(
                     let value = heap.decimally(slots[args[1].0 as usize]);
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
                 }
+                // The `Say` family: exactly what the matching `Print` would have
+                // written, handed back instead. Each is the same expression as the one
+                // above it, so the two cannot drift apart without the drift being
+                // visible on one screen.
+                qir::Host::SayI64 => {
+                    let value = slots[args[0].0 as usize];
+                    return Ok(heap.text(value.to_string()));
+                }
+                qir::Host::SayU64 => {
+                    let value = slots[args[0].0 as usize] as u64;
+                    return Ok(heap.text(value.to_string()));
+                }
+                qir::Host::SayBool => {
+                    let yes = slots[args[0].0 as usize] != 0;
+                    return Ok(heap.text(if yes { "true" } else { "false" }.to_string()));
+                }
+                qir::Host::SayFloat => {
+                    let bits = slots[args[0].0 as usize];
+                    let shown = match slots[args[1].0 as usize] {
+                        64 => quench_num::show_f64(f64::from_bits(bits as u64)),
+                        _ => quench_num::show_f32(f32::from_bits(bits as u32)),
+                    };
+                    return Ok(heap.text(shown));
+                }
+                qir::Host::SayExact => {
+                    let shown = heap.exactly(slots[args[0].0 as usize]).to_string();
+                    return Ok(heap.text(shown));
+                }
+                qir::Host::SayDecimal => {
+                    let shown = heap.decimally(slots[args[0].0 as usize]).to_string();
+                    return Ok(heap.text(shown));
+                }
+                qir::Host::SayArray => {
+                    let kind = qir::Elements::from_code(slots[args[1].0 as usize])
+                        .expect("the lowering wrote this constant");
+                    let depth = slots[args[2].0 as usize];
+                    let shown = shown(slots[args[0].0 as usize], kind, depth, heap);
+                    return Ok(heap.text(shown));
+                }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);

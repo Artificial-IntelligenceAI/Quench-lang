@@ -431,6 +431,24 @@ pub enum Host {
     /// printing as `2.5`.
     PrintDecimal,
 
+    /// `(value)` — the text of a number, rather than the number written somewhere.
+    ///
+    /// One of these for every `Print` above, giving back what that one would have
+    /// written. They exist because a program can show a number and could not, until
+    /// now, *hold* the text of one: `stitch` is the word for that, and this is what it
+    /// is made of. The two must agree, so each engine works the answer out once and
+    /// either writes it or hands it back.
+    SayI64,
+    SayU64,
+    SayBool,
+    /// `(float, width)` — the width says which binary format, since all three arrive
+    /// here in the same register.
+    SayFloat,
+    SayExact,
+    SayDecimal,
+    /// `(handle, elements, depth)` — the same square brackets a `print` shows.
+    SayArray,
+
     /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
     /// negative exponent: the answer to that is a fraction and this is a whole number.
     PowI64,
@@ -472,6 +490,13 @@ impl Host {
             Host::DecimalDiv => "decimal-div",
             Host::DecimalCompare => "decimal-compare",
             Host::PrintDecimal => "print-decimal",
+            Host::SayI64 => "say-i64",
+            Host::SayU64 => "say-u64",
+            Host::SayBool => "say-bool",
+            Host::SayFloat => "say-float",
+            Host::SayExact => "say-exact",
+            Host::SayDecimal => "say-decimal",
+            Host::SayArray => "say-array",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
         }
@@ -510,6 +535,12 @@ impl Host {
             }
             Host::DecimalCompare => &[Ty::Decimal, Ty::Decimal],
             Host::PrintDecimal => &[Ty::I64, Ty::Decimal],
+            Host::SayI64 | Host::SayU64 => &[Ty::I64],
+            Host::SayBool => &[Ty::Bool],
+            Host::SayFloat => &[Ty::F64, Ty::I64],
+            Host::SayExact => &[Ty::Exact],
+            Host::SayDecimal => &[Ty::Decimal],
+            Host::SayArray => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
     }
@@ -527,6 +558,7 @@ impl Host {
             Host::ArraySet => Some(2),
             Host::ArrayPush => Some(1),
             Host::PrintFloat => Some(1),
+            Host::SayFloat => Some(0),
             Host::ToB16 => Some(0),
             _ => None,
         }
@@ -553,7 +585,14 @@ impl Host {
         match self {
             Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
             Host::ArrayEqual => Ty::Bool,
-            Host::TextJoin => Ty::Text,
+            Host::TextJoin
+            | Host::SayI64
+            | Host::SayU64
+            | Host::SayBool
+            | Host::SayFloat
+            | Host::SayExact
+            | Host::SayDecimal
+            | Host::SayArray => Ty::Text,
             Host::ToB16 => Ty::F32,
             Host::ExactRead
             | Host::ExactAdd
