@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Division, Settings};
+use quench_conf::{Division, Overflow, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -64,6 +64,7 @@ pub fn settings_for(seed: u64) -> Settings {
     let mut rng = Seeded::from(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
     Settings {
         division: if rng.upto(2) == 0 { Division::Truncated } else { Division::Floored },
+        overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
         ..Settings::default()
     }
 }
@@ -81,13 +82,17 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
     let mut rng = Seeded::from(seed);
     let mut b = Builder::new(name_of(seed), &[], Ty::I64);
 
+    // Mostly small, because a program built out of enormous numbers overflows on its
+    // first multiplication and then tests nothing else. The extremes are here because
+    // they are where the edges are -- `i64::MIN` has no positive counterpart, and
+    // `MIN / -1` is the one division that does not fit -- but they are the minority on
+    // purpose, so a program reaches them rather than starting there.
     let mut numbers = vec![
-        b.const_i64(rng.next() as i64),
         b.const_i64(rng.upto(1000) as i64),
+        b.const_i64(rng.upto(1000) as i64 - 500),
         b.const_i64(0),
+        b.const_i64(1),
         b.const_i64(-1),
-        b.const_i64(i64::MIN),
-        b.const_i64(i64::MAX),
     ];
     let mut flags: Vec<Value> = Vec::new();
 
@@ -95,7 +100,17 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
     for _ in 0..steps {
         match rng.upto(10) {
             0 => {
-                let n = b.const_i64(rng.next() as i64);
+                // The extremes are where the edges are -- `i64::MIN` has no positive
+                // counterpart, and `MIN / -1` is the one division that does not fit --
+                // so they have to appear. But they are kept rare, because a trapping
+                // sum touching one stops immediately, and a program that stops on its
+                // first operation exercises one instruction and then nothing.
+                let n = match rng.upto(16) {
+                    0 => b.const_i64(i64::MIN),
+                    1 => b.const_i64(i64::MAX),
+                    2 => b.const_i64(rng.next() as i64),
+                    _ => b.const_i64(rng.upto(2000) as i64 - 1000),
+                };
                 numbers.push(n);
             }
             1..=4 => {
@@ -106,14 +121,32 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                     Division::Truncated => (BinOp::DivTruncated, BinOp::RemTruncated),
                     Division::Floored => (BinOp::DivFloored, BinOp::RemFloored),
                 };
+                // Whether a sum that does not fit rounds or stops is the project's
+                // decision too, so a seed picks it and the oracle checks both.
+                let (add, sub, mul) = match settings.overflow {
+                    Overflow::Wrap => (BinOp::Add, BinOp::Sub, BinOp::Mul),
+                    Overflow::Trap => {
+                        (BinOp::AddTrapping, BinOp::SubTrapping, BinOp::MulTrapping)
+                    }
+                };
                 let op = match rng.upto(5) {
-                    0 => BinOp::Add,
-                    1 => BinOp::Sub,
-                    2 => BinOp::Mul,
+                    0 => add,
+                    1 => sub,
+                    2 => mul,
                     3 => divide,
                     _ => remainder,
                 };
-                let value = if op.can_trap() {
+                // The one division that does not fit is far too rare to turn up by
+                // chance once the extremes are kept rare, so it is aimed at. A trap the
+                // generator never writes is a trap the oracle never checks.
+                if matches!(op, BinOp::DivTruncated | BinOp::DivFloored) && rng.upto(64) == 0 {
+                    let least = b.const_i64(i64::MIN);
+                    let minus_one = b.const_i64(-1);
+                    let value = b.bin(op, least, minus_one);
+                    numbers.push(value);
+                    continue;
+                }
+                let value = if matches!(op, BinOp::DivTruncated | BinOp::RemTruncated | BinOp::DivFloored | BinOp::RemFloored) {
                     // Most divisors are safe, because a program that stops on its first
                     // division exercises one instruction and then nothing. One in eight
                     // is whatever turned up, which is how zero and -1 get in.

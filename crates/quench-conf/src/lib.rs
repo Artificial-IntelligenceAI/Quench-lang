@@ -80,6 +80,21 @@ pub enum Optimise {
     SpeedAndSize,
 }
 
+/// What happens when a number does not fit.
+///
+/// **Semantic** — the most so of any setting here. `9223372036854775807 + 1` is the
+/// smallest number under `wrap` and a stop under `trap`, so the same program answers
+/// differently, and every engine must agree under *each*.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Overflow {
+    /// Round the answer into the type, as the processor does. Fast, and occasionally
+    /// the reason a program is quietly wrong for a year.
+    #[default]
+    Wrap,
+    /// Stop, in the same place and for the same reason in every engine.
+    Trap,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -100,6 +115,8 @@ pub struct Settings {
     pub engine: Engine,
     /// `[build] optimise`
     pub optimise: Optimise,
+    /// `[defaults] overflow`
+    pub overflow: Overflow,
 }
 
 /// Read a `QNL-Config.toml`, reporting everything wrong with it rather than the first
@@ -162,6 +179,11 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 "floored" => settings.division = Division::Floored,
                 _ => errors.push(bad_value(span_of(value), key, value, &["truncated", "floored"])),
             },
+            ("defaults", "overflow") => match value {
+                "wrap" => settings.overflow = Overflow::Wrap,
+                "trap" => settings.overflow = Overflow::Trap,
+                _ => errors.push(bad_value(span_of(value), key, value, &["wrap", "trap"])),
+            },
             ("build", "optimise") => match value {
                 "none" => settings.optimise = Optimise::None,
                 "speed" => settings.optimise = Optimise::Speed,
@@ -189,7 +211,7 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                     .primary(span_of(key), "here")
                     .rule("a setting that is not understood is refused rather than ignored, since a project that set it meant something by it")
                     .tip(match section {
-                        "defaults" => "`[defaults]` holds `division`.",
+                        "defaults" => "`[defaults]` holds `division` and `overflow`.",
                         "build" => "`[build]` holds `optimise`.",
                         "run" => "`[run]` holds `engine`.",
                         _ => "that section holds nothing yet.",

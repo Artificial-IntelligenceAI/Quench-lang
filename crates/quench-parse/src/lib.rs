@@ -14,7 +14,7 @@
 
 pub mod ast;
 
-pub use ast::{OpKind, Operator, Piece, Print, Program, Start, Stmt, Term, Value, Var};
+pub use ast::{OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
 
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
@@ -193,13 +193,14 @@ impl<'a> Parser<'a> {
         match self.text(token.span) {
             "print" => self.print().map(Stmt::Print),
             "var" => self.var().map(Stmt::Var),
+            "set" => self.set().map(Stmt::Set),
             other => {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var` or `print`")
+                        .rule("a statement begins with `var`, `set` or `print`")
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var` or `print`?"),
+                        .fix("did you mean `var`, `set` or `print`?"),
                 );
                 None
             }
@@ -228,6 +229,66 @@ impl<'a> Parser<'a> {
         self.expect(Kind::CloseList, "`print`")?;
         let end = self.expect(Kind::Semicolon, "a statement")?;
         Some(Print { word, pieces, span: word.to(end) })
+    }
+
+    /// `set ['x', 'xs'[*1*]] = [*5*, *9*];`
+    fn set(&mut self) -> Option<ast::Set> {
+        let word = self.bump().span;
+        self.expect(Kind::OpenList, "`set`")?;
+
+        let mut targets = Vec::new();
+        loop {
+            let name = self.expect(Kind::Name, "`set`")?;
+            if self.peek().kind == Kind::OpenList {
+                self.bump();
+                let mut indices = Vec::new();
+                while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+                    indices.push(self.term()?);
+                }
+                let close = self.expect(Kind::CloseList, "an index")?;
+                targets.push(ast::Place::At { name, indices, close });
+            } else {
+                targets.push(ast::Place::Name(name));
+            }
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let targets_end = self.expect(Kind::CloseList, "`set`")?;
+        self.expect(Kind::Equals, "`set`")?;
+
+        let values_start = self.expect(Kind::OpenList, "`set`")?;
+        let mut values = Vec::new();
+        loop {
+            values.push(self.value()?);
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let values_end = self.expect(Kind::CloseList, "`set`")?;
+        let end = self.expect(Kind::Semicolon, "a statement")?;
+
+        if targets.len() != values.len() {
+            let named = targets[0].span().to(targets_end);
+            let given = values_start.to(values_end);
+            self.errors.push(
+                Diagnostic::new(
+                    "E0110",
+                    format!(
+                        "{} changed, and {} given.",
+                        counted(targets.len(), "thing"),
+                        counted(values.len(), "value")
+                    ),
+                )
+                .secondary(named, counted(targets.len(), "thing"))
+                .primary(given, counted(values.len(), "value"))
+                .rule("`set` gives one value for each thing it changes, in the same order")
+                .tip("a value runs until a comma, so a missing comma joins two of them into one.")
+                .fix("give one value for each"),
+            );
+        }
+
+        Some(ast::Set { word, targets, values, span: word.to(end) })
     }
 
     fn var(&mut self) -> Option<Var> {

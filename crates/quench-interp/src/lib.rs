@@ -301,6 +301,9 @@ fn evaluate(
                 qir::BinOp::Add => l.wrapping_add(r),
                 qir::BinOp::Sub => l.wrapping_sub(r),
                 qir::BinOp::Mul => l.wrapping_mul(r),
+                qir::BinOp::AddTrapping => l.checked_add(r).ok_or(Trap::Overflowed)?,
+                qir::BinOp::SubTrapping => l.checked_sub(r).ok_or(Trap::Overflowed)?,
+                qir::BinOp::MulTrapping => l.checked_mul(r).ok_or(Trap::Overflowed)?,
                 qir::BinOp::DivTruncated => l.checked_div(r).ok_or(trap_for(r))?,
                 qir::BinOp::RemTruncated => l.checked_rem(r).ok_or(trap_for(r))?,
                 qir::BinOp::DivFloored => {

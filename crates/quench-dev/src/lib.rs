@@ -173,6 +173,43 @@ fn stop_now(
     b.ins().jump(stopping, &[]);
 }
 
+/// Arithmetic that stops rather than rounding.
+///
+/// Cranelift gives the overflow bit alongside the answer, so this costs one branch and
+/// no arithmetic of its own — cheaper than the division guards, which have to work out
+/// beforehand whether the processor would object.
+fn trapping(
+    b: &mut FunctionBuilder<'_>,
+    runtime: i64,
+    stopping: cranelift_codegen::ir::Block,
+    op: qir::BinOp,
+    lhs: ClifValue,
+    rhs: ClifValue,
+) -> ClifValue {
+    let (answer, overflowed) = match op {
+        qir::BinOp::AddTrapping => {
+            let r = b.ins().sadd_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        qir::BinOp::SubTrapping => {
+            let r = b.ins().ssub_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        qir::BinOp::MulTrapping => {
+            let r = b.ins().smul_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        _ => unreachable!("only the trapping three reach here"),
+    };
+    let fits = b.create_block();
+    let does_not = b.create_block();
+    b.ins().brif(overflowed, does_not, &[], fits, &[]);
+    b.switch_to_block(does_not);
+    stop_now(b, runtime, stopping, qir::Trap::Overflowed);
+    b.switch_to_block(fits);
+    answer
+}
+
 /// Emit a division that cannot fault, by refusing the two cases that would.
 ///
 /// Cranelift's `sdiv` traps on a zero divisor and on `i64::MIN / -1`, and a trap in
@@ -605,6 +642,11 @@ fn lower(
                         qir::BinOp::Add => b.ins().iadd(l, r),
                         qir::BinOp::Sub => b.ins().isub(l, r),
                         qir::BinOp::Mul => b.ins().imul(l, r),
+                        qir::BinOp::AddTrapping
+                        | qir::BinOp::SubTrapping
+                        | qir::BinOp::MulTrapping => {
+                            trapping(&mut b, table, stopping, *op, l, r)
+                        }
                         // The processor's own division, which rounds toward zero --
                         // after the two cases it would fault on have been refused.
                         qir::BinOp::DivTruncated => {

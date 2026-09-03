@@ -322,3 +322,46 @@ fn an_array_of_nothing_is_refused() {
     let rendered = errors("START { var.arr.i64 (0) ['xs'] = [[]]; }");
     assert!(rendered.contains("an array of nothing holds nothing"), "{rendered}");
 }
+
+// --- changing things ----------------------------------------------------------------
+
+#[test]
+fn mut_finally_means_something() {
+    // It has been a word in the chain that did nothing since the chain was designed.
+    assert!(check("START { var.mut.i64 ['n'] = [*0*]; set ['n'] = [*5*]; }").ok());
+
+    let rendered = errors("START { var.i64 ['total'] = [*0*]; set ['total'] = [*55*]; }");
+    assert!(
+        rendered.contains("`'total'` cannot be changed, because its declaration never said it could."),
+        "{rendered}"
+    );
+    assert!(rendered.contains("declared here, and `mut` is not in the chain"), "{rendered}");
+    assert!(rendered.contains("changed here"), "{rendered}");
+    assert!(rendered.contains("a variable changes only if its declaration says `mut`"), "{rendered}");
+    // The fix is the line they wanted, not a description of it.
+    assert!(rendered.contains("`var.mut.i64`"), "{rendered}");
+}
+
+#[test]
+fn changing_something_that_was_never_declared() {
+    let rendered = errors("START { set ['nope'] = [*1*]; }");
+    assert!(rendered.contains("`'nope'` is not declared"), "{rendered}");
+}
+
+#[test]
+fn what_is_put_in_has_to_fit_what_is_there() {
+    let rendered = errors("START { var.mut.i64 ['n'] = [*1*]; set ['n'] = [*hello*]; }");
+    assert!(rendered.contains("is not a whole number"), "{rendered}");
+}
+
+#[test]
+fn only_an_array_has_an_element_to_change() {
+    let rendered = errors("START { var.mut.i64 ['n'] = [*1*]; set ['n'[*1*]] = [*2*]; }");
+    assert!(rendered.contains("`i64` is not an array"), "{rendered}");
+}
+
+#[test]
+fn set_gives_one_value_for_each_thing_it_changes() {
+    let rendered = errors("START { var.mut.i64 ['a', 'b'] = [*1*, *2*]; set ['a', 'b'] = [*9*]; }");
+    assert!(rendered.contains("two things changed, and one value given"), "{rendered}");
+}

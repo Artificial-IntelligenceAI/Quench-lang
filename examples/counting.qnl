@@ -1,0 +1,9 @@
+START {
+    var.mut.i64 ['total'] = [*0*];
+    set ['total'] = ['total' + *55*];
+    print[str:*total = * 'total' \n];
+
+    var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]];
+    set ['xs'[*2*]] = [*99*];
+    print[str:*xs = * 'xs'[*1*] str:* * 'xs'[*2*] str:* * 'xs'[*3*] \n];
+}

@@ -48,7 +48,7 @@ fn a_setting_it_does_not_know_is_refused_rather_than_ignored() {
     // says so.
     let out = errors("[defaults]\ndivison = \"floored\"\n");
     assert!(out.contains("`divison` is not a setting `[defaults]` has."), "{out}");
-    assert!(out.contains("`[defaults]` holds `division`."), "{out}");
+    assert!(out.contains("`[defaults]` holds `division` and `overflow`."), "{out}");
 }
 
 #[test]

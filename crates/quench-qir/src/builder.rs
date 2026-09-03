@@ -122,6 +122,18 @@ impl Builder {
         self.bin(BinOp::Add, lhs, rhs)
     }
 
+    pub fn add_trapping(&mut self, lhs: Value, rhs: Value) -> Value {
+        self.bin(BinOp::AddTrapping, lhs, rhs)
+    }
+
+    pub fn sub_trapping(&mut self, lhs: Value, rhs: Value) -> Value {
+        self.bin(BinOp::SubTrapping, lhs, rhs)
+    }
+
+    pub fn mul_trapping(&mut self, lhs: Value, rhs: Value) -> Value {
+        self.bin(BinOp::MulTrapping, lhs, rhs)
+    }
+
     pub fn sub(&mut self, lhs: Value, rhs: Value) -> Value {
         self.bin(BinOp::Sub, lhs, rhs)
     }

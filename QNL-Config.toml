@@ -11,6 +11,12 @@
 # means and what makes `x % n` always land in `0..n`.
 division = "truncated"
 
+# Also changes what a program answers. `wrap` rounds a sum that does not fit back into
+# the type, as the processor does; `trap` stops instead, in the same place and for the
+# same reason in every engine. Wrapping is fast and is occasionally the reason a program
+# is quietly wrong for a year.
+overflow = "wrap"
+
 [build]
 # Changes what gets delivered, never what a program answers -- every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`, or

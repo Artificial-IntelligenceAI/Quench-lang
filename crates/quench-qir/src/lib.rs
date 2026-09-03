@@ -46,7 +46,7 @@
 /// same reason* is as much a thing the engines must agree about as printing the same
 /// number. An engine that invented its own list could not be compared with one that did
 /// not.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(i64)]
 pub enum Trap {
     /// Division or remainder by zero.
@@ -58,6 +58,8 @@ pub enum Trap {
     OutsideTheArray = 3,
     /// Calls nested deeper than an engine will follow.
     TooDeep = 4,
+    /// An answer too large for the type it was going into.
+    Overflowed = 5,
 }
 
 impl Trap {
@@ -68,6 +70,7 @@ impl Trap {
             Trap::DivisionOverflowed => "a division too large to hold",
             Trap::OutsideTheArray => "an index outside the array",
             Trap::TooDeep => "calls nested too deep",
+            Trap::Overflowed => "a number too large to hold",
         }
     }
 
@@ -78,6 +81,7 @@ impl Trap {
             2 => Trap::DivisionOverflowed,
             3 => Trap::OutsideTheArray,
             4 => Trap::TooDeep,
+            5 => Trap::Overflowed,
             _ => return None,
         })
     }
@@ -162,9 +166,15 @@ pub struct FuncId(pub u32);
 /// is finished that decision is written down here as an instruction.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BinOp {
+    /// Round into the type, as the processor does.
     Add,
     Sub,
     Mul,
+    /// Stop rather than round. Which a program gets is `[defaults] overflow`, decided by
+    /// the frontend and written down here, so no backend learns a setting existed.
+    AddTrapping,
+    SubTrapping,
+    MulTrapping,
     /// Toward zero, and the remainder follows the dividend: `-7 / 2` is `-3`.
     DivTruncated,
     /// The remainder that goes with [`BinOp::DivTruncated`]: `-7 % 2` is `-1`.
@@ -178,10 +188,7 @@ pub enum BinOp {
 impl BinOp {
     /// Whether this stops on a zero divisor, and on `i64::MIN / -1`.
     pub fn can_trap(self) -> bool {
-        matches!(
-            self,
-            BinOp::DivTruncated | BinOp::RemTruncated | BinOp::DivFloored | BinOp::RemFloored
-        )
+        !matches!(self, BinOp::Add | BinOp::Sub | BinOp::Mul)
     }
 }
 

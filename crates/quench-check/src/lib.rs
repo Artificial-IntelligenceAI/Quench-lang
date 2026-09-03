@@ -79,6 +79,9 @@ pub struct Local {
     pub mutable: bool,
     /// Where the name was written, for pointing at later.
     pub at: Span,
+    /// The whole chain that declared it, so an error about `mut` can point at where
+    /// `mut` was not, and offer the line with it put in.
+    pub chain: Span,
 }
 
 /// Which variable. An index into [`Checked::locals`].
@@ -139,7 +142,16 @@ pub enum Printed {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Stmt {
     Declare { local: LocalId, value: Value },
+    /// `set` — changing something that already exists.
+    Assign { to: Place, value: Value },
     Print(Vec<Printed>),
+}
+
+/// Somewhere a value can be put.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Place {
+    Local(LocalId),
+    Element { local: LocalId, indices: Vec<Value>, shape: Vec<usize> },
 }
 
 /// What a program means.
@@ -202,6 +214,7 @@ impl<'a> Checker<'a> {
         match stmt {
             ast::Stmt::Var(var) => self.declare(var),
             ast::Stmt::Print(print) => self.print(print),
+            ast::Stmt::Set(set) => self.set(set),
         }
     }
 
@@ -240,11 +253,13 @@ impl<'a> Checker<'a> {
             let Some(value) = self.value(value, &ty, chain.ty_span) else { continue };
 
             let local = LocalId(self.locals.len() as u32);
+            let chain_span = var.chain[0].to(*var.chain.last().expect("a chain has links"));
             self.locals.push(Local {
                 name: name.clone(),
                 ty,
                 mutable: chain.mutable,
                 at: *name_span,
+                chain: chain_span,
             });
             self.scope.insert(name, local);
             self.body.push(Stmt::Declare { local, value });
@@ -917,6 +932,64 @@ impl<'a> Checker<'a> {
                         .fix("declare it on its own, and print the pieces separately"),
                 );
                 None
+            }
+        }
+    }
+
+    // --- changing ---------------------------------------------------------------------
+
+    fn set(&mut self, set: &ast::Set) {
+        for (n, target) in set.targets.iter().enumerate() {
+            let Some(local) = self.lookup(target.name()) else { continue };
+            let held = self.locals[local.0 as usize].ty.clone();
+
+            if !self.locals[local.0 as usize].mutable {
+                let declared = self.locals[local.0 as usize].clone();
+                let chain = self.text(declared.chain);
+                // `var.i64` becomes `var.mut.i64`, which is the line they wanted.
+                let with_mut = chain.replacen("var", "var.mut", 1);
+                self.errors.push(
+                    Diagnostic::new(
+                        "E0438",
+                        format!("`'{}'` cannot be changed, because its declaration never said it could.", declared.name),
+                    )
+                    .secondary(declared.chain, "declared here, and `mut` is not in the chain")
+                    .primary(target.name(), "changed here")
+                    .rule("a variable changes only if its declaration says `mut`")
+                    .tip("`mut` goes between `var` and the type.")
+                    .fix(format!("`{with_mut}`")),
+                );
+                continue;
+            }
+
+            let Some(value) = set.values.get(n) else { continue };
+
+            match target {
+                ast::Place::Name(span) => {
+                    let Some(built) = self.value(value, &held, *span) else { continue };
+                    self.body.push(Stmt::Assign { to: Place::Local(local), value: built });
+                }
+                ast::Place::At { name, indices, close } => {
+                    let Ty::Arr { of, shape } = held else {
+                        self.errors.push(
+                            Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
+                                .primary(*name, format!("a `{}`", held.name()))
+                                .rule("only an array has elements to change")
+                                .fix("change the whole thing, or index an array"),
+                        );
+                        continue;
+                    };
+                    let Some(Value::At { indices: built, .. }) =
+                        self.at(*name, indices, *close)
+                    else {
+                        continue;
+                    };
+                    let Some(value) = self.value(value, &of, *name) else { continue };
+                    self.body.push(Stmt::Assign {
+                        to: Place::Element { local, indices: built, shape },
+                        value,
+                    });
+                }
             }
         }
     }

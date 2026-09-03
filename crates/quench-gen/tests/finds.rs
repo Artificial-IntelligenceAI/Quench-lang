@@ -189,7 +189,7 @@ fn some_generated_programs_stop_and_that_is_the_point() {
     // Until compiled code could report a stop rather than abort the process, the
     // generator had to write nothing that could stop -- which left "they stop in the
     // same place for the same reason" entirely unchecked.
-    let seeds: Vec<u64> = (1..=600).collect();
+    let seeds: Vec<u64> = (1..=400).collect();
     let module = batch(&seeds);
     let mut stopped = 0;
     for seed in &seeds {
@@ -199,8 +199,29 @@ fn some_generated_programs_stop_and_that_is_the_point() {
             stopped += 1;
         }
     }
-    assert!(stopped > 5, "only {stopped} of 600 stopped, which is too few to be checking anything");
-    assert!(stopped < 200, "{stopped} of 600 stopped, which is too many to be checking much else");
+    assert!(stopped > 10, "only {stopped} of 400 stopped, which is too few to be checking anything");
+    assert!(stopped < 180, "{stopped} of 400 stopped, which is too many to be checking much else");
+}
+
+#[test]
+fn every_kind_of_stop_is_generated_by_something() {
+    // A trap the generator never writes is a trap the oracle never checks. The one
+    // division that does not fit is far too rare to turn up by chance, so it is aimed
+    // at on purpose -- and this is what says so.
+    use std::collections::BTreeSet;
+    let seeds: Vec<u64> = (1..=1_200).collect();
+    let module = batch(&seeds);
+    let mut seen = BTreeSet::new();
+    for seed in &seeds {
+        if let quench_qir::Outcome::Trapped(t) =
+            quench_interp::run_named(&module, &name_of(*seed)).expect("it runs")
+        {
+            seen.insert(t);
+        }
+    }
+    assert!(seen.contains(&quench_qir::Trap::DividedByZero), "{seen:?}");
+    assert!(seen.contains(&quench_qir::Trap::DivisionOverflowed), "{seen:?}");
+    assert!(seen.contains(&quench_qir::Trap::Overflowed), "{seen:?}");
 }
 
 #[test]

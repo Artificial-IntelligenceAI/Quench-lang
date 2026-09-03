@@ -325,3 +325,63 @@ fn a_program_that_stops_stops_where_it_stopped() {
     quench_interp::run_writing(&module, &mut walked).expect("it runs");
     assert_eq!(String::from_utf8(walked).expect("text"), "before\n");
 }
+
+#[test]
+fn setting_a_variable_changes_what_it_holds() {
+    assert_eq!(
+        said("START { var.mut.i64 ['n'] = [*1*]; set ['n'] = ['n' + *41*]; print['n']; }"),
+        "42"
+    );
+    assert_eq!(
+        said("START { var.mut.str ['s'] = [*a*]; set ['s'] = [*b*]; print['s']; }"),
+        "b"
+    );
+}
+
+#[test]
+fn setting_an_element_changes_only_that_one() {
+    let source = "START {
+        var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]];
+        set ['xs'[*2*]] = [*99*];
+        print['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
+    }";
+    assert_eq!(said(source), "1,99,3");
+}
+
+#[test]
+fn setting_an_element_outside_the_array_stops_both_engines() {
+    use quench_qir::{Outcome, Trap};
+    assert_eq!(
+        ended("START { var.mut.arr.i64 (2) ['xs'] = [[*1* *2*]]; set ['xs'[*7*]] = [*0*]; }"),
+        Outcome::Trapped(Trap::OutsideTheArray)
+    );
+}
+
+#[test]
+fn the_overflow_setting_reaches_the_answer() {
+    use quench_conf::{Overflow, Settings};
+    use quench_qir::{Outcome, Trap};
+    let source = "START {
+        var.i64 ['big'] = [*9223372036854775807*];
+        var.i64 ['n'] = ['big' + *1*];
+        print['n'];
+    }";
+
+    let ran = |settings: Settings| {
+        let module = quench_lower::lower_under(source, settings).module.expect("a program");
+        let walked = quench_interp::run(&module).expect("it runs");
+        let (compiled, _) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+        assert_eq!(walked, compiled, "the engines disagree");
+        walked
+    };
+
+    // One program, two languages -- which is what a semantic setting is.
+    assert!(matches!(
+        ran(Settings { overflow: Overflow::Wrap, ..Settings::default() }),
+        Outcome::Returned(_)
+    ));
+    assert_eq!(
+        ran(Settings { overflow: Overflow::Trap, ..Settings::default() }),
+        Outcome::Trapped(Trap::Overflowed)
+    );
+}

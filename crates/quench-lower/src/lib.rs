@@ -5,8 +5,8 @@
 //! what is left is a transliteration, and that is the point of doing the checking first.
 //! Anything in this file that started to look like a judgement would belong further up.
 
-use quench_check::{Checked, OpKind, Printed, Stmt, Ty, Value};
-use quench_conf::{Division, Settings};
+use quench_check::{Checked, OpKind, Place, Printed, Stmt, Ty, Value};
+use quench_conf::{Division, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
 
@@ -73,6 +73,20 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
                 let value = emit(&mut b, &mut module, value, &held, settings);
                 held[local.0 as usize] = Some(value);
             }
+            // Changing a variable is naming a new value for it. With no control flow
+            // yet there is nothing to merge, so this is a write to the table -- and when
+            // there is, block parameters are what carry a name across a join.
+            Stmt::Assign { to, value } => {
+                let value = emit(&mut b, &mut module, value, &held, settings);
+                match to {
+                    Place::Local(local) => held[local.0 as usize] = Some(value),
+                    Place::Element { local, indices, shape } => {
+                        let handle = held[local.0 as usize].expect("declared before used");
+                        let at = flat_index(&mut b, &mut module, indices, shape, &held, settings);
+                        b.call_host(qir::Host::ArraySet, &[handle, at, value]);
+                    }
+                }
+            }
             Stmt::Print(pieces) => {
                 for piece in pieces {
                     match piece {
@@ -106,6 +120,35 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
     let id = module.add(b.finish());
     module.set_entry(id);
     module
+}
+
+/// Where element (i, j, …) sits in a block laid out row by row.
+///
+/// Counting from one, so each index is shifted down before it is scaled. This is the
+/// whole of what one `arr` link costs to index: no handle is followed on the way.
+fn flat_index(
+    b: &mut qir::Builder,
+    module: &mut qir::Module,
+    indices: &[Value],
+    shape: &[usize],
+    held: &[Option<qir::Value>],
+    settings: Settings,
+) -> qir::Value {
+    let mut flat = None;
+    for (n, index) in indices.iter().enumerate() {
+        let this = emit(b, module, index, held, settings);
+        flat = Some(match flat {
+            None => this,
+            Some(so_far) => {
+                let one = b.const_i64(1);
+                let zeroed = b.sub(so_far, one);
+                let stride = b.const_i64(shape[n] as i64);
+                let scaled = b.mul(zeroed, stride);
+                b.add(scaled, this)
+            }
+        });
+    }
+    flat.expect("the checker refused an index with no numbers in it")
 }
 
 /// One value, put into the IR.
@@ -144,22 +187,7 @@ fn emit(
         // arithmetic, and no handle is followed on the way.
         Value::At { array, indices, shape } => {
             let handle = emit(b, module, array, held, settings);
-            let mut flat = None;
-            for (n, index) in indices.iter().enumerate() {
-                let this = emit(b, module, index, held, settings);
-                flat = Some(match flat {
-                    None => this,
-                    Some(so_far) => {
-                        // so_far is already 1-based; shift down, scale, and add.
-                        let one = b.const_i64(1);
-                        let zeroed = b.sub(so_far, one);
-                        let stride = b.const_i64(shape[n] as i64);
-                        let scaled = b.mul(zeroed, stride);
-                        b.add(scaled, this)
-                    }
-                });
-            }
-            let at = flat.expect("the checker refused an index with no numbers in it");
+            let at = flat_index(b, module, indices, shape, held, settings);
             b.call_host(qir::Host::ArrayGet, &[handle, at])
         }
         Value::Binary { op, lhs, rhs } => {
@@ -167,6 +195,11 @@ fn emit(
             let r = emit(b, module, rhs, held, settings);
             let floored = settings.division == Division::Floored;
             match op {
+                // Whether a sum that does not fit rounds or stops is the project's
+                // decision, written down here as an instruction.
+                OpKind::Add if settings.overflow == Overflow::Trap => b.add_trapping(l, r),
+                OpKind::Sub if settings.overflow == Overflow::Trap => b.sub_trapping(l, r),
+                OpKind::Mul if settings.overflow == Overflow::Trap => b.mul_trapping(l, r),
                 OpKind::Add => b.add(l, r),
                 OpKind::Sub => b.sub(l, r),
                 OpKind::Mul => b.mul(l, r),

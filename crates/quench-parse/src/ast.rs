@@ -30,6 +30,43 @@ pub struct Start {
 pub enum Stmt {
     Print(Print),
     Var(Var),
+    Set(Set),
+}
+
+/// `set ['x'] = [*5*];` — changing something that already exists.
+///
+/// The same shape as a declaration minus the chain, because the variable already has a
+/// type and saying it again would only be a chance to disagree.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Set {
+    pub word: Span,
+    pub targets: Vec<Place>,
+    pub values: Vec<Value>,
+    pub span: Span,
+}
+
+/// Somewhere a value can be put.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Place {
+    Name(Span),
+    At { name: Span, indices: Vec<Term>, close: Span },
+}
+
+impl Place {
+    pub fn span(&self) -> Span {
+        match self {
+            Place::Name(s) => *s,
+            Place::At { name, close, .. } => name.to(*close),
+        }
+    }
+
+    /// The name being changed, without whatever follows it.
+    pub fn name(&self) -> Span {
+        match self {
+            Place::Name(s) => *s,
+            Place::At { name, .. } => *name,
+        }
+    }
 }
 
 impl Stmt {
@@ -37,6 +74,7 @@ impl Stmt {
         match self {
             Stmt::Print(p) => p.span,
             Stmt::Var(v) => v.span,
+            Stmt::Set(s) => s.span,
         }
     }
 }
