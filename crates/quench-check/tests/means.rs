@@ -242,3 +242,83 @@ fn the_operators_that_are_not_built_say_so() {
         assert!(errors(source).contains(which), "{source}\n{}", errors(source));
     }
 }
+
+// --- arrays -------------------------------------------------------------------------
+
+#[test]
+fn an_array_says_its_size_in_its_type() {
+    let out = check("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }");
+    assert!(out.ok(), "{}", errors("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }"));
+    assert_eq!(out.locals[0].ty.name(), "arr.i64 (5)");
+}
+
+#[test]
+fn the_shape_and_the_elements_have_to_agree() {
+    let rendered = errors("START { var.arr.i64 (5) ['xs'] = [[*1* *2*]]; }");
+    assert!(rendered.contains("this holds 5 element(s), and 2 were written"), "{rendered}");
+    assert!(rendered.contains("written flat, row by row"), "{rendered}");
+    assert!(rendered.contains("declared (5)"), "{rendered}");
+}
+
+#[test]
+fn a_shape_is_written_without_marks_because_it_is_part_of_a_type() {
+    // `(5)`, not `(*5*)`. Marks tell a name from a written value, and a size is neither.
+    assert!(check("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }").ok());
+
+    let rendered = errors("START { var.i64 ['n'] = [5]; }");
+    assert!(rendered.contains("a bare number is a size, not a value"), "{rendered}");
+    assert!(rendered.contains("`*5*`"), "{rendered}");
+}
+
+#[test]
+fn an_array_has_to_say_how_big_it_is() {
+    let rendered = errors("START { var.arr.i64 ['xs'] = [[*1*]]; }");
+    assert!(rendered.contains("does not say how big it is"), "{rendered}");
+    assert!(rendered.contains("a growing array is not built yet"), "{rendered}");
+}
+
+#[test]
+fn only_an_array_has_a_shape() {
+    let rendered = errors("START { var.i64 (5) ['n'] = [*1*]; }");
+    assert!(rendered.contains("only an array has a shape"), "{rendered}");
+}
+
+#[test]
+fn an_index_needs_one_number_per_dimension() {
+    let rendered = errors("START { var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print['m'[*1*]]; }");
+    assert!(rendered.contains("has 2 dimension(s), and 1 index(es) were given"), "{rendered}");
+    assert!(rendered.contains("declared (2 3)"), "{rendered}");
+}
+
+#[test]
+fn only_an_array_can_be_indexed() {
+    let rendered = errors("START { var.i64 ['n'] = [*1*]; print['n'[*1*]]; }");
+    assert!(rendered.contains("`i64` is not an array"), "{rendered}");
+}
+
+#[test]
+fn every_element_is_the_type_the_array_said() {
+    let rendered = errors("START { var.arr.i64 (2) ['xs'] = [[*1* *hello*]]; }");
+    assert!(rendered.contains("is not a whole number"), "{rendered}");
+}
+
+#[test]
+fn an_array_of_arrays_says_it_is_not_built() {
+    let rendered = errors("START { var.arr.arr.i64 (2 3) ['m'] = [[*1*]]; }");
+    assert!(rendered.contains("an array of arrays is not built yet"), "{rendered}");
+    assert!(rendered.contains("one `arr` is one allocation"), "{rendered}");
+    assert!(rendered.contains("`arr.i64 (2 3)` is two rows of three"), "{rendered}");
+}
+
+#[test]
+fn an_array_of_something_that_is_not_a_number_says_so() {
+    let rendered = errors("START { var.arr.str (2) ['xs'] = [[*a* *b*]]; }");
+    assert!(rendered.contains("an array of `str` is not built yet"), "{rendered}");
+    assert!(rendered.contains("packed by width"), "{rendered}");
+}
+
+#[test]
+fn an_array_of_nothing_is_refused() {
+    let rendered = errors("START { var.arr.i64 (0) ['xs'] = [[]]; }");
+    assert!(rendered.contains("an array of nothing holds nothing"), "{rendered}");
+}

@@ -81,12 +81,15 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
                             let value = b.const_text(at);
                             b.call_host(qir::Host::PrintText, &[value]);
                         }
-                        Printed::Local { local, ty } => {
-                            let value = held[local.0 as usize].expect("declared before used");
+                        Printed::Value { value, ty } => {
+                            let value = emit(&mut b, &mut module, value, &held, settings);
                             let host = match ty {
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::I64 => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
+                                Ty::Arr { .. } => {
+                                    unreachable!("refused by the checker: an array is not printed")
+                                }
                             };
                             b.call_host(host, &[value]);
                         }
@@ -123,6 +126,42 @@ fn emit(
         // Values do not change, so copying one is naming the same value again rather
         // than doing anything.
         Value::Copy(from) => held[from.0 as usize].expect("declared before used"),
+        // The array is made, then filled one element at a time. Both are host calls:
+        // asking for memory is a runtime service, and this is the first time Quench
+        // asks. Nothing frees it yet, which is the first stage of the collector.
+        Value::Array(elements) => {
+            let len = b.const_i64(elements.len() as i64);
+            let handle = b.call_host(qir::Host::ArrayNew, &[len]);
+            for (n, element) in elements.iter().enumerate() {
+                let at = b.const_i64(n as i64 + 1); // counted from one
+                let value = emit(b, module, element, held, settings);
+                b.call_host(qir::Host::ArraySet, &[handle, at, value]);
+            }
+            handle
+        }
+        // Row by row: element (i, j) of a (2 3) is at (i - 1) x 3 + j, counting from one.
+        // Which is why one `arr` link is one allocation -- the whole address is
+        // arithmetic, and no handle is followed on the way.
+        Value::At { array, indices, shape } => {
+            let handle = emit(b, module, array, held, settings);
+            let mut flat = None;
+            for (n, index) in indices.iter().enumerate() {
+                let this = emit(b, module, index, held, settings);
+                flat = Some(match flat {
+                    None => this,
+                    Some(so_far) => {
+                        // so_far is already 1-based; shift down, scale, and add.
+                        let one = b.const_i64(1);
+                        let zeroed = b.sub(so_far, one);
+                        let stride = b.const_i64(shape[n] as i64);
+                        let scaled = b.mul(zeroed, stride);
+                        b.add(scaled, this)
+                    }
+                });
+            }
+            let at = flat.expect("the checker refused an index with no numbers in it");
+            b.call_host(qir::Host::ArrayGet, &[handle, at])
+        }
         Value::Binary { op, lhs, rhs } => {
             let l = emit(b, module, lhs, held, settings);
             let r = emit(b, module, rhs, held, settings);

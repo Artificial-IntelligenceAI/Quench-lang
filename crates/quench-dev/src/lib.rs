@@ -101,6 +101,7 @@ impl Compiled {
 
     /// Run the entry, keeping whatever it printed rather than letting it out.
     pub fn run_capturing(&self) -> (i64, String) {
+        HEAP.with(|heap| heap.borrow_mut().clear());
         SINK.with(|sink| *sink.borrow_mut() = Some(Vec::new()));
         let answer = self.run();
         let written = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
@@ -147,6 +148,9 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         // it into an address is this backend's business and happens in the runtime
         // function rather than in the generated code.
         qir::Ty::Text => types::I64,
+        // A handle into the heap, which is an index and so an integer as well. The
+        // generated code never dereferences one; it hands it back to the runtime.
+        qir::Ty::Handle => types::I64,
     }
 }
 
@@ -162,12 +166,71 @@ struct Piece {
 }
 
 thread_local! {
+    /// The heap compiled code allocates from.
+    ///
+    /// Allocated and never freed — the first stage of the collector, which needs no
+    /// stack maps and no cooperation from any backend. A handle is an index into this.
+    /// Thread-local for the same reason the sink is, and tolerable for the same reason:
+    /// a worker in the oracle owns its thread.
+    static HEAP: std::cell::RefCell<Vec<Vec<i64>>> = const { std::cell::RefCell::new(Vec::new()) };
+
     /// Where a running program's output goes, when something is collecting it.
     ///
     /// A thread-local rather than an argument because the generated code calls a plain
     /// C function and there is nowhere to put a writer. Provisional, and the reason it
     /// is tolerable is that a worker in the oracle owns its thread.
     static SINK: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Compiled code stopping, because there is no answer to give it.
+///
+/// Aborts rather than returning, since the generated code has nowhere to put a failure
+/// and no way to unwind. Which is exactly why the generator writes no program that can
+/// stop -- see `crates/quench-gen/src/write.rs`. Making this reportable is what has to
+/// happen before it can.
+fn stopped(why: &str) -> ! {
+    eprintln!("the program stopped: {why}");
+    std::process::abort()
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn array_new(_table: *const Piece, len: i64) -> i64 {
+    HEAP.with(|heap| {
+        let mut heap = heap.borrow_mut();
+        heap.push(vec![0; len.max(0) as usize]);
+        heap.len() as i64 - 1
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn array_set(_table: *const Piece, handle: i64, at: i64, value: i64) -> i64 {
+    HEAP.with(|heap| {
+        let mut heap = heap.borrow_mut();
+        let array = &mut heap[handle as usize];
+        match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| array.get_mut(i))
+        {
+            Some(cell) => *cell = value,
+            None => stopped("an index outside the array"),
+        }
+        0
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn array_get(_table: *const Piece, handle: i64, at: i64) -> i64 {
+    HEAP.with(|heap| {
+        let heap = heap.borrow();
+        match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| heap[handle as usize].get(i))
+        {
+            Some(value) => *value,
+            None => stopped("an index outside the array"),
+        }
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn array_len(_table: *const Piece, handle: i64) -> i64 {
+    HEAP.with(|heap| heap.borrow()[handle as usize].len() as i64)
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -260,6 +323,10 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_print_text", print_text as *const u8);
     builder.symbol("quench_print_i64", print_i64 as *const u8);
     builder.symbol("quench_print_bool", print_bool as *const u8);
+    builder.symbol("quench_array_new", array_new as *const u8);
+    builder.symbol("quench_array_set", array_set as *const u8);
+    builder.symbol("quench_array_get", array_get as *const u8);
+    builder.symbol("quench_array_len", array_len as *const u8);
     let mut jit = JITModule::new(builder);
 
     // The text, owned here and pointed at by a table whose address the code will carry.
@@ -287,23 +354,26 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     }
 
     let target = jit.target_config();
-    // Declared once for the whole module: the runtime function every `CallHost` reaches.
-    let mut host_sig = jit.make_signature();
-    host_sig.params.push(AbiParam::new(types::I64)); // the table
-    host_sig.params.push(AbiParam::new(types::I64)); // which piece
-    host_sig.returns.push(AbiParam::new(types::I64));
-    // One declaration per host function. They share a signature -- table, one argument,
-    // an answer nothing uses -- so the lowering only has to pick which.
+    // One declaration per host function, each with its own shape: the table first, then
+    // whatever that one takes. They all give back an i64 -- a handle is one too.
     let mut hosts = Vec::new();
-    for (host, symbol) in
-        [
-            (qir::Host::PrintText, "quench_print_text"),
-            (qir::Host::PrintI64, "quench_print_i64"),
-            (qir::Host::PrintBool, "quench_print_bool"),
-        ]
-    {
+    for (host, symbol) in [
+        (qir::Host::PrintText, "quench_print_text"),
+        (qir::Host::PrintI64, "quench_print_i64"),
+        (qir::Host::PrintBool, "quench_print_bool"),
+        (qir::Host::ArrayNew, "quench_array_new"),
+        (qir::Host::ArraySet, "quench_array_set"),
+        (qir::Host::ArrayGet, "quench_array_get"),
+        (qir::Host::ArrayLen, "quench_array_len"),
+    ] {
+        let mut sig = jit.make_signature();
+        sig.params.push(AbiParam::new(types::I64)); // the table
+        for _ in host.params() {
+            sig.params.push(AbiParam::new(types::I64));
+        }
+        sig.returns.push(AbiParam::new(types::I64));
         let id = jit
-            .declare_function(symbol, Linkage::Import, &host_sig)
+            .declare_function(symbol, Linkage::Import, &sig)
             .map_err(|e| Error::Backend(e.to_string()))?;
         hosts.push((host, id));
     }

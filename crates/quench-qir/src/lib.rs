@@ -64,6 +64,11 @@ pub const ENTRY: &str = "START";
 pub enum Ty {
     I64,
     Bool,
+    /// A handle to something on the heap. An array, so far.
+    ///
+    /// A handle, not a pointer — the same reason [`Ty::Text`] is an index. What a handle
+    /// *is* belongs to whichever runtime is holding the heap.
+    Handle,
     /// A piece of text the program was written with.
     ///
     /// A `Text` value is an index into [`Module::text`], not a pointer — QIR may not
@@ -80,6 +85,7 @@ impl Ty {
             Ty::I64 => "i64",
             Ty::Bool => "bool",
             Ty::Text => "text",
+            Ty::Handle => "handle",
         }
     }
 }
@@ -151,6 +157,20 @@ pub enum Host {
     PrintI64,
     /// Write `true` or `false`. Takes one [`Ty::Bool`].
     PrintBool,
+
+    /// Make an array of that many elements, all zero. Gives back a handle.
+    ///
+    /// This is where Quench first asks for memory. There is no collector behind it yet —
+    /// it allocates and never frees, which is deliberately the first of the three stages
+    /// in `notes/the-collector-earns-its-place.md`, and the one that needs no stack maps
+    /// and no cooperation from any backend.
+    ArrayNew,
+    /// `(handle, index, value)` — put a value in. Counted from one.
+    ArraySet,
+    /// `(handle, index)` — take one out. Counted from one.
+    ArrayGet,
+    /// How many elements it has.
+    ArrayLen,
 }
 
 impl Host {
@@ -159,6 +179,10 @@ impl Host {
             Host::PrintText => "print-text",
             Host::PrintI64 => "print-i64",
             Host::PrintBool => "print-bool",
+            Host::ArrayNew => "array-new",
+            Host::ArraySet => "array-set",
+            Host::ArrayGet => "array-get",
+            Host::ArrayLen => "array-len",
         }
     }
 
@@ -168,6 +192,18 @@ impl Host {
             Host::PrintText => &[Ty::Text],
             Host::PrintI64 => &[Ty::I64],
             Host::PrintBool => &[Ty::Bool],
+            Host::ArrayNew => &[Ty::I64],
+            Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
+            Host::ArrayGet => &[Ty::Handle, Ty::I64],
+            Host::ArrayLen => &[Ty::Handle],
+        }
+    }
+
+    /// What it gives back. Most give an `i64` nothing is expected to use.
+    pub fn result(self) -> Ty {
+        match self {
+            Host::ArrayNew => Ty::Handle,
+            _ => Ty::I64,
         }
     }
 }
@@ -186,9 +222,10 @@ pub enum Inst {
     Call { func: FuncId, args: Vec<Value> },
     /// Ask the runtime for something.
     ///
-    /// Produces an `i64` that nothing is expected to use — every instruction here
-    /// defines exactly one value, and a host call having nothing to give back is not a
-    /// good enough reason to make that untrue everywhere else.
+    /// What it produces is [`Host::result`] — usually an `i64` nothing is expected to
+    /// use, since every instruction here defines exactly one value and a host call
+    /// having nothing to give back is not a good enough reason to make that untrue
+    /// everywhere else.
     CallHost { host: Host, args: Vec<Value> },
 }
 

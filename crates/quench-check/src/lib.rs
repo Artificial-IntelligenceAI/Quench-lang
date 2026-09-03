@@ -18,23 +18,41 @@ use std::collections::HashMap;
 ///
 /// Quench's type list is longer than this. These are the ones that exist all the way
 /// down — anything else is read, understood, and then honestly refused as not built.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Ty {
     I64,
     Str,
     Bool,
+    /// `arr.i64 (2 3)` — one allocation, laid out row by row.
+    ///
+    /// One `arr` link is one allocation however many dimensions it has, which is what
+    /// makes indexing arithmetic. Two `arr` links would be an array of handles, and is
+    /// a different type that is not built yet.
+    Arr { of: Box<Ty>, shape: Vec<usize> },
 }
 
 impl Ty {
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> String {
         match self {
-            Ty::I64 => "i64",
-            Ty::Str => "str",
-            Ty::Bool => "bool",
+            Ty::I64 => "i64".to_string(),
+            Ty::Str => "str".to_string(),
+            Ty::Bool => "bool".to_string(),
+            Ty::Arr { of, shape } => {
+                let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
+                format!("arr.{} ({})", of.name(), sizes.join(" "))
+            }
         }
     }
 
-    fn of(word: &str) -> Option<Ty> {
+    /// How many elements one of these holds, all told.
+    pub fn count(&self) -> usize {
+        match self {
+            Ty::Arr { shape, .. } => shape.iter().product(),
+            _ => 1,
+        }
+    }
+
+    fn simple(word: &str) -> Option<Ty> {
         match word {
             "i64" => Some(Ty::I64),
             "str" => Some(Ty::Str),
@@ -77,6 +95,11 @@ pub enum Value {
     /// The value another variable holds.
     Copy(LocalId),
     Binary { op: OpKind, lhs: Box<Value>, rhs: Box<Value> },
+    /// The elements of an array, flat and in order however many dimensions it has.
+    Array(Vec<Value>),
+    /// One element. The shape is carried so the lowering can work out where it is
+    /// without going back to the type.
+    At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
 }
 
 pub use quench_parse::OpKind;
@@ -109,7 +132,7 @@ fn is_comparison(op: OpKind) -> bool {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Printed {
     Text(String),
-    Local { local: LocalId, ty: Ty },
+    Value { value: Value, ty: Ty },
 }
 
 /// A statement, resolved.
@@ -212,9 +235,9 @@ impl<'a> Checker<'a> {
                 continue;
             }
 
-            let Some(ty) = chain.ty else { continue };
+            let Some(ty) = chain.ty.clone() else { continue };
             let Some(value) = var.values.get(n) else { continue };
-            let Some(value) = self.value(value, ty, chain.ty_span) else { continue };
+            let Some(value) = self.value(value, &ty, chain.ty_span) else { continue };
 
             let local = LocalId(self.locals.len() as u32);
             self.locals.push(Local {
@@ -228,10 +251,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `var` . `mut`? . type — and nothing else, yet.
+    /// `var` . `mut`? . `arr`* . type, then a shape in brackets.
     fn chain(&mut self, var: &ast::Var) -> Option<Chain> {
         let mut mutable = false;
         let mut ty_span = None;
+        let mut arrays: Vec<Span> = Vec::new();
 
         for link in var.chain.iter().skip(1) {
             match self.text(*link) {
@@ -244,6 +268,7 @@ impl<'a> Checker<'a> {
                             .fix("`var.mut.<type>`"),
                     );
                 }
+                "arr" if ty_span.is_none() => arrays.push(*link),
                 word if ty_span.is_none() => {
                     if !INTENDED.contains(&word) {
                         self.errors.push(
@@ -279,22 +304,105 @@ impl<'a> Checker<'a> {
         })?;
 
         let word = self.text(ty_span);
-        let ty = Ty::of(word);
+        let mut ty = Ty::simple(word);
         if ty.is_none() {
             self.errors.push(
                 Diagnostic::new("E0405", format!("`{word}` is not built yet."))
                     .primary(ty_span, "here")
                     .rule("Quench means to have this type, and does not have it today")
-                    .tip("`i64` and `str` are the two that work all the way down.")
-                    .fix("`i64` or `str` for now"),
+                    .tip("`i64`, `str` and `bool` are the ones that work all the way down.")
+                    .fix("one of those for now"),
             );
         }
+
+        if arrays.len() > 1 {
+            self.errors.push(
+                Diagnostic::new("E0423", "an array of arrays is not built yet.")
+                    .primary(arrays[1], "this second `arr`")
+                    .rule("one `arr` is one allocation, however many dimensions it has; two would be an array of handles")
+                    .tip("a rectangular array does most of what nesting is wanted for: `arr.i64 (2 3)` is two rows of three.")
+                    .fix("use one `arr` with more than one size"),
+            );
+            return None;
+        }
+
+        if let Some(arr) = arrays.first() {
+            let Some(element) = ty else { return None };
+            if !matches!(element, Ty::I64) {
+                self.errors.push(
+                    Diagnostic::new("E0424", format!("an array of `{}` is not built yet.", element.name()))
+                        .primary(ty_span, "here")
+                        .rule("the elements of an array are packed by width, and only `i64` is built that way today")
+                        .fix("`arr.i64` for now"),
+                );
+                return None;
+            }
+            let shape = self.shape(var, *arr)?;
+            ty = Some(Ty::Arr { of: Box::new(element), shape });
+        } else if var.shape_span.is_some() {
+            self.errors.push(
+                Diagnostic::new("E0425", "only an array has a shape.")
+                    .primary(var.shape_span.expect("just checked"), "here")
+                    .rule("a shape says how many elements an array holds, and this declares no array")
+                    .fix("add `arr` to the chain, or remove the shape"),
+            );
+            return None;
+        }
+
         Some(Chain { mutable, ty, ty_span })
+    }
+
+    /// `(5)` or `(2 3)` — the sizes, which an array must have and must not be empty.
+    fn shape(&mut self, var: &ast::Var, arr: Span) -> Option<Vec<usize>> {
+        let Some(span) = var.shape_span else {
+            self.errors.push(
+                Diagnostic::new("E0426", "this array does not say how big it is.")
+                    .primary(arr, "here")
+                    .rule("an array says its size in brackets after the chain, because the size is part of the type")
+                    .tip("a growing array is not built yet, so every one has to say.")
+                    .fix("`arr.i64 (5)`, or whichever size was meant"),
+            );
+            return None;
+        };
+        if var.shape.is_empty() {
+            self.errors.push(
+                Diagnostic::new("E0427", "this shape is empty.")
+                    .primary(span, "here")
+                    .rule("a shape is one size for each dimension, and there is always at least one")
+                    .fix("`(5)`, or whichever size was meant"),
+            );
+            return None;
+        }
+        let mut sizes = Vec::new();
+        for size in &var.shape {
+            match self.text(*size).parse::<usize>() {
+                Ok(0) => {
+                    self.errors.push(
+                        Diagnostic::new("E0428", "an array of nothing holds nothing.")
+                            .primary(*size, "here")
+                            .rule("every size in a shape is at least one")
+                            .fix("give it a size, or do not declare it"),
+                    );
+                    return None;
+                }
+                Ok(n) => sizes.push(n),
+                Err(_) => {
+                    self.errors.push(
+                        Diagnostic::new("E0429", format!("`{}` is not a size.", self.text(*size)))
+                            .primary(*size, "here")
+                            .rule("a size is a whole number, written without marks, because it is part of a type")
+                            .fix("write a whole number"),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(sizes)
     }
 
     // --- values ---------------------------------------------------------------------
 
-    fn value(&mut self, value: &ast::Value, ty: Ty, ty_span: Span) -> Option<Value> {
+    fn value(&mut self, value: &ast::Value, ty: &Ty, ty_span: Span) -> Option<Value> {
         // No operators written: the pieces sit side by side, which builds text.
         if !value.has_operators() {
             return self.juxtaposed(value, ty, ty_span);
@@ -315,7 +423,7 @@ impl<'a> Checker<'a> {
 
         let built = self.tree(value)?;
         let found = self.type_of(&built, value.span)?;
-        if found != ty {
+        if &found != ty {
             self.errors.push(
                 Diagnostic::new("E0406", format!("this works out to `{}`, and it is being given to a `{}`.", found.name(), ty.name()))
                     .primary(value.span, format!("a `{}`", found.name()))
@@ -329,12 +437,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Pieces side by side, which is how text is built.
-    fn juxtaposed(&mut self, value: &ast::Value, ty: Ty, ty_span: Span) -> Option<Value> {
+    fn juxtaposed(&mut self, value: &ast::Value, ty: &Ty, ty_span: Span) -> Option<Value> {
         // A value that is one name is that variable's value, whatever the type.
         if let [ast::Term::Piece(ast::Piece::Name(span))] = value.terms.as_slice() {
             let local = self.lookup(*span)?;
-            let held = self.locals[local.0 as usize].ty;
-            if held != ty {
+            let held = self.locals[local.0 as usize].ty.clone();
+            if &held != ty {
                 self.errors.push(
                     Diagnostic::new("E0406", format!("this is `{}`, and it is being given to a `{}`.", held.name(), ty.name()))
                         .primary(*span, format!("a `{}`", held.name()))
@@ -351,7 +459,13 @@ impl<'a> Checker<'a> {
             return self.value(inner, ty, ty_span);
         }
 
+        // An array: its elements, juxtaposed, flat however many dimensions it has.
+        if let Ty::Arr { of, shape } = ty {
+            return self.array(value, of, shape, ty_span);
+        }
+
         match ty {
+            Ty::Arr { .. } => unreachable!("handled above"),
             Ty::Str => {
                 let mut out = String::new();
                 for term in &value.terms {
@@ -412,6 +526,24 @@ impl<'a> Checker<'a> {
                     }
                 }
                 [] => None,
+                // Exactly one thing that is not a written value -- a bare number, an
+                // index, brackets. Whatever it is, `term` knows what is wrong with it
+                // specifically, and "not several" would be a poor description of one.
+                [one] => {
+                    let built = self.term(one)?;
+                    let found = self.type_of(&built, one.span())?;
+                    if found != Ty::I64 {
+                        self.errors.push(
+                            Diagnostic::new("E0406", format!("this is `{}`, and it is being given to a `i64`.", found.name()))
+                                .primary(one.span(), format!("a `{}`", found.name()))
+                                .secondary(ty_span, "declared `i64` here")
+                                .rule("nothing converts on its own — two types meet only where something says they should")
+                                .fix("declare it the same type"),
+                        );
+                        return None;
+                    }
+                    Some(built)
+                }
                 terms => {
                     let all = terms[0].span().to(terms[terms.len() - 1].span());
                     self.errors.push(
@@ -426,6 +558,112 @@ impl<'a> Checker<'a> {
                 }
             },
         }
+    }
+
+    /// The elements of an array: `[[*1* *2* *3*]]`.
+    ///
+    /// Written flat however many dimensions the shape has, because the type already said
+    /// the shape and writing it twice would only be a chance to disagree.
+    fn array(
+        &mut self,
+        value: &ast::Value,
+        of: &Ty,
+        shape: &[usize],
+        ty_span: Span,
+    ) -> Option<Value> {
+        let [ast::Term::Elements { of: written, open, close }] = value.terms.as_slice() else {
+            self.errors.push(
+                Diagnostic::new("E0430", "an array is written between brackets.")
+                    .primary(value.span, "here")
+                    .rule("the elements go in a list of their own, inside the value")
+                    .fix("`[[*1* *2* *3*]]`"),
+            );
+            return None;
+        };
+
+        let wanted: usize = shape.iter().product();
+        if written.len() != wanted {
+            let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
+            self.errors.push(
+                Diagnostic::new("E0431", format!(
+                    "this holds {} element(s), and {} were written.",
+                    wanted,
+                    written.len()
+                ))
+                .primary(open.to(*close), format!("{} here", written.len()))
+                .secondary(ty_span, format!("declared ({})", sizes.join(" ")))
+                .rule("a shaped array is written flat, row by row, since the type already gave the shape")
+                .fix(if written.len() < wanted { "write the missing ones" } else { "remove the extra ones" }),
+            );
+            return None;
+        }
+
+        let mut elements = Vec::with_capacity(written.len());
+        for term in written {
+            let built = self.term(term)?;
+            let found = self.type_of(&built, term.span())?;
+            if &found != of {
+                self.errors.push(
+                    Diagnostic::new("E0432", format!("this is `{}`, and the array holds `{}`.", found.name(), of.name()))
+                        .primary(term.span(), format!("a `{}`", found.name()))
+                        .secondary(ty_span, format!("declared `arr.{}` here", of.name()))
+                        .rule("every element of an array is the type the array said, and nothing converts on its own")
+                        .fix(format!("write a `{}`", of.name())),
+                );
+                return None;
+            }
+            elements.push(built);
+        }
+        Some(Value::Array(elements))
+    }
+
+    /// `'xs'[…]` — one element.
+    fn at(&mut self, name: Span, indices: &[ast::Term], close: Span) -> Option<Value> {
+        let local = self.lookup(name)?;
+        let held = self.locals[local.0 as usize].ty.clone();
+        let Ty::Arr { of: _, shape } = held else {
+            self.errors.push(
+                Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
+                    .primary(name, format!("a `{}`", held.name()))
+                    .rule("only an array has elements to index")
+                    .fix("index an array, or use the value on its own"),
+            );
+            return None;
+        };
+
+        if indices.len() != shape.len() {
+            let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
+            self.errors.push(
+                Diagnostic::new("E0434", format!(
+                    "this array has {} dimension(s), and {} index(es) were given.",
+                    shape.len(),
+                    indices.len()
+                ))
+                .primary(name.to(close), format!("{} here", indices.len()))
+                .secondary(self.locals[local.0 as usize].at, format!("declared ({})", sizes.join(" ")))
+                .rule("an index gives one number for each dimension, in the order the shape wrote them")
+                .fix(format!("give {} of them", shape.len())),
+            );
+            return None;
+        }
+
+        let mut built = Vec::with_capacity(indices.len());
+        for index in indices {
+            let value = self.term(index)?;
+            let found = self.type_of(&value, index.span())?;
+            if found != Ty::I64 {
+                self.errors.push(
+                    Diagnostic::new("E0435", format!("an index is a number, and this is `{}`.", found.name()))
+                        .primary(index.span(), "here")
+                        .rule("an element is found by counting, and counting is done with numbers")
+                        .fix("use a whole number"),
+                );
+                return None;
+            }
+            built.push(value);
+        }
+
+        Some(Value::At { array: Box::new(Value::Copy(local)), indices: built, shape })
     }
 
     /// Fold a flat run into a tree, or refuse and say why.
@@ -481,6 +719,25 @@ impl<'a> Checker<'a> {
 
     fn term(&mut self, term: &ast::Term) -> Option<Value> {
         match term {
+            ast::Term::Number(span) => {
+                self.errors.push(
+                    Diagnostic::new("E0436", "a bare number is a size, not a value.")
+                        .primary(*span, "here")
+                        .rule("a value wears marks, so that a written thing is never read differently depending on where it sits")
+                        .fix(format!("`*{}*`", self.text(*span))),
+                );
+                None
+            }
+            ast::Term::At { name, indices, close } => self.at(*name, indices, *close),
+            ast::Term::Elements { open, close, .. } => {
+                self.errors.push(
+                    Diagnostic::new("E0437", "this is a list of elements, and nothing here wants one.")
+                        .primary(open.to(*close), "here")
+                        .rule("elements are written for an array, and the type says which")
+                        .fix("declare it `arr`, or remove the brackets"),
+                );
+                None
+            }
             ast::Term::Group { value, .. } => self.tree_or_leaf(value),
             ast::Term::Not { word, .. } => {
                 self.errors.push(
@@ -523,6 +780,9 @@ impl<'a> Checker<'a> {
                 );
                 None
             }
+            ast::Term::Piece(ast::Piece::At { name, indices, close }) => {
+                self.at(*name, indices, *close)
+            }
             ast::Term::Piece(ast::Piece::Escape(span)) => {
                 self.errors.push(
                     Diagnostic::new("E0419", "an escape is part of text, not of a sum.")
@@ -557,7 +817,16 @@ impl<'a> Checker<'a> {
             Value::Text(_) => Some(Ty::Str),
             Value::Number(_) => Some(Ty::I64),
             Value::Bool(_) => Some(Ty::Bool),
-            Value::Copy(local) => Some(self.locals[local.0 as usize].ty),
+            Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
+            Value::Array(_) => None,
+            Value::At { shape, array, .. } => {
+                let Value::Copy(local) = **array else { return None };
+                let _ = shape;
+                match self.locals[local.0 as usize].ty.clone() {
+                    Ty::Arr { of, .. } => Some(*of),
+                    other => Some(other),
+                }
+            }
             Value::Binary { op, lhs, rhs } => {
                 if matches!(op, OpKind::Pow | OpKind::And | OpKind::Or) {
                     self.errors.push(
@@ -630,6 +899,15 @@ impl<'a> Checker<'a> {
                 );
                 None
             }),
+            ast::Piece::At { name, close, .. } => {
+                self.errors.push(
+                    Diagnostic::new("E0411", "an element cannot be one piece of a longer value yet.")
+                        .primary(name.to(*close), "here")
+                        .rule("joining something to text builds a new value, and building one needs the collector")
+                        .fix("print the pieces separately"),
+                );
+                None
+            }
             ast::Piece::Name(span) => {
                 self.errors.push(
                     Diagnostic::new("E0411", "a name cannot be one piece of a longer value yet.")
@@ -651,8 +929,8 @@ impl<'a> Checker<'a> {
             match piece {
                 ast::Piece::Name(span) => {
                     let Some(local) = self.lookup(*span) else { continue };
-                    let ty = self.locals[local.0 as usize].ty;
-                    pieces.push(Printed::Local { local, ty });
+                    let ty = self.locals[local.0 as usize].ty.clone();
+                    pieces.push(Printed::Value { value: Value::Copy(local), ty });
                 }
                 ast::Piece::Written { ty: None, mark } => {
                     self.errors.push(
@@ -665,7 +943,8 @@ impl<'a> Checker<'a> {
                 }
                 ast::Piece::Written { ty: Some(span), mark } => {
                     let word = self.text(*span);
-                    match Ty::of(word) {
+                    match Ty::simple(word) {
+                        Some(Ty::Arr { .. }) => unreachable!("`arr` is not a simple type"),
                         Some(Ty::Str) => pieces.push(Printed::Text(unmarked(self.text(*mark)))),
                         Some(Ty::Bool) => match unmarked(self.text(*mark)).as_str() {
                             "true" | "false" => {
@@ -697,6 +976,11 @@ impl<'a> Checker<'a> {
                                 .fix("`i64` or `str` for now"),
                         ),
                     }
+                }
+                ast::Piece::At { name, indices, close } => {
+                    let Some(value) = self.at(*name, indices, *close) else { continue };
+                    let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
+                    pieces.push(Printed::Value { value, ty });
                 }
                 ast::Piece::Escape(span) => match escape(self.text(*span)) {
                     Some(text) => pieces.push(Printed::Text(text.to_string())),

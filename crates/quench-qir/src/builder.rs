@@ -109,9 +109,9 @@ impl Builder {
         self.push(Inst::ConstText(at), Ty::Text)
     }
 
-    /// Ask the runtime for something. The value it gives back is not meant to be used.
+    /// Ask the runtime for something.
     pub fn call_host(&mut self, host: Host, args: &[Value]) -> Value {
-        self.push(Inst::CallHost { host, args: args.to_vec() }, Ty::I64)
+        self.push(Inst::CallHost { host, args: args.to_vec() }, host.result())
     }
 
     pub fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value) -> Value {

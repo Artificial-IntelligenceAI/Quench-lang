@@ -56,7 +56,7 @@ Both print the same thing, which is not a coincidence — it is
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked, `i64` and `str` all the way down |
-| Collector, stack maps | Not started — written here, in Rust, not borrowed |
+| Collector, stack maps | **Stage 1** — arrays allocate and nothing frees them yet. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
 | QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
 | **Interpreter** (`quench-interp`) | **Working** — QIR run directly, the engine that does the least |
@@ -94,6 +94,12 @@ Both print the same thing, which is not a coincidence — it is
   both produced famous traps: the lesson is not that C chose wrong but that there was
   nothing to choose. See
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
+- **Arrays.** `var.arr.i64 (2 3) ['m']` is one allocation of six, laid out row by
+  row; `arr.arr.i64` would be an array of handles and is a different type. The
+  shape is written **without marks** — it is part of the type, and the `64` in
+  `i64` wears none either. Counted from one, because an inclusive loop with an
+  unsigned counter walks `[1, count]` exactly while `[0, count - 1]` wraps on an
+  empty one.
 - **Arithmetic works.** `+ - x / mod` and the comparisons, with the precedence
   mathematics settled applied and everything else refused. `1 + 2 x 3` is 7;
   `10 mod 3 + 1` is an error offering both readings.

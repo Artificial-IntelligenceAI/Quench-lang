@@ -90,6 +90,7 @@ impl<'a> Lexer<'a> {
                 '\'' => self.delimited('\'', Kind::Name, "a name"),
                 '*' => self.delimited('*', Kind::Written, "a written value"),
                 c if starts_word(c) => self.word(),
+                '0'..='9' => self.number(),
                 _ => self.unknown(),
             }
         }
@@ -280,6 +281,15 @@ impl<'a> Lexer<'a> {
         );
     }
 
+    /// A bare number, which is only ever a shape.
+    fn number(&mut self) {
+        let start = self.at;
+        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            self.at += 1;
+        }
+        self.tokens.push(Token { kind: Kind::Number, span: Span::new(start, self.at) });
+    }
+
     fn unknown(&mut self) {
         let start = self.at;
         let c = self.peek().expect("called with a character waiting");
@@ -292,12 +302,6 @@ impl<'a> Lexer<'a> {
 
         // The ones that are almost always a habit from another language rather than a typo.
         diag = match c {
-            // A word cannot start with a digit, so this is always a value written bare.
-            // When Quench grows arithmetic this stops being an error and starts being a
-            // number, and this arm goes with it.
-            '0'..='9' => diag
-                .tip("a written value goes between bars, so that a quoted thing is always a name and never has to be read as a value depending on where it sits.")
-                .fix(format!("`|{c}…|`")),
             '/' => diag
                 .tip("comments start with `#`, and run to the end of the line.")
                 .fix("`# like this`"),

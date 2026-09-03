@@ -101,6 +101,13 @@ pub enum Kind {
 
     /// A bare word: a chain part, a type, or the name of a block. Never a variable's name.
     Word,
+    /// A bare number, with no marks on it.
+    ///
+    /// Only a *shape* is written this way — `arr.i64 (5 2)` — because a shape is part of
+    /// a type rather than a value, and types wear no marks. The `64` in `i64` is a number
+    /// inside a type and nobody writes `i*64*`; a dimension is the same kind of thing.
+    /// Marks exist to tell a name from a written value, and a shape is neither.
+    Number,
 
     /// `'…'` — a name. Quoted, so it can be anything you can type.
     Name,
@@ -157,6 +164,7 @@ impl Kind {
             Kind::GreaterEqual => "`>/=`",
             Kind::NotEqual => "`!=`",
             Kind::Word => "a word",
+            Kind::Number => "a bare number",
             Kind::Name => "a name",
             Kind::Written => "a written value",
             Kind::Escape => "an escape",

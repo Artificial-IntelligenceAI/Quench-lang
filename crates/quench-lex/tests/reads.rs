@@ -118,18 +118,26 @@ fn a_double_quoted_thing_is_one_mistake_not_two() {
 }
 
 #[test]
-fn a_value_written_without_bars_is_told_where_bars_go() {
-    let out = lex("var.b16 ['x'] = [1000];");
-    assert!(!out.ok());
-    assert_eq!(out.errors[0].code, "E0001");
-    assert!(out.errors[0].tips.join(" ").contains("between bars"), "{:?}", out.errors[0]);
+fn a_bare_number_is_a_shape_and_nothing_else() {
+    use Kind::*;
+    // Shapes are part of a type, and types wear no marks -- the `64` in `i64` does not.
+    assert_eq!(
+        kinds("var.arr.i64 (5 2) ['m']"),
+        [
+            Word, Dot, Word, Dot, Word,
+            OpenGroup, Number, Number, CloseGroup,
+            OpenList, Name, CloseList,
+            End,
+        ]
+    );
+    assert_eq!(text("(5 2)", 1), "5");
 }
 
 #[test]
 fn one_bad_line_does_not_hide_the_next() {
     // Three separate mistakes. A lexer that stopped at the first would report a third of
     // what is wrong with this file.
-    let out = lex("var.str ['a = [*x*];\nvar.b16 ['y'] = [\"z\"];\nvar.b16 ['w'] = [9];\n");
+    let out = lex("var.str ['a = [*x*];\nvar.b16 ['y'] = [\"z\"];\nvar.b16 ['w'] = [?];\n");
     assert_eq!(out.errors.len(), 3, "{:#?}", out.errors);
     assert_eq!(out.errors.iter().map(|e| e.code.as_str()).collect::<Vec<_>>(), ["E0002", "E0003", "E0001"]);
 }

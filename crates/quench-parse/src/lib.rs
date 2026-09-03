@@ -212,6 +212,16 @@ impl<'a> Parser<'a> {
 
         let mut pieces = Vec::new();
         while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            // `'xs'[*1*]` in a print list is an index, not a name and then a list.
+            if self.peek().kind == Kind::Name
+                && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+            {
+                let ast::Term::At { name, indices, close } = self.term()? else {
+                    unreachable!("just matched an index")
+                };
+                pieces.push(ast::Piece::At { name, indices, close });
+                continue;
+            }
             pieces.push(self.piece(true)?);
         }
 
@@ -225,6 +235,19 @@ impl<'a> Parser<'a> {
         let mut chain = vec![self.bump().span];
         while self.eat(Kind::Dot).is_some() {
             chain.push(self.expect(Kind::Word, "a chain")?);
+        }
+
+        // `(5 2)` — the shape, if there is one. A shape is part of the type, so it
+        // sits between the chain and the names rather than inside either.
+        let mut shape = Vec::new();
+        let mut shape_span = None;
+        if self.peek().kind == Kind::OpenGroup {
+            let open = self.bump().span;
+            while self.peek().kind == Kind::Number {
+                shape.push(self.bump().span);
+            }
+            let close = self.expect(Kind::CloseGroup, "a shape")?;
+            shape_span = Some(open.to(close));
         }
 
         // The names.
@@ -286,7 +309,7 @@ impl<'a> Parser<'a> {
             );
         }
 
-        Some(Var { chain, names, values, span: start.to(end) })
+        Some(Var { chain, shape, shape_span, names, values, span: start.to(end) })
     }
 
     /// One value: terms, and whatever sits between them.
@@ -345,9 +368,36 @@ impl<'a> Parser<'a> {
         Some(ast::Operator { kind, span: token.span })
     }
 
-    /// One operand: a piece, a bracketed value, or `not` in front of one.
+    /// One operand: a piece, a bracketed value, an array, an index, or `not`.
     fn term(&mut self) -> Option<ast::Term> {
         let token = self.peek();
+        if token.kind == Kind::Number {
+            return Some(ast::Term::Number(self.bump().span));
+        }
+        // `[…]` here is a list of elements. `[` always opens a list in Quench -- of
+        // names, of values, of things to print -- and this is one more of them.
+        if token.kind == Kind::OpenList {
+            let open = self.bump().span;
+            let mut of = Vec::new();
+            while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+                of.push(self.term()?);
+            }
+            let close = self.expect(Kind::CloseList, "an array")?;
+            return Some(ast::Term::Elements { open, of, close });
+        }
+        // A quoted name followed by a bracket is an index. A bare word followed by one
+        // would be a call, which is why names being quoted settles this for free.
+        if token.kind == Kind::Name && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+        {
+            let name = self.bump().span;
+            self.bump();
+            let mut indices = Vec::new();
+            while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+                indices.push(self.term()?);
+            }
+            let close = self.expect(Kind::CloseList, "an index")?;
+            return Some(ast::Term::At { name, indices, close });
+        }
         if token.kind == Kind::OpenGroup {
             let open = self.bump().span;
             let value = self.value()?;

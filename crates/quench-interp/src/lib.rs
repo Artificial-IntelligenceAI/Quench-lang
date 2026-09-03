@@ -40,6 +40,11 @@ pub enum Trap {
     /// `i64::MIN / -1`, whose answer is one larger than an `i64` holds. Cranelift traps
     /// on this rather than wrapping, so this does too.
     DivisionOverflowed,
+    /// An index outside the array it was given to.
+    ///
+    /// Counted from one, so `0` is no element at all and so is one past the end. Both
+    /// engines have to stop here, in the same place, for the same reason.
+    OutsideTheArray,
     /// Calls nested deeper than the interpreter will follow.
     ///
     /// An admitted mismatch: compiled code has a real machine stack and overflows it
@@ -181,6 +186,9 @@ impl Frame {
 /// Run, with the calls on a stack here rather than on Rust's.
 fn walk(module: &qir::Module, entry: qir::FuncId, out: &mut dyn Write) -> Result<i64, Trap> {
     let mut stack = vec![Frame::new(module, entry, &[])];
+    // Allocated and never freed, which is the first stage of the collector and is all
+    // an array needs in order to exist. A handle is an index into this.
+    let mut heap: Vec<Vec<i64>> = Vec::new();
 
     loop {
         let top = stack.len() - 1;
@@ -200,7 +208,7 @@ fn walk(module: &qir::Module, entry: qir::FuncId, out: &mut dyn Write) -> Result
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots, module, out)?;
+            let value = evaluate(inst, &stack[top].slots, module, out, &mut heap)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
@@ -249,6 +257,7 @@ fn evaluate(
     slots: &[i64],
     module: &qir::Module,
     out: &mut dyn Write,
+    heap: &mut Vec<Vec<i64>>,
 ) -> Result<i64, Trap> {
     Ok(match inst {
         qir::Inst::ConstI64(n) => *n,
@@ -257,6 +266,43 @@ fn evaluate(
         qir::Inst::ConstText(at) => i64::from(*at),
         qir::Inst::CallHost { host, args } => {
             match host {
+                qir::Host::ArrayNew => {
+                    let len = slots[args[0].0 as usize];
+                    heap.push(vec![0; len.max(0) as usize]);
+                    return Ok(heap.len() as i64 - 1);
+                }
+                qir::Host::ArraySet => {
+                    let (h, at, value) = (
+                        slots[args[0].0 as usize] as usize,
+                        slots[args[1].0 as usize],
+                        slots[args[2].0 as usize],
+                    );
+                    let array = &mut heap[h];
+                    // Counted from one, so `0` is no element and so is one past the end.
+                    let Some(slot) = at.checked_sub(1).and_then(|i| usize::try_from(i).ok())
+                    else {
+                        return Err(Trap::OutsideTheArray);
+                    };
+                    let Some(cell) = array.get_mut(slot) else {
+                        return Err(Trap::OutsideTheArray);
+                    };
+                    *cell = value;
+                }
+                qir::Host::ArrayGet => {
+                    let (h, at) =
+                        (slots[args[0].0 as usize] as usize, slots[args[1].0 as usize]);
+                    let Some(slot) = at.checked_sub(1).and_then(|i| usize::try_from(i).ok())
+                    else {
+                        return Err(Trap::OutsideTheArray);
+                    };
+                    let Some(value) = heap[h].get(slot) else {
+                        return Err(Trap::OutsideTheArray);
+                    };
+                    return Ok(*value);
+                }
+                qir::Host::ArrayLen => {
+                    return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
+                }
                 qir::Host::PrintBool => {
                     let yes = slots[args[0].0 as usize] != 0;
                     let _ = write!(out, "{}", if yes { "true" } else { "false" });

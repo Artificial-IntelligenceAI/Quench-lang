@@ -207,3 +207,53 @@ fn the_division_setting_reaches_the_answer() {
     assert_eq!(ran(truncated), "-3", "toward zero");
     assert_eq!(ran(floored), "-4", "toward negative infinity");
 }
+
+#[test]
+fn an_array_holds_what_it_was_given() {
+    assert_eq!(
+        said("START { var.arr.i64 (3) ['xs'] = [[*10* *20* *30*]]; print['xs'[*2*]]; }"),
+        "20"
+    );
+}
+
+#[test]
+fn a_shaped_array_is_written_flat_and_indexed_by_dimension() {
+    // (2 3) is two rows of three, laid out row by row in one allocation. Element (2, 3)
+    // is the last one, and finding it is arithmetic rather than following a handle.
+    let source = "START {
+        var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
+        print['m'[*1* *1*] str:*,* 'm'[*1* *3*] str:*,* 'm'[*2* *1*] str:*,* 'm'[*2* *3*]];
+    }";
+    assert_eq!(said(source), "1,3,4,6");
+}
+
+#[test]
+fn arrays_are_counted_from_one() {
+    // Which is not a preference: a counting loop is inclusive and its counter unsigned,
+    // so `[1, count]` walks an array exactly while `[0, count - 1]` wraps on an empty one.
+    assert_eq!(
+        said("START { var.arr.i64 (2) ['xs'] = [[*7* *8*]]; print['xs'[*1*]]; }"),
+        "7",
+        "the first element is 1"
+    );
+}
+
+#[test]
+fn an_index_outside_the_array_stops_the_interpreter() {
+    // The Dev JIT aborts instead, having nowhere to put a failure and no way to unwind.
+    // That asymmetry is why the generator writes nothing that can stop, and it is the
+    // thing to fix before it can.
+    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*3*]]; }");
+    let module = out.module.expect("a program");
+    assert_eq!(
+        quench_interp::run(&module).expect("it runs"),
+        quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray)
+    );
+
+    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*0*]]; }");
+    assert_eq!(
+        quench_interp::run(&out.module.expect("a program")).expect("it runs"),
+        quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray),
+        "and nought is no element at all"
+    );
+}

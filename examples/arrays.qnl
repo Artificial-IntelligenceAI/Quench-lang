@@ -1,0 +1,12 @@
+START {
+    var.arr.i64 (5) ['xs'] = [[*10* *20* *30* *40* *50*]];
+    print[str:*xs[1] = * 'xs'[*1*] str:*, xs[5] = * 'xs'[*5*] \n];
+
+    # (2 3) is one allocation, two rows of three, written flat -- the type
+    # already gave the shape, and writing it twice is a chance to disagree.
+    var.arr.i64 (2 3) ['m'] = [[
+        *1* *2* *3*
+        *4* *5* *6*
+    ]];
+    print[str:*m[2 3] = * 'm'[*2* *3*] \n];
+}
