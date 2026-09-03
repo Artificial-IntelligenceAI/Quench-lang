@@ -25,6 +25,12 @@ for: no pointer width, no calling convention, no target-specific anything. See
 
 Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle).
 
+**This file is a test too.** Every `quench` block in it is compiled, every error it
+shows is produced and compared character for character, and every inline snippet that
+is a whole statement is checked — so a claim here that stopped being true fails
+`cargo test` rather than sitting until somebody notices. What is left is prose, which
+nothing can check and which is therefore the only part to read sceptically.
+
 ## Hello, World
 
 ```quench
@@ -52,20 +58,19 @@ Both print the same thing, which is not a coincidence — it is
 | --- | --- |
 | Diagnostics (`quench-diag`) | Working — the error format, spans, and grapheme/byte/cell-correct columns |
 | **Lexer** (`quench-lex`) | **Working** — tokens, comments, and diagnostics with recovery |
-| **Parser** (`quench-parse`) | **Working** — `START`, declarations, `print`, and recovery at the semicolon |
-| **Lowering** (`quench-lower`) | **Working** — the tree turned into QIR: `START`, `print`, text and escapes |
-| **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
-| **The heap** (`quench-heap`) | **Working** — mark and sweep, shared by both engines, nothing moving |
+| **Parser** (`quench-parse`) | **Working** — the whole language, and recovery at the semicolon |
+| **Lowering** (`quench-lower`) | **Working** — the checked tree turned into QIR, settings written in as instructions |
+| **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
-| **Type checker** (`quench-check`) | **Working** — names resolved, types checked, `i64` and `str` all the way down |
-| Collector, stack maps | **Stage 1** — arrays allocate and nothing frees them yet. Written here, in Rust, not borrowed |
+| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; `i64`, `b64`, `e`, `str`, `bool` and `arr` all the way down |
+| **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
-| QIR (`quench-qir`) | Seed — `i64` and `bool`, SSA with block parameters, verified before any backend sees it |
+| **QIR** (`quench-qir`) | **Working** — six types, SSA with block parameters, verified before any backend sees it, and written down |
 | **Interpreter** (`quench-interp`) | **Working** — QIR run directly, the engine that does the least |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
-| **Generator + oracle** (`quench-gen`) | **Working** — 200,000 programs checked across two engines in 5.5s, all cores |
+| **Generator + oracle** (`quench-gen`) | **Working** — 200,000 programs, three ways each, every module round-tripped through the artefact |
 
 ## Decisions made
 
@@ -76,7 +81,7 @@ Both print the same thing, which is not a coincidence — it is
   types, constants — and they are order-free, because none of them execute.
   Execution begins in `START` and nowhere else. See
   [notes/the-top-level-does-not-run.md](notes/the-top-level-does-not-run.md).
-- **Declarations chain**, as Luarust's do: `var.mut.b16 ['x'] = [*1000*];`.
+- **Declarations chain**, as Luarust's do: `var.mut.i64 ['x'] = [*1000*];`.
   Names in quotes, values between marks, semicolons at the end. See
   [notes/the-declaration-chain.md](notes/the-declaration-chain.md).
 - **A Quench file is `.qnl`.** Unclaimed, and distinctive enough to search for —
@@ -84,7 +89,7 @@ Both print the same thing, which is not a coincidence — it is
   abbreviation.
 - **Two marks**: `'a name'` and `*a written value*`. Whether a written value is
   text or a number is the *type's* question, not the mark's — `*1000*` is a number
-  under `b16` and four characters under `str`. A written value is literal, and
+  under `i64` and four characters under `str`. A written value is literal, and
   escapes stand outside it: `\n` is an item in the list, not a character hidden in
   the text. Items juxtapose to build a value, commas separate values. Where no
   chain supplies a type, the value carries it — `print.stdout[str:*Hello* 'name' \n];` —
@@ -298,17 +303,24 @@ floats at `b64` is what keeps the rest of them out of the heap.
 An error names the rule that was broken, points at the line, and ends with the fix,
 because the fix is what should still be on screen when the reader stops reading.
 
+```quench
+START {
+    var.immut.str ['name'] = [*Tankun*];
+    var.immut.i64 ['name'] = [*1000*];
+}
+```
+
 ```text
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
+file: src/main.qnl, line: 3, column: 20 (src/main.qnl:3:20)
 
 `'name'` is declared twice.
 
-  1 | var.immut.str ['name'] = [*Tankun*];
-    |          ~~~~~~ declared here first, as `str`
-  2 | var.immut.b16 ['name'] = [*1000*];
-    |          ^^^^^^ and declared again here, as `b16`
+  2 |     var.immut.str ['name'] = [*Tankun*];
+    |                    ~~~~~~ declared here first, as `str`
+  3 |     var.immut.i64 ['name'] = [*1000*];
+    |                    ^^^^^^ and declared again here, as `i64`
 
 Error code: E0201
 Rule(s) broken: a name is declared once, and keeps the type it was declared with
