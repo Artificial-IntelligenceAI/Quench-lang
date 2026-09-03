@@ -108,6 +108,11 @@ Which means a working collector arrives before LLVM statepoints are touched at a
 What blocks step 1 is the **object header** — a mark bit, and enough to find an
 object's type so its references can be traced.
 
+*(Written before arrays existed. **Four things allocate now**: arrays, text built while
+a program runs, `e`, and nothing else. And the question below about `e`'s layout stopped
+being the one that decides whether tracing has edges, because `arr.arr` has them
+whatever `e` does. The rest of this section is kept as it was written.)*
+
 With iteration 1's types that is very nearly nothing. Binary floats stop at `b64` and
 integers at 64 bits, so every number fits in a register and never reaches the heap.
 **Two things allocate: `str`, and `e`.**
@@ -156,3 +161,77 @@ good, assert that something which must hold still holds.
 Constants outside and variables inside stays, and the argument for it never depended
 on ownership: an initialiser that needs code to run would need it to run before
 `START`. See [the top level does not run](the-top-level-does-not-run.md).
+
+---
+
+## Step two, in the engine that could
+
+The interpreter collects. Mark and sweep, from exact roots, with nothing moving —
+which is step two of the three above, arriving before a statepoint has been touched
+exactly as the staging promised.
+
+### The header, which step one never had
+
+A slot is an `i64` whatever is in it. Nothing about the bits says whether a slot of
+an array is a number to leave alone or a handle to follow, so `array-new` now takes
+two more arguments: what its slots hold, and how many allocations lie under it. That
+is the whole object header, and it is the thing this note said step one needed.
+
+It has to come from the **type**, not from the elements. An array written empty has
+no elements to ask — and an array written empty is exactly what a growing one starts
+as. The first version of this read the header off the first element, and a
+`(grow grow)` written `[[]]` therefore claimed to hold numbers; its rows were freed
+underneath it within a few thousand allocations. The heap's own assertion caught it,
+which is the argument for asserting rather than returning nought.
+
+### What a root is
+
+Everything a running program could still reach: **the slots of every frame on the
+call stack whose type is a reference**, and everything the module was written with.
+
+The types come from QIR, which says what every value in a function is — so a slot
+holding `7` is told from a slot holding handle 7 without either of them saying so.
+And the roots are exact rather than conservative, because the interpreter's call
+stack is a list it owns rather than the machine's. That is the same property that
+makes it the engine to believe when the three disagree, showing up somewhere else.
+
+A constant array and a written piece of text are **never collected**. They are in
+the artefact rather than on the heap, laid out before anything runs, so nothing can
+ever be the last to let go of one.
+
+### Three spaces, and nothing moves
+
+Arrays, text and exact numbers, each a list with a free list beside it. A handle is
+an index, so a freed slot is reused rather than compacted — nothing moves, no handle
+anywhere needs correcting afterwards, and that is the whole reason this step comes
+before the one with statepoints in it.
+
+Collection happens **between instructions** and nowhere else, where nothing is
+half-built. The threshold is twice what survived the last one, so a program that
+genuinely holds a lot stops collecting on every allocation and one that holds nothing
+keeps its heap small.
+
+### What the Dev JIT does, and what it would take
+
+**It does not collect.** It is still at step one: allocate and never free.
+
+That is not a disagreement, and the rule at the top of this note is why —
+finalisation is not observable, so two engines collecting at different moments, or
+one of them not at all, is not something a program can tell. The oracle agrees on
+all 200,000 programs with one engine collecting and one not, which is the claim being
+made rather than an accident.
+
+What it would take is the thing this note always said step two costs, and the
+interpreter got to skip: **roots that are not on a list somebody owns.** A handle in
+the Dev JIT lives in a machine register or a stack slot, and finding it means either
+
+- **stack maps** — Cranelift can be told which values are live references at a
+  safepoint, and then the runtime has to walk the native stack, find each frame's
+  return address, and look up the map for it; or
+- **a shadow stack** — generated code writes its live handles somewhere the runtime
+  can see, which needs no unwinding and costs a store per live handle per allocation.
+  It also needs a liveness pass over QIR, because a temporary handle held in a
+  register across an allocation is live and is in no local.
+
+Neither is hard to describe and both are real work. Written down here so that the
+next person to read this knows the interpreter's collector was the cheap half.

@@ -226,8 +226,13 @@ pub enum Value {
     /// The value another variable holds.
     Copy(LocalId),
     Binary { op: OpKind, lhs: Box<Value>, rhs: Box<Value> },
-    /// The elements of an array, flat and in order however many dimensions it has.
-    Array(Vec<Value>),
+    /// The elements of an array, flat and in order however many dimensions it has,
+    /// and what one of them is.
+    ///
+    /// The type is carried because a collector needs it and the elements cannot always
+    /// supply it: an empty array has none, and an array written empty is exactly what a
+    /// growing one starts as.
+    Array { of: Box<Ty>, elements: Vec<Value> },
     /// One element. The shape is carried so the lowering can work out where it is
     /// without going back to the type.
     At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
@@ -1569,7 +1574,11 @@ impl<'a> Checker<'a> {
                 return None;
             }
             let rows = if grows { 0 } else { shape.iter().product::<usize>() };
-            return Some(Value::Array(vec![Value::Array(Vec::new()); rows]));
+            let Ty::Arr { of: under, .. } = of else {
+                unreachable!("only an array holds something that is not settled")
+            };
+            let empty = Value::Array { of: under.clone(), elements: Vec::new() };
+            return Some(Value::Array { of: Box::new(of.clone()), elements: vec![empty; rows] });
         }
 
         // A growing allocation takes however many were written, so long as they fill
@@ -1623,7 +1632,7 @@ impl<'a> Checker<'a> {
                 let built = self.array(&piece, inner, inner_shape, *inner_grows, ty_span)?;
                 rows.push(built);
             }
-            return Some(Value::Array(rows));
+            return Some(Value::Array { of: Box::new(of.clone()), elements: rows });
         }
 
         let mut elements = Vec::with_capacity(written.len());
@@ -1653,7 +1662,7 @@ impl<'a> Checker<'a> {
             }
             elements.push(built);
         }
-        Some(Value::Array(elements))
+        Some(Value::Array { of: Box::new(of.clone()), elements })
     }
 
     /// `'xs'[…]` — one element.
@@ -2080,7 +2089,7 @@ impl<'a> Checker<'a> {
             Value::Float(_) => Some(Ty::Float),
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
-            Value::Array(_) => None,
+            Value::Array { .. } => None,
             Value::Join(_) => Some(Ty::Str),
             Value::Not(_) => Some(Ty::Bool),
             Value::Count(_) => Some(Ty::I64),

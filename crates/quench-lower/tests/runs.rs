@@ -1418,3 +1418,107 @@ fn an_array_of_floats_shows_what_it_holds() {
         "always with a point, so what is shown says which type it came from",
     );
 }
+
+/// What the heap kept, which is the one thing the oracle cannot see.
+fn kept(source: &str) -> quench_interp::Kept {
+    let out = lower(source);
+    assert!(out.ok(), "{}", report(source));
+    let (_, kept) = quench_interp::run_kept(&out.module.expect("a program")).expect("it runs");
+    kept
+}
+
+#[test]
+fn what_nothing_can_reach_goes_away() {
+    // Twenty thousand arrays made and one held at a time. A heap that grew with the
+    // loop would end with twenty thousand in it.
+    let kept = kept("\
+START {
+    var.mut.i64 ['total'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.arr.i64 (3) ['scratch'] = [[*1* *2* *3*]];
+        set ['total'] = ['total' + 'scratch'[*2*]];
+    }
+}
+");
+    assert!(kept.collections > 10, "it collected: {kept:?}");
+    assert!(kept.live.0 < 1000, "and kept almost nothing: {kept:?}");
+}
+
+#[test]
+fn text_and_exact_numbers_are_collected_too() {
+    let kept = kept("\
+START {
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.str ['junk'] = [*x* *y*];
+        var.immut.e ['also'] = [e:*1/3* + e:*1/6*];
+    }
+}
+");
+    assert!(kept.live.1 < 1000, "text went away: {kept:?}");
+    assert!(kept.live.2 < 1000, "and so did exact numbers: {kept:?}");
+}
+
+#[test]
+fn what_something_can_reach_stays() {
+    // An array of arrays is the one thing in Quench with edges to follow, and this is
+    // the program that fails if tracing does not follow them: the rows are reachable
+    // only through the outer array, and nothing else names them by the end.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.i64 (grow grow) ['kept'] = [[]];
+    loop.temp.range.i64 ['r'] = [*1*, *3*] {
+        var.mut.arr.i64 (grow) ['row'] = [[]];
+        loop.temp.range.i64 ['c'] = [*1*, *3*] {
+            add ['row'] = ['r' \u{d7} 'c'];
+        }
+        add ['kept'] = [share 'row'];
+    }
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.arr.i64 (2) ['junk'] = [[*1* *2*]];
+    }
+    print.stdout['kept'];
+}
+"),
+        "[[1 2 3] [2 4 6] [3 6 9]]",
+    );
+}
+
+#[test]
+fn an_array_written_empty_still_says_what_it_will_hold() {
+    // Its header cannot come from its elements, because it has none -- and an array
+    // written empty is exactly what a growing one starts as. This program freed its
+    // rows underneath itself until the header came from the type instead.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.i64 (grow grow) ['rows'] = [[]];
+    var.mut.arr.i64 (grow) ['one'] = [[*7* *8*]];
+    add ['rows'] = [share 'one'];
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.str ['junk'] = [*a* *b*];
+    }
+    print.stdout['rows'];
+}
+"),
+        "[[7 8]]",
+    );
+}
+
+#[test]
+fn what_a_program_was_written_with_outlives_every_collection() {
+    // A constant array and a written piece of text are in the artefact rather than on
+    // the heap, so nothing can ever be the last to let go of one.
+    assert_eq!(
+        said("\
+const.file.arr.i64 (3) ['PRIMES'] = [[*2* *3* *5*]];
+START {
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.arr.i64 (2) ['junk'] = [[*1* *2*]];
+    }
+    print.stdout['PRIMES' str:* * str:*written*];
+}
+"),
+        "[2 3 5] written",
+    );
+}

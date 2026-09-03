@@ -93,7 +93,7 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
 /// decided by the time it is written — the layout being fixed is what makes a handle
 /// something the compiler can know.
 fn lay_out(module: &mut qir::Module, value: &Value) -> u32 {
-    let Value::Array(elements) = value else {
+    let Value::Array { elements, .. } = value else {
         unreachable!("refused by the checker: a constant array is written out")
     };
     let mut slots = Vec::with_capacity(elements.len());
@@ -102,7 +102,7 @@ fn lay_out(module: &mut qir::Module, value: &Value) -> u32 {
             Value::Number(n) => *n,
             Value::Bool(yes) => i64::from(*yes),
             Value::Text(text) => i64::from(module.intern(text)),
-            Value::Array(_) => i64::from(lay_out(module, element)),
+            Value::Array { .. } => i64::from(lay_out(module, element)),
             _ => unreachable!("refused by the checker: a constant is worked out here"),
         });
     }
@@ -686,10 +686,17 @@ fn emit(
         // The array is made, then filled one element at a time. Both are host calls:
         // asking for memory is a runtime service, and this is the first time Quench
         // asks. Nothing frees it yet, which is the first stage of the collector.
-        Value::Array(elements) => {
-            let len = b.const_i64(elements.len() as i64);
-            let handle = b.call_host(qir::Host::ArrayNew, &[len]);
-            for (n, element) in elements.iter().enumerate() {
+        Value::Array { of, elements: written } => {
+            let len = b.const_i64(written.len() as i64);
+            // The header: what the slots hold, so a collector can tell a number to
+            // leave alone from a handle to follow. It comes from the type rather than
+            // from the elements, because an array written empty has none — and an array
+            // written empty is exactly what a growing one starts as.
+            let (leaf, depth) = elements(of);
+            let kind = b.const_i64(leaf as i64);
+            let deep = b.const_i64(depth);
+            let handle = b.call_host(qir::Host::ArrayNew, &[len, kind, deep]);
+            for (n, element) in written.iter().enumerate() {
                 let at = b.const_i64(n as i64 + 1); // counted from one
                 let value = emit(b, module, element, held, w);
                 b.call_host(qir::Host::ArraySet, &[handle, at, value]);

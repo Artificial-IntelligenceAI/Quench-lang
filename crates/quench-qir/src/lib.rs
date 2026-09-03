@@ -307,12 +307,12 @@ pub enum Host {
     /// `(stream, bool)`
     PrintBool,
 
-    /// Make an array of that many elements, all zero. Gives back a handle.
+    /// `(length, elements, depth)` — an array of that many, all zero. Gives a handle.
     ///
-    /// This is where Quench first asks for memory. There is no collector behind it yet —
-    /// it allocates and never frees, which is deliberately the first of the three stages
-    /// in `notes/the-collector-earns-its-place.md`, and the one that needs no stack maps
-    /// and no cooperation from any backend.
+    /// The last two are the **object header**: what its slots hold, and how many
+    /// allocations lie under it. A slot is an `i64` whatever is in it, so nothing else
+    /// could tell a collector whether a slot is a number to leave alone or a handle to
+    /// follow. See `notes/the-collector-earns-its-place.md`.
     ArrayNew,
     /// `(handle, index, value)` — put a value in. Counted from one. Can stop.
     ArraySet,
@@ -414,7 +414,7 @@ impl Host {
             Host::PrintText => &[Ty::I64, Ty::Text],
             Host::PrintI64 => &[Ty::I64, Ty::I64],
             Host::PrintBool => &[Ty::I64, Ty::Bool],
-            Host::ArrayNew => &[Ty::I64],
+            Host::ArrayNew => &[Ty::I64, Ty::I64, Ty::I64],
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
@@ -498,6 +498,14 @@ pub enum Elements {
     Text = 2,
     Exact = 3,
     Float = 4,
+}
+
+impl Elements {
+    /// Whether a slot holding one of these is something to follow rather than a value
+    /// to leave alone. The whole of what tracing needs to know.
+    pub fn is_a_reference(self) -> bool {
+        matches!(self, Elements::Text | Elements::Exact)
+    }
 }
 
 impl Elements {

@@ -222,6 +222,12 @@ Both print the same thing, which is not a coincidence — it is
   before `START`, which is the model above, smuggled back in. So every variable
   lives inside a function.
 - **Memory is collected.** A garbage collector, not ownership and not refcounting.
+  **The interpreter collects** — mark and sweep, exact roots off its own call stack,
+  nothing moving. The Dev JIT still allocates and never frees, and that is not a
+  disagreement: finalisation is not observable, which is exactly what lets two engines
+  collect at different moments or one of them not at all. Every array carries what its
+  slots hold, because a slot is an `i64` whatever is in it and nothing else could tell
+  a number to leave alone from a handle to follow.
   Ownership makes the shape of your data a tree, and cycles, self-reference, caches
   and interning are not trees; the usual escape — an arena of integer indices —
   keeps the memory safety and loses the guarantee it was bought for. **Finalisation

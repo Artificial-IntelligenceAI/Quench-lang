@@ -20,6 +20,9 @@
 //! here are not the interpreter's own opinion — they are chosen to match what Cranelift's
 //! `sdiv` and `srem` do, because that is what the machine code will do.
 
+pub mod heap;
+
+use heap::Heap;
 use quench_qir as qir;
 use std::io::Write;
 
@@ -67,23 +70,21 @@ fn shown(
     handle: i64,
     kind: qir::Elements,
     depth: i64,
-    heap: &[Vec<i64>],
-    exacts: &[quench_num::Exact],
-    texts: &[String],
+    heap: &Heap,
 ) -> String {
-    let parts: Vec<String> = heap[handle as usize]
+    let parts: Vec<String> = heap.at(handle).values
         .iter()
         .map(|value| {
             if depth > 0 {
-                return shown(*value, kind, depth - 1, heap, exacts, texts);
+                return shown(*value, kind, depth - 1, heap);
             }
             match kind {
                 qir::Elements::I64 => value.to_string(),
                 qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
                 // Wearing its marks, because an array of text with a space in it is
                 // unreadable without them.
-                qir::Elements::Text => format!("*{}*", texts[*value as usize]),
-                qir::Elements::Exact => exacts[*value as usize].to_string(),
+                qir::Elements::Text => format!("*{}*", heap.said(*value)),
+                qir::Elements::Exact => heap.exactly(*value).to_string(),
                 qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
@@ -97,32 +98,49 @@ fn alike(
     b: i64,
     kind: qir::Elements,
     depth: i64,
-    heap: &[Vec<i64>],
-    exacts: &[quench_num::Exact],
-    texts: &[String],
+    heap: &Heap,
 ) -> bool {
-    let (left, right) = (&heap[a as usize], &heap[b as usize]);
+    let (left, right) = (&heap.at(a).values, &heap.at(b).values);
     if left.len() != right.len() {
         return false;
     }
-    left.iter().zip(right).all(|(x, y)| {
+    left.iter().zip(right.iter()).all(|(x, y)| {
         if depth > 0 {
-            return alike(*x, *y, kind, depth - 1, heap, exacts, texts);
+            return alike(*x, *y, kind, depth - 1, heap);
         }
         match kind {
             // Two names for one exact number are not the only way to hold the same one,
             // so these are compared by value rather than by which they are -- and so is
             // text, for the same reason.
-            qir::Elements::Exact => exacts[*x as usize] == exacts[*y as usize],
+            qir::Elements::Exact => heap.exactly(*x) == heap.exactly(*y),
             // By what they are, not by their bits: two ways of writing nought are one
             // number, and a not-a-number is not even itself.
             qir::Elements::Float => {
                 f64::from_bits(*x as u64) == f64::from_bits(*y as u64)
             }
-            qir::Elements::Text => texts[*x as usize] == texts[*y as usize],
+            qir::Elements::Text => heap.said(*x) == heap.said(*y),
             _ => x == y,
         }
     })
+}
+
+/// Everything a running program could still reach.
+///
+/// One entry per slot of every frame whose type is a reference. The type comes from the
+/// function the frame is running: QIR says what every value in it is, so a slot holding
+/// `7` is told apart from a slot holding handle 7 without either of them saying so.
+fn rooted(stack: &[Frame], module: &qir::Module) -> Vec<(qir::Ty, i64)> {
+    let mut roots = Vec::new();
+    for frame in stack {
+        let func = module.func(frame.func);
+        for (n, value) in frame.slots.iter().enumerate() {
+            let ty = func.ty_of(qir::Value(n as u32));
+            if matches!(ty, qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact) {
+                roots.push((ty, *value));
+            }
+        }
+    }
+    roots
 }
 
 /// Why a power had no answer, as a reason to stop.
@@ -149,6 +167,31 @@ impl Writing<'_> {
 pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
     let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
     run_writing(module, &mut Writing { out: &mut out, err: &mut err })
+}
+
+/// What the heap looked like when the program ended.
+///
+/// Nothing a program can see, and that is the point: a collector that changed what a
+/// program answered would be a bug rather than a feature. It is here so that a test can
+/// check the one thing the oracle cannot — that memory nothing can reach went away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Kept {
+    /// Arrays, pieces of text and exact numbers still alive at the end.
+    pub live: (usize, usize, usize),
+    pub collections: usize,
+}
+
+/// Run it, and say what the heap looked like afterwards as well as what it answered.
+pub fn run_kept(module: &qir::Module) -> Result<(Outcome, Kept), Error> {
+    let (mut out, mut err) = (std::io::sink(), std::io::sink());
+    let id = module.entry.ok_or(Error::NoEntry)?;
+    let mut writing = Writing { out: &mut out, err: &mut err };
+    let mut heap = Heap::new(module);
+    let outcome = match walk_with(module, id, &mut writing, &mut heap) {
+        Ok(value) => Outcome::Returned(value),
+        Err(trap) => Outcome::Trapped(trap),
+    };
+    Ok((outcome, Kept { live: heap.live(), collections: heap.collections }))
 }
 
 /// The same, sending whatever it prints somewhere of your choosing.
@@ -244,19 +287,24 @@ impl Frame {
 
 /// Run, with the calls on a stack here rather than on Rust's.
 fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> Result<i64, Trap> {
+    let mut heap = Heap::new(module);
+    walk_with(module, entry, writing, &mut heap)
+}
+
+fn walk_with(
+    module: &qir::Module,
+    entry: qir::FuncId,
+    writing: &mut Writing<'_>,
+    heap: &mut Heap,
+) -> Result<i64, Trap> {
     let mut stack = vec![Frame::new(module, entry, &[])];
     // Allocated and never freed, which is the first stage of the collector and is all
     // an array needs in order to exist. A handle is an index into this.
     // The module's constant tables, laid out before anything runs — so table `i` is
     // handle `i`, and nothing has to look one up. The same thing the text table is,
     // with numbers in it.
-    let mut heap: Vec<Vec<i64>> = module.tables.clone();
-    // Exact numbers, allocated and never freed -- the first stage of the collector,
-    // same as the arrays above and for the same reason.
-    let mut exacts: Vec<quench_num::Exact> = Vec::new();
-    // Every piece of text there is: the ones the program was written with first, then
-    // every one it builds while it runs. A `Text` value is an index into this.
-    let mut texts: Vec<String> = module.text.clone();
+
+
 
     loop {
         let top = stack.len() - 1;
@@ -276,10 +324,19 @@ fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> 
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots, module, writing, &mut heap, &mut exacts, &mut texts)?;
+            let value = evaluate(inst, &stack[top].slots, module, writing, heap)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
+
+        // Between instructions, and only there: every handle a program can still reach
+        // is in a slot of some frame, and nothing is half-built. What makes the roots
+        // exact here is the thing that makes this engine the reference one — its call
+        // stack is a list it owns, not the machine's.
+        if heap.worth_collecting() {
+            let roots = rooted(&stack, module);
+            heap.collect(&roots);
+        }
 
         if let Some((callee, given)) = calling {
             if stack.len() >= DEPTH {
@@ -325,9 +382,7 @@ fn evaluate(
     slots: &[i64],
     _module: &qir::Module,
     writing: &mut Writing<'_>,
-    heap: &mut Vec<Vec<i64>>,
-    exacts: &mut Vec<quench_num::Exact>,
-    texts: &mut Vec<String>,
+    heap: &mut Heap,
 ) -> Result<i64, Trap> {
     Ok(match inst {
         qir::Inst::ConstI64(n) => *n,
@@ -341,8 +396,10 @@ fn evaluate(
             match host {
                 qir::Host::ArrayNew => {
                     let len = slots[args[0].0 as usize];
-                    heap.push(vec![0; len.max(0) as usize]);
-                    return Ok(heap.len() as i64 - 1);
+                    let holds = qir::Elements::from_code(slots[args[1].0 as usize])
+                        .expect("the lowering wrote this constant");
+                    let depth = slots[args[2].0 as usize];
+                    return Ok(heap.make(holds, depth, vec![0; len.max(0) as usize]));
                 }
                 qir::Host::ArraySet => {
                     let (h, at, value) = (
@@ -350,7 +407,7 @@ fn evaluate(
                         slots[args[1].0 as usize],
                         slots[args[2].0 as usize],
                     );
-                    let array = &mut heap[h];
+                    let array = &mut heap.at_mut(h as i64).values;
                     // Counted from one, so `0` is no element and so is one past the end.
                     let Some(slot) = at.checked_sub(1).and_then(|i| usize::try_from(i).ok())
                     else {
@@ -368,23 +425,26 @@ fn evaluate(
                     else {
                         return Err(Trap::OutsideTheArray);
                     };
-                    let Some(value) = heap[h].get(slot) else {
+                    let Some(value) = heap.at(h as i64).values.get(slot) else {
                         return Err(Trap::OutsideTheArray);
                     };
                     return Ok(*value);
                 }
                 qir::Host::ArrayLen => {
-                    return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
+                    return Ok(heap.at(slots[args[0].0 as usize]).values.len() as i64);
                 }
                 qir::Host::ArrayPush => {
                     let (h, value) =
                         (slots[args[0].0 as usize] as usize, slots[args[1].0 as usize]);
-                    heap[h].push(value);
+                    heap.at_mut(h as i64).values.push(value);
                 }
                 qir::Host::ArrayCopy => {
-                    let of = heap[slots[args[0].0 as usize] as usize].clone();
-                    heap.push(of);
-                    return Ok(heap.len() as i64 - 1);
+                    let from = slots[args[0].0 as usize];
+                    let (holds, depth, values) = {
+                        let of = heap.at(from);
+                        (of.holds, of.depth, of.values.clone())
+                    };
+                    return Ok(heap.make(holds, depth, values));
                 }
                 qir::Host::ArrayEqual => {
                     let kind = qir::Elements::from_code(slots[args[2].0 as usize])
@@ -392,30 +452,28 @@ fn evaluate(
                     let depth = slots[args[3].0 as usize];
                     let (a, b) =
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);
-                    return Ok(i64::from(alike(a, b, kind, depth, heap, exacts, texts)));
+                    return Ok(i64::from(alike(a, b, kind, depth, heap)));
                 }
                 qir::Host::PrintArray => {
                     let kind = qir::Elements::from_code(slots[args[2].0 as usize])
                         .expect("the lowering wrote this constant");
                     let depth = slots[args[3].0 as usize];
-                    let shown = shown(slots[args[1].0 as usize], kind, depth, heap, exacts, texts);
+                    let shown = shown(slots[args[1].0 as usize], kind, depth, heap);
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
                 }
                 qir::Host::ExactRead => {
                     let at = slots[args[0].0 as usize] as usize;
-                    let text = &texts[at];
-                    let read = quench_num::Exact::parse(text)
+                    let read = quench_num::Exact::parse(heap.said(at as i64))
                         .expect("refused by the checker: an `e` that is not a number");
-                    exacts.push(read);
-                    return Ok(exacts.len() as i64 - 1);
+                    return Ok(heap.exact(read));
                 }
                 qir::Host::ExactAdd
                 | qir::Host::ExactSub
                 | qir::Host::ExactMul
                 | qir::Host::ExactDiv => {
                     let (a, b) = (
-                        exacts[slots[args[0].0 as usize] as usize].clone(),
-                        exacts[slots[args[1].0 as usize] as usize].clone(),
+                        heap.exactly(slots[args[0].0 as usize]).clone(),
+                        heap.exactly(slots[args[1].0 as usize]).clone(),
                     );
                     let answer = match host {
                         qir::Host::ExactAdd => a.add(&b),
@@ -425,16 +483,15 @@ fn evaluate(
                         // a rational divided by a rational is a rational, always.
                         _ => a.div(&b).map_err(|_| Trap::DividedByZero)?,
                     };
-                    exacts.push(answer);
-                    return Ok(exacts.len() as i64 - 1);
+                    return Ok(heap.exact(answer));
                 }
                 qir::Host::ExactPow => {
                     let (a, b) = (
-                        exacts[slots[args[0].0 as usize] as usize].clone(),
-                        exacts[slots[args[1].0 as usize] as usize].clone(),
+                        heap.exactly(slots[args[0].0 as usize]).clone(),
+                        heap.exactly(slots[args[1].0 as usize]).clone(),
                     );
-                    exacts.push(a.power(&b).map_err(no_power)?);
-                    return Ok(exacts.len() as i64 - 1);
+                    let answer = a.power(&b).map_err(no_power)?;
+                    return Ok(heap.exact(answer));
                 }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =
@@ -445,16 +502,15 @@ fn evaluate(
                 qir::Host::TextJoin => {
                     let joined = format!(
                         "{}{}",
-                        texts[slots[args[0].0 as usize] as usize],
-                        texts[slots[args[1].0 as usize] as usize]
+                        heap.said(slots[args[0].0 as usize]),
+                        heap.said(slots[args[1].0 as usize])
                     );
-                    texts.push(joined);
-                    return Ok(texts.len() as i64 - 1);
+                    return Ok(heap.text(joined));
                 }
                 qir::Host::TextCompare => {
                     let (a, b) = (
-                        &texts[slots[args[0].0 as usize] as usize],
-                        &texts[slots[args[1].0 as usize] as usize],
+                        heap.said(slots[args[0].0 as usize]),
+                        heap.said(slots[args[1].0 as usize]),
                     );
                     return Ok(match a.cmp(b) {
                         std::cmp::Ordering::Less => -1,
@@ -464,8 +520,8 @@ fn evaluate(
                 }
                 qir::Host::ExactCompare => {
                     let (a, b) = (
-                        &exacts[slots[args[0].0 as usize] as usize],
-                        &exacts[slots[args[1].0 as usize] as usize],
+                        heap.exactly(slots[args[0].0 as usize]),
+                        heap.exactly(slots[args[1].0 as usize]),
                     );
                     return Ok(match a.cmp(b) {
                         std::cmp::Ordering::Less => -1,
@@ -479,7 +535,7 @@ fn evaluate(
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
                 }
                 qir::Host::PrintExact => {
-                    let value = &exacts[slots[args[1].0 as usize] as usize];
+                    let value = heap.exactly(slots[args[1].0 as usize]);
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
                 }
                 qir::Host::PrintBool => {
@@ -493,7 +549,7 @@ fn evaluate(
                 }
                 qir::Host::PrintText => {
                     let at = slots[args[1].0 as usize] as usize;
-                    let text = texts.get(at).map_or("", |s| s.as_str());
+                    let text = heap.said(at as i64).to_string();
                     let out = writing.to(slots[args[0].0 as usize]);
                     // Nowhere to report a write that fails, and nothing sensible to do
                     // about one: a program that cannot print has not computed the wrong
