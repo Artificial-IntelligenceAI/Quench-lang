@@ -17,6 +17,24 @@ division = "truncated"
 # is quietly wrong for a year.
 overflow = "wrap"
 
+# Also changes what a program answers, and only started to when functions arrived:
+# before a program could call anything, nothing inside an expression could *do*
+# anything, so both answers gave identical programs. `stops-early` means `and` asks its
+# right side only when the left was true, and `or` only when it was false. The reason
+# it is the default is not speed -- Quench stops rather than having undefined
+# behaviour, so under `asks-both` a guard like `('n' != *0*) and ((*100* / 'n') > *5*)`
+# does not merely waste a division, it stops the program.
+logic = "stops-early"
+
+# What a `b64` does when there is no number to give back. `carries-on` answers
+# `infinity` or `not-a-number` and continues, as the processor does; `stops` stops.
+#
+# Carrying on is the default for a different reason than `overflow = "wrap"`: `b64` *is*
+# IEEE 754 binary64, and `infinity` and `not-a-number` are values of that type rather
+# than accidents of it. Asking to stop is asking for something narrower than the type
+# you named.
+no-number = "carries-on"
+
 [build]
 # Changes what gets delivered, never what a program answers -- every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`, or

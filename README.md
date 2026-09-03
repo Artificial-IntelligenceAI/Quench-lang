@@ -340,12 +340,19 @@ rather than a cost.
 
 So the first kind can grow freely and the second is argued one knob at a time.
 
-The first semantic one is here: `[defaults] division`, truncated or floored. It is
-threaded all the way through — the generator picks a configuration per seed, both
-engines carry it as **separate QIR instructions** rather than a mode they interpret,
-and a disagreement names the settings it happened under. The oracle now proves two
-languages instead of one — and three ways of running each, since the oracle sweeps
-optimisation levels too. 200,000 programs, 600,000 comparisons, 8.3 seconds. See
+There are four semantic ones: `[defaults] division` (truncated or floored), `overflow`
+(wrap or trap), `logic` (stops-early or asks-both) and `no-number` (carries-on or
+stops). Each is threaded all the way through — the generator picks a configuration per
+seed, both engines carry the choice as **separate QIR instructions** rather than as a
+mode they interpret, and a disagreement names the settings it happened under. So the
+oracle proves sixteen languages rather than one, three ways of running each, since it
+sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 15 seconds.
+
+`logic` is the one worth reading the note for: it was **not** a semantic setting until
+functions arrived, because before a program could call anything, nothing inside an
+expression could *do* anything and both answers gave byte-for-byte identical programs.
+A setting can move piles under you — not because anyone changed it, but because the
+language grew a way to tell the difference. See
 [notes/every-knob-is-a-multiplier.md](notes/every-knob-is-a-multiplier.md).
 
 ## The oracle
