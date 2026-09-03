@@ -291,12 +291,16 @@ fn a_constant_is_a_declaration_written_somewhere_else() {
 fn a_call_separates_its_arguments_with_commas() {
     // Juxtaposition builds one value out of pieces, which is why it cannot also
     // separate two of them.
-    let source = "START {\nprint.stdout[add[*1* + *2*, *3*]];\n}\n";
+    //
+    // The parser does not know this is a call rather than an index -- both are a name
+    // between marks and a bracketed list, and which one it is depends on what the name
+    // was declared as. So what it produces is the list, and the checker decides.
+    let source = "START {\nprint.stdout['add'[*1* + *2*, *3*]];\n}\n";
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
     let Stmt::Print(print) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
-    let quench_parse::Piece::Call(call) = &print.pieces[0] else { panic!() };
-    assert_eq!(call.args.len(), 2);
-    assert_eq!(call.args[0].terms.len(), 2, "`*1*` and `*2*`");
-    assert!(call.args[0].has_operators());
+    let quench_parse::Piece::At { indices, .. } = &print.pieces[0] else { panic!() };
+    assert_eq!(indices.len(), 2);
+    assert_eq!(indices[0].terms.len(), 2, "`*1*` and `*2*`");
+    assert!(indices[0].has_operators());
 }

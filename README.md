@@ -95,13 +95,14 @@ Both print the same thing, which is not a coincidence — it is
   chain supplies a type, the value carries it — `print.stdout[str:*Hello* 'name' \n];` —
   and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
-- **A name holds whatever a line holds**, because the marks do the delimiting and
-  there is no identifier grammar to break: `'ผลลัพธ์'`, `'🔥'`, `'a name with spaces'`
-  and `'it\'s'` are all names. **A function's is the exception**, and only because it
-  is the one name written *twice* — once between marks where it is declared, and once
-  at every call, where it is a bare word. So a function is named with letters, digits
-  and `_`, letters being Unicode's idea of them: `'ทวีคูณ'` is a fine function name
-  and `'🔥'` is refused where it is declared rather than where it is first called.
+- **A name holds whatever a line holds, and wears marks everywhere.** The marks do the
+  delimiting, so there is no identifier grammar to break: `'ผลลัพธ์'`, `'🔥'`,
+  `'a name with spaces'` and `'it\'s'` are all names, and all of them are fine names
+  for a *function* too, because a call wears the marks like every other use of a name.
+  Which leaves the bare word free to mean one thing: **`count['xs']` came with Quench
+  and `'count'['xs']` did not.** A reader tells them apart without looking either up.
+  The price is that a name is a function or a variable and never both, since nothing at
+  a use site could say which was meant.
 - **Precedence stops where mathematics stopped.** `x` binds tighter than `+`, and
   comparison looser than both, because that was settled before computers existed.
   Everything programming invented — `mod` infix, `and` against `or`, bitwise — has no
@@ -126,8 +127,10 @@ Both print the same thing, which is not a coincidence — it is
   with something must answer on **every way out**, and an `if` counts only when it has
   an `else`: there is nothing honest to invent for the path that falls off the bottom.
   Parameters are declarations with `var` taken off, and `[]` is written even when empty.
-  Calls cost no new syntax — `add[*1*, *2*]` is a call and `'xs'[*2*]` is an index,
-  because names wear quotes. See
+  Calls cost no new syntax — `'add'[*1*, *2*]` is a call and `'xs'[*2*]` is an index,
+  and they are told apart by what the name was declared as rather than by how it was
+  written. Arguments take commas, because juxtaposition already builds one value out of
+  pieces and cannot also separate two. See
   [notes/what-a-function-has-to-say.md](notes/what-a-function-has-to-say.md).
 - **Constants outside, functions at the top, variables inside.**
   `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is

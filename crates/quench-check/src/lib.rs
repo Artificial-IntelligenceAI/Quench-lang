@@ -326,26 +326,6 @@ fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
     }
 }
 
-/// Whether a name can be written as a bare word, and the character that stops it.
-///
-/// `None` means it can. `Some(Some(c))` names the character in the way; `Some(None)` is
-/// a name with no characters at all.
-///
-/// Letters are Unicode's idea of letters, not ASCII's: `'ทวีคูณ'` is a word and is
-/// called the way any other function is. An emoji is not a letter in any language, so
-/// it is not one here either.
-fn not_a_word(name: &str) -> Option<Option<char>> {
-    let mut characters = name.chars();
-    match characters.next() {
-        // Nothing at all, which is a name that is wrong without any character being
-        // the wrong one.
-        None => return Some(None),
-        Some(first) if !(first.is_alphabetic() || first == '_') => return Some(Some(first)),
-        Some(_) => {}
-    }
-    characters.find(|&c| !(c.is_alphanumeric() || c == '_')).map(Some)
-}
-
 /// The name of that number type, for saying which one it was.
 fn made_number(ty: &Ty) -> String {
     match ty {
@@ -764,36 +744,6 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        // Every other name in Quench is only ever written between marks, so it can
-        // hold anything a line can. A function's is the one written twice -- once here
-        // between marks, and once at every call, where it is a bare word. A name that
-        // cannot be a bare word declares a function nothing can reach, and the honest
-        // place to say so is here rather than at the first call that fails.
-        if let Some(wrong) = not_a_word(&name) {
-            // An empty name has no character to point at, and "` ` cannot be part of a
-            // call" would be pointing at a space that is not there.
-            let said = match wrong {
-                Some(c) => format!("`{c}` cannot be part of a call"),
-                None => "there is no name here".to_string(),
-            };
-            self.errors.push(
-                Diagnostic::new("E0490", format!("`'{name}'` cannot be written where it would be called."))
-                    .primary(func.name, said)
-                    .rule("a call is a bare word, so a function's name is one: a letter or `_` to start, then letters, digits and `_`")
-                    .tip("every other name is only ever written between marks, which is why `'a name with spaces'` is a fine variable and not a fine function.")
-                    .fix("name it with letters, digits and `_`"),
-            );
-            return;
-        }
-        if name == "count" {
-            self.errors.push(
-                Diagnostic::new("E0462", "`count` is already something.")
-                    .primary(func.name, "here")
-                    .rule("`count` answers how many elements an array holds, and is not yours to redefine")
-                    .fix("pick another name"),
-            );
-            return;
-        }
 
         // The type is whatever the chain says that is not `fn`, not a visibility and
         // not an `arr` link.
@@ -1200,6 +1150,16 @@ impl<'a> Checker<'a> {
                         .fix("rename one of them"),
                 );
             }
+            if let Some(&which) = self.named.get(&text) {
+                let at = self.signatures[which as usize].at;
+                self.errors.push(
+                    Diagnostic::new("E0492", format!("`'{text}'` is already a function."))
+                        .secondary(at, "declared here, as a function")
+                        .primary(*name, "and named again here, as a parameter")
+                        .rule("one name means one thing, and a parameter is a name like any other")
+                        .fix("rename one of them"),
+                );
+            }
         }
 
         self.statements(body)
@@ -1216,6 +1176,18 @@ impl<'a> Checker<'a> {
             // Checked before the type is, so that declaring `'x'` twice is reported as
             // declaring it twice even when the second one also names a type that is not
             // built. The name is what collided.
+            if let Some(&which) = self.named.get(&name) {
+                let at = self.signatures[which as usize].at;
+                self.errors.push(
+                    Diagnostic::new("E0492", format!("`'{name}'` is already a function."))
+                        .secondary(at, "declared here, as a function")
+                        .primary(*name_span, "and declared again here, as a variable")
+                        .rule(format!("one name means one thing, and `'{name}'[…]` cannot be a call and an index at once"))
+                        .tip("a function and a variable are written the same way wherever they are used, so nothing there could tell them apart.")
+                        .fix("rename one of them"),
+                );
+                continue;
+            }
             if let Some(before) = self.seen(&name) {
                 let first = &self.locals[before.0 as usize];
                 self.errors.push(
@@ -1896,6 +1868,74 @@ impl<'a> Checker<'a> {
     }
 
     /// `'xs'[…]` — one element.
+    /// `'xs'[…]` — an index when the name is a variable's, a call when it is a
+    /// function's.
+    ///
+    /// The parser hands both here because it cannot tell them apart: both are a name
+    /// between marks and a bracketed list. What settles it is what the name was
+    /// declared as, and a name cannot be declared as both -- that is what makes this a
+    /// lookup rather than a guess.
+    fn reached(&mut self, name: Span, given: &[ast::Value], close: Span) -> Option<Value> {
+        let word = self.named(name);
+        if let Some(&which) = self.named.get(&word) {
+            return self.called(which, name, given, close);
+        }
+
+        // An index. Its dimensions are written side by side, matching the shape they
+        // index into, so there is exactly one value here however many dimensions it has.
+        let [one] = given else {
+            if given.is_empty() {
+                return self.at(name, &[], close);
+            }
+            let all = given[0].span.to(given[given.len() - 1].span);
+            self.errors.push(
+                Diagnostic::new("E0491", "an index writes its dimensions side by side.")
+                    .primary(all, "commas here")
+                    .secondary(name, "indexing this")
+                    .rule("a shape is written `(2 3)` and an index into it is written the same way")
+                    .tip("commas separate the arguments of a call, and this names no function.")
+                    .fix("take the commas out"),
+            );
+            return None;
+        };
+        if one.between.iter().any(Option::is_some) {
+            self.errors.push(
+                Diagnostic::new("E0491", "an index is a number, not something to work out.")
+                    .primary(one.span, "here")
+                    .secondary(name, "indexing this")
+                    .rule("a shape is written `(2 3)` and an index into it is written the same way")
+                    .tip("brackets make one value out of a sum, and an index takes one value per dimension.")
+                    .fix("put the sum in brackets of its own"),
+            );
+            return None;
+        }
+        self.at(name, &one.terms, close)
+    }
+
+    /// A call to a function the writer declared, whatever it was written like.
+    fn called(
+        &mut self,
+        which: u32,
+        name: Span,
+        args: &[ast::Value],
+        close: Span,
+    ) -> Option<Value> {
+        let args = self.arguments(which, name, args, close)?;
+        if self.signatures[which as usize].returns.is_none() {
+            let said = self.signatures[which as usize].name.clone();
+            let at = self.signatures[which as usize].at;
+            self.errors.push(
+                Diagnostic::new("E0471", format!("`'{said}'` gives `nothing` back, and this wants a value."))
+                    .secondary(at, "declared `nothing` here")
+                    .primary(name.to(close), "and its answer is wanted here")
+                    .rule("`nothing` means there is no answer, and there is no value to stand in for one")
+                    .fix("call it on its own line, or have it give something back"),
+            );
+            return None;
+        }
+        Some(Value::Call { func: which, args })
+    }
+
     fn at(&mut self, name: Span, indices: &[ast::Term], close: Span) -> Option<Value> {
         // A constant array has somewhere it lives — the module's tables — so it is
         // indexed like any other. What it does not have is a way to be changed, and
@@ -2047,20 +2087,31 @@ impl<'a> Checker<'a> {
     /// by it costs nothing at all.
     fn call(&mut self, call: &ast::Call) -> Option<Value> {
         if self.text(call.name) != "count" {
-            let (which, args) = self.invocation(call)?;
-            if self.signatures[which as usize].returns.is_none() {
-                let name = self.signatures[which as usize].name.clone();
-                let at = self.signatures[which as usize].at;
-                self.errors.push(
-                    Diagnostic::new("E0471", format!("`'{name}'` gives `nothing` back, and this wants a value."))
-                        .secondary(at, "declared `nothing` here")
-                        .primary(call.name.to(call.close), "and its answer is wanted here")
-                        .rule("`nothing` means there is no answer, and there is no value to stand in for one")
-                        .fix("call it on its own line, or have it give something back"),
-                );
-                return None;
-            }
-            return Some(Value::Call { func: which, args });
+            let name = self.text(call.name).to_string();
+            // A bare word is Quench's own. Anything the writer named is written between
+            // marks everywhere it appears, and a call is the one place that used to be
+            // an exception.
+            let (rule, tip, fix) = if self.named.contains_key(&name) {
+                (
+                    "a name the writer gave is written between marks, at a call as everywhere else",
+                    "a bare word before a bracket is one of Quench's own, which is how a reader tells them apart.",
+                    format!("`'{name}'[…]`"),
+                )
+            } else {
+                (
+                    "a bare word before a bracket calls something the language provides, and this names none of them",
+                    "`count` is the one that comes with the language.",
+                    format!("`'{name}'[…]` if you declared it with `fn`"),
+                )
+            };
+            self.errors.push(
+                Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
+                    .primary(call.name, "here")
+                    .rule(rule)
+                    .tip(tip)
+                    .fix(fix),
+            );
+            return None;
         }
 
         let [one] = call.args.as_slice() else {
@@ -2121,7 +2172,7 @@ impl<'a> Checker<'a> {
                 );
                 None
             }
-            ast::Term::At { name, indices, close } => self.at(*name, indices, *close),
+            ast::Term::At { name, indices, close } => self.reached(*name, indices, *close),
             ast::Term::Call(call) | ast::Term::Piece(ast::Piece::Call(call)) => self.call(call),
             ast::Term::Elements { open, close, .. } => {
                 self.errors.push(
@@ -2274,7 +2325,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Term::Piece(ast::Piece::At { name, indices, close }) => {
-                self.at(*name, indices, *close)
+                self.reached(*name, indices, *close)
             }
             ast::Term::Piece(ast::Piece::Escape(span)) => {
                 self.errors.push(
@@ -2661,7 +2712,7 @@ impl<'a> Checker<'a> {
 
     /// A call written for what it does rather than for its answer.
     fn perform(&mut self, call: &ast::Call) {
-        let name = self.text(call.name);
+        let name = self.named(call.name);
         if name == "count" {
             self.errors.push(
                 Diagnostic::new("E0469", "`count` answers a question and does nothing else.")
@@ -2671,38 +2722,56 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some((which, args)) = self.invocation(call) else { return };
+        let Some(&which) = self.named.get(&name) else {
+            // A name between marks that is not a function is a variable, and a variable
+            // written on its own line does nothing at all.
+            let (rule, fix) = match self.seen(&name) {
+                Some(_) => (
+                    "a call written on its own is written for what it does, and naming a variable does nothing",
+                    "remove the line, or `set` it",
+                ),
+                None => (
+                    "a call written on its own names a function, and this names nothing",
+                    "check the spelling, or declare it with `fn`",
+                ),
+            };
+            self.errors.push(
+                Diagnostic::new("E0455", format!("there is nothing called `'{name}'`."))
+                    .primary(call.name, "here")
+                    .rule(rule)
+                    .fix(fix),
+            );
+            return;
+        };
+        let Some(args) = self.arguments(which, call.name, &call.args, call.close) else {
+            return;
+        };
         self.body.push(Stmt::Do { func: which, args });
     }
 
     /// Look a call up, and check what it was given against what it takes.
-    fn invocation(&mut self, call: &ast::Call) -> Option<(u32, Vec<Value>)> {
-        let name = self.text(call.name).to_string();
-        let Some(&which) = self.named.get(&name) else {
-            self.errors.push(
-                Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
-                    .primary(call.name, "here")
-                    .rule("a bare word before a bracket is a call, and this names no function")
-                    .tip("`count` is the one that comes with the language.")
-                    .fix("check the spelling, or declare it with `fn`"),
-            );
-            return None;
-        };
-
+    fn arguments(
+        &mut self,
+        which: u32,
+        at_name: Span,
+        given: &[ast::Value],
+        close: Span,
+    ) -> Option<Vec<Value>> {
         let signature = &self.signatures[which as usize];
+        let name = signature.name.clone();
         let (wanted, at, list) = (signature.takes.clone(), signature.at, signature.list);
-        if call.args.len() != wanted.len() {
+        if given.len() != wanted.len() {
             self.errors.push(
                 Diagnostic::new(
                     "E0470",
                     format!(
                         "`'{name}'` takes {}, and was given {}.",
                         counted(wanted.len(), "thing"),
-                        counted(call.args.len(), "thing")
+                        counted(given.len(), "thing")
                     ),
                 )
                 .secondary(list, format!("takes {}", counted(wanted.len(), "thing")))
-                .primary(call.name.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                .primary(at_name.to(close), format!("given {}", counted(given.len(), "thing")))
                 .rule("a call brings one value for each parameter, in the same order")
                 .fix("add what is missing, or take away what is spare"),
             );
@@ -2710,10 +2779,10 @@ impl<'a> Checker<'a> {
         }
 
         let mut args = Vec::new();
-        for (given, ty) in call.args.iter().zip(&wanted) {
-            args.push(self.value(given, ty, at)?);
+        for (value, ty) in given.iter().zip(&wanted) {
+            args.push(self.value(value, ty, at)?);
         }
-        Some((which, args))
+        Some(args)
     }
 
     // --- looping ----------------------------------------------------------------------
@@ -3080,7 +3149,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 ast::Piece::At { name, indices, close } => {
-                    let Some(value) = self.at(*name, indices, *close) else { continue };
+                    let Some(value) = self.reached(*name, indices, *close) else { continue };
                     let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
                     pieces.push(Printed::Value { value, ty });
                 }

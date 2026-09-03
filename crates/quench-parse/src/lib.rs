@@ -293,11 +293,21 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) -> Option<Stmt> {
         let token = self.peek();
+        // `'greet'[*x*];` — a function called for what it does rather than its answer.
+        // Its name is between marks like every other name a writer gives, so this is
+        // the one statement that does not begin with a word.
+        if token.kind == Kind::Name
+            && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+        {
+            let (name, args, close) = self.reaching()?;
+            self.expect(Kind::Semicolon, "a statement")?;
+            return Some(Stmt::Do(ast::Call { name, args, close }));
+        }
         if token.kind != Kind::Word {
             self.errors.push(
                 Diagnostic::new("E0103", "a statement begins with a word.")
                     .primary(token.span, format!("found {}", token.kind.describe()))
-                    .rule("every statement starts by saying what it is — `var`, `print`")
+                    .rule("every statement starts by saying what it is — `var`, `print`, or a call")
                     .fix("start the line with what it does"),
             );
             return None;
@@ -412,6 +422,23 @@ impl<'a> Parser<'a> {
 
     /// `add[*1*, *2*]` — arguments are values, so commas separate them. Juxtaposition
     /// builds one value out of pieces, which is why it cannot also separate two.
+    /// `'xs'[…]` — a name between marks and a bracketed list, whatever it turns out to
+    /// mean. Parsed the way a call's arguments are, since one of the two things it can
+    /// be is a call.
+    fn reaching(&mut self) -> Option<(Span, Vec<ast::Value>, Span)> {
+        let name = self.bump().span;
+        self.bump();
+        let mut indices = Vec::new();
+        while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            indices.push(self.value()?);
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let close = self.expect(Kind::CloseList, "an index")?;
+        Some((name, indices, close))
+    }
+
     fn invocation(&mut self) -> Option<ast::Call> {
         let name = self.bump().span;
         self.bump();
@@ -750,23 +777,18 @@ impl<'a> Parser<'a> {
             let close = self.expect(Kind::CloseList, "an array")?;
             return Some(ast::Term::Elements { open, of, close });
         }
-        // A bare word followed by a bracket is a call. A quoted name followed by one is
-        // an index. Names being quoted is what settles this, and always was.
+        // A bare word before a bracket is a call to something Quench provides. A name
+        // between marks before one is a call to something the writer made, or an index
+        // -- and which of those it is depends on what the name was declared as, so the
+        // parser leaves it alone.
         if token.kind == Kind::Word
             && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
         {
             return self.invocation().map(ast::Term::Call);
         }
-        // A quoted name followed by a bracket is an index.
         if token.kind == Kind::Name && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
         {
-            let name = self.bump().span;
-            self.bump();
-            let mut indices = Vec::new();
-            while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
-                indices.push(self.term()?);
-            }
-            let close = self.expect(Kind::CloseList, "an index")?;
+            let (name, indices, close) = self.reaching()?;
             return Some(ast::Term::At { name, indices, close });
         }
         if token.kind == Kind::OpenGroup {

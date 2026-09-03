@@ -268,9 +268,15 @@ pub enum Term {
     Piece(Piece),
     /// `[…]` inside a value — the elements of an array, juxtaposed.
     Elements { open: Span, of: Vec<Term>, close: Span },
-    /// `'xs'[…]` — one element of an array. The indices are juxtaposed, matching the
-    /// shape they index into.
-    At { name: Span, indices: Vec<Term>, close: Span },
+    /// `'xs'[…]` or `'double'[…]` — a name and a bracketed list, which is an index
+    /// when the name is a variable's and a call when it is a function's.
+    ///
+    /// The parser cannot tell those apart and does not try: both are a name between
+    /// marks and a list of values, and which one it is depends on what the name was
+    /// declared as. So the list is parsed the way a call's arguments are -- commas
+    /// between values -- and an index unpacks the one value it gets, whose terms are
+    /// its dimensions written side by side.
+    At { name: Span, indices: Vec<Value>, close: Span },
     /// A bare number, which is only ever part of a shape.
     Number(Span),
     /// `count['xs']` — a bare word before a bracket is a call, where a quoted name
@@ -360,8 +366,8 @@ pub enum Piece {
     Name(Span),
     /// `\n`
     Escape(Span),
-    /// `'xs'[…]` — one element of an array.
-    At { name: Span, indices: Vec<Term>, close: Span },
+    /// `'xs'[…]` — an index or a call, told apart by what the name was declared as.
+    At { name: Span, indices: Vec<Value>, close: Span },
     /// `count['xs']` — the same call a value can hold, in a list.
     Call(Call),
 }
