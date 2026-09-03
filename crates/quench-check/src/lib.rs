@@ -225,6 +225,9 @@ pub enum Value {
     /// One element. The shape is carried so the lowering can work out where it is
     /// without going back to the type.
     At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
+    /// Pieces of text, one after another. What juxtaposition has always meant — this
+    /// is only the case where a piece is not known until the program runs.
+    Join(Vec<Value>),
     /// `not 'ready'` — the opposite of a `bool`.
     Not(Box<Value>),
     /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
@@ -1343,8 +1346,38 @@ impl<'a> Checker<'a> {
                 }
             },
             Ty::Str => {
-                let mut out = String::new();
+                // Pieces side by side, which is what juxtaposition means everywhere in
+                // the language. A run of them that is entirely known here stays one
+                // piece of text; a name among them makes it something joined while the
+                // program runs, which is the same thing said at a different time.
+                let mut pieces: Vec<Value> = Vec::new();
+                let mut so_far = String::new();
                 for term in &value.terms {
+                    if let ast::Term::Piece(ast::Piece::Name(_))
+                    | ast::Term::Piece(ast::Piece::At { .. })
+                    | ast::Term::Piece(ast::Piece::Call(_))
+                    | ast::Term::At { .. }
+                    | ast::Term::Call(_) = term
+                    {
+                        let built = self.term(term)?;
+                        let found = self.type_of(&built, term.span())?;
+                        if found != Ty::Str {
+                            self.errors.push(
+                                Diagnostic::new("E0411", format!("this is {} `{}`, and text is made of text.", found.article(), found.name()))
+                                    .primary(term.span(), format!("{} `{}`", found.article(), found.name()))
+                                    .secondary(ty_span, "declared `str` here")
+                                    .rule("pieces side by side join, and nothing converts on its own")
+                                    .tip("a `print` shows any type because showing is not joining -- it writes one piece after another and builds nothing.")
+                                    .fix("declare it `str`, or print the pieces separately"),
+                            );
+                            return None;
+                        }
+                        if !so_far.is_empty() {
+                            pieces.push(Value::Text(std::mem::take(&mut so_far)));
+                        }
+                        pieces.push(built);
+                        continue;
+                    }
                     let ast::Term::Piece(piece) = term else {
                         self.errors.push(
                             Diagnostic::new("E0415", "brackets group something to work out, and text is not worked out.")
@@ -1354,9 +1387,15 @@ impl<'a> Checker<'a> {
                         );
                         return None;
                     };
-                    out.push_str(&self.literal(piece)?);
+                    so_far.push_str(&self.literal(piece)?);
                 }
-                Some(Value::Text(out))
+                if pieces.is_empty() {
+                    return Some(Value::Text(so_far));
+                }
+                if !so_far.is_empty() {
+                    pieces.push(Value::Text(so_far));
+                }
+                Some(Value::Join(pieces))
             }
             Ty::Bool => match value.terms.as_slice() {
                 [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
@@ -1912,12 +1951,27 @@ impl<'a> Checker<'a> {
                             None
                         }
                     },
+                    Some(Ty::Str) => Some(Value::Text(digits)),
+                    Some(Ty::Bool) => match digits.as_str() {
+                        "true" => Some(Value::Bool(true)),
+                        "false" => Some(Value::Bool(false)),
+                        other => {
+                            self.errors.push(
+                                Diagnostic::new("E0416", format!("`{other}` is not true or false."))
+                                    .primary(*mark, "here")
+                                    .rule("a `bool` is written `*true*` or `*false*`, and nothing is truthy")
+                                    .fix("`*true*` or `*false*`"),
+                            );
+                            None
+                        }
+                    },
                     _ => {
                         self.errors.push(
                             Diagnostic::new("E0409", format!("`{word}` has nothing to do in a sum."))
                                 .primary(*span, "said here")
-                                .rule("a value in a sum says a number type or says nothing, and the chain says the rest")
-                                .fix("`e:` for an exact number, or nothing at all"),
+                                .rule("a value in a sum says one of the types that are built, and the chain says the rest")
+                                .tip("this is for where the chain cannot say -- two things compared under a `bool` chain, most often.")
+                                .fix("`e:`, `i64:`, `str:` or `bool:`, or nothing at all"),
                         );
                         None
                     }
@@ -1963,6 +2017,7 @@ impl<'a> Checker<'a> {
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
+            Value::Join(_) => Some(Ty::Str),
             Value::Not(_) => Some(Ty::Bool),
             Value::Count(_) => Some(Ty::I64),
             Value::Copied(of) => self.type_of(of, span),

@@ -107,6 +107,7 @@ impl Compiled {
     pub fn call(&self, name: &str) -> Option<i64> {
         let (_, code) = self.callable.iter().find(|(known, _)| known == name)?;
         HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
+        TEXTS.with(|texts| *texts.borrow_mut() = self._text.clone());
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
         unsafe { (*rt).stopped = 0 };
         // Safe for the same reasons `run` is: the signature was checked at compile time
@@ -144,6 +145,7 @@ impl Compiled {
     /// nothing — [`Compiled::outcome`] is the one that says so.
     pub fn run(&self) -> i64 {
         HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
+        TEXTS.with(|texts| *texts.borrow_mut() = self._text.clone());
         // The flag is per-run, so a program that stopped does not make the next one look
         // as though it did.
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
@@ -362,6 +364,17 @@ thread_local! {
     /// answer differently, however large the numbers get.
     static EXACTS: std::cell::RefCell<Vec<quench_num::Exact>> =
         const { std::cell::RefCell::new(Vec::new()) };
+
+    /// Every piece of text there is: the ones the program was written with first, then
+    /// every one it builds while it runs. Laid out at the start of each run, the same
+    /// way the constant tables are.
+    static TEXTS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// One piece of text, whatever it was made by.
+fn text_of(index: i64) -> String {
+    TEXTS.with(|texts| texts.borrow()[index as usize].clone())
 }
 
 /// Put an exact number away, and give back the handle to it.
@@ -474,8 +487,18 @@ extern "C" fn pow_i64_trapping(rt: *mut Runtime, base: i64, exponent: i64) -> i6
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn text_compare(rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    match piece_of(rt, a).cmp(piece_of(rt, b)) {
+extern "C" fn text_join(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    TEXTS.with(|texts| {
+        let mut texts = texts.borrow_mut();
+        let joined = format!("{}{}", texts[a as usize], texts[b as usize]);
+        texts.push(joined);
+        texts.len() as i64 - 1
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    match text_of(a).cmp(&text_of(b)) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -569,12 +592,6 @@ extern "C" fn array_copy(_rt: *mut Runtime, handle: i64) -> i64 {
     })
 }
 
-/// One piece of the module's text, as bytes.
-fn piece_of(rt: *mut Runtime, index: i64) -> &'static [u8] {
-    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
-    unsafe { std::slice::from_raw_parts(piece.at, piece.len) }
-}
-
 /// Called by compiled code. Not called by anything else.
 extern "C" fn array_equal(rt: *mut Runtime, a: i64, b: i64, kind: i64, depth: i64) -> i64 {
     let kind = qir::Elements::from_code(kind).expect("the lowering wrote this constant");
@@ -583,6 +600,7 @@ extern "C" fn array_equal(rt: *mut Runtime, a: i64, b: i64, kind: i64, depth: i6
 
 /// Whether two arrays hold the same things, following handles as far down as they go.
 fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> bool {
+    let _ = rt;
     let (left, right) = HEAP.with(|heap| {
         let heap = heap.borrow();
         (heap[a as usize].clone(), heap[b as usize].clone())
@@ -598,7 +616,7 @@ fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> b
             qir::Elements::Exact => {
                 EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
             }
-            qir::Elements::Text => piece_of(rt, *x) == piece_of(rt, *y),
+            qir::Elements::Text => text_of(*x) == text_of(*y),
             _ => x == y,
         }
     })
@@ -619,6 +637,7 @@ extern "C" fn print_array(
 
 /// What one array says, following handles as far down as it goes.
 fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> String {
+    let _ = rt;
     let elements = HEAP.with(|heap| heap.borrow()[handle as usize].clone());
     let parts: Vec<String> = elements
         .iter()
@@ -630,7 +649,7 @@ fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> Stri
                 qir::Elements::I64 => value.to_string(),
                 qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
                 qir::Elements::Text => {
-                    format!("*{}*", String::from_utf8_lossy(piece_of(rt, *value)))
+                    format!("*{}*", text_of(*value))
                 }
                 qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
             }
@@ -652,12 +671,8 @@ extern "C" fn print_i64(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_text(rt: *mut Runtime, stream: i64, index: i64) -> i64 {
-    // Safe because `compile` verified the index against the module's text before any of
-    // this existed, and the table outlives the code that names it.
-    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
-    let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
-    write_out(stream, bytes);
+extern "C" fn print_text(_rt: *mut Runtime, stream: i64, index: i64) -> i64 {
+    write_out(stream, text_of(index).as_bytes());
     0
 }
 
@@ -752,6 +767,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
+    builder.symbol("quench_text_join", text_join as *const u8);
     builder.symbol("quench_exact_pow", exact_pow as *const u8);
     builder.symbol("quench_pow_i64", pow_i64 as *const u8);
     builder.symbol("quench_pow_i64_trapping", pow_i64_trapping as *const u8);
@@ -806,6 +822,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
         (qir::Host::TextCompare, "quench_text_compare"),
+        (qir::Host::TextJoin, "quench_text_join"),
         (qir::Host::ExactPow, "quench_exact_pow"),
         (qir::Host::PowI64, "quench_pow_i64"),
         (qir::Host::PowI64Trapping, "quench_pow_i64_trapping"),

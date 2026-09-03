@@ -320,6 +320,13 @@ pub enum Host {
     /// `(a, b)` — `-1`, `0` or `1`. One host rather than six, because a comparison of
     /// exact numbers is a comparison of the answer against zero and always was.
     ExactCompare,
+    /// `(a, b)` — one piece of text with both in it, in that order.
+    ///
+    /// The answer is a piece the program was not written with, so it goes past the end
+    /// of the module's table into one the runtime keeps. Which is why a `Text` value is
+    /// an index into *that* rather than into [`Module::text`]: the module's pieces are
+    /// the first ones in it, and everything built while running comes after.
+    TextJoin,
     /// `(a, b)` — `-1`, `0` or `1`, comparing what two pieces of text hold rather than
     /// which pieces they are. Interning would make the indices agree today, and would
     /// stop doing so the moment text can be built while a program runs.
@@ -357,6 +364,7 @@ impl Host {
             Host::ExactMul => "exact-mul",
             Host::ExactDiv => "exact-div",
             Host::ExactCompare => "exact-compare",
+            Host::TextJoin => "text-join",
             Host::TextCompare => "text-compare",
             Host::PrintExact => "print-exact",
             Host::ExactPow => "exact-pow",
@@ -386,6 +394,7 @@ impl Host {
                 &[Ty::Exact, Ty::Exact]
             }
             Host::ExactCompare => &[Ty::Exact, Ty::Exact],
+            Host::TextJoin => &[Ty::Text, Ty::Text],
             Host::TextCompare => &[Ty::Text, Ty::Text],
             Host::PrintExact => &[Ty::I64, Ty::Exact],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
@@ -428,6 +437,7 @@ impl Host {
         match self {
             Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
             Host::ArrayEqual => Ty::Bool,
+            Host::TextJoin => Ty::Text,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub

@@ -97,16 +97,16 @@ fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
         // A type Quench means to have and does not have yet.
         ("START { print.stdout[b16:*1*]; }", "`b16` is not built yet"),
-        // Joining a name to something else builds a new value, which needs the collector.
-        ("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }", "needs the collector"),
+        // A number is not text, and nothing converts on its own.
+        ("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }", "text is made of text"),
     ];
     for (source, expected) in cases {
         let rendered = report(source);
         assert!(rendered.contains(expected), "{source}\n{rendered}");
     }
 
-    // And declaring things, which this test used to assert was not built, now is.
-    assert!(lower("START { var.immut.str ['a'] = [*x*]; print.stdout['a']; }").ok());
+    // And joining, which this test used to assert was not built, now is.
+    assert!(lower("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }").ok());
 }
 
 #[test]
@@ -1305,5 +1305,43 @@ START {
 }
 "),
         "true [99 3 5] [2 3 5]",
+    );
+}
+
+#[test]
+fn text_is_joined_by_writing_pieces_side_by_side() {
+    // The same thing juxtaposition has always meant. What is new is that a piece may
+    // not be known until the program runs.
+    assert_eq!(
+        said("\
+fn.file.str ['greet'] [immut.str 'name'] {
+    give [*Hello, * 'name' *!*];
+}
+START {
+    var.immut.str ['name'] = [*Tankun*];
+    var.immut.str ['hello'] = [*Hello, * 'name'];
+    print.stdout['hello' str:*/* greet[*Claude*]];
+}
+"),
+        "Hello, Tankun/Hello, Claude!",
+    );
+}
+
+#[test]
+fn built_text_is_the_same_as_written_text() {
+    // Which is what makes comparing text a comparison of what it holds rather than of
+    // which piece it is -- a built one is not in the module at all.
+    assert_eq!(
+        said("\
+START {
+    var.immut.str ['name'] = [*Tankun*];
+    var.immut.str ['built'] = [*Hello, * 'name'];
+    var.immut.bool ['same'] = ['built' == str:*Hello, Tankun*];
+    var.immut.arr.str (2) ['words'] = [[*a* *b*]];
+    var.immut.str ['joined'] = ['words'[*1*] 'words'[*2*] *!*];
+    print.stdout['same' str:* * 'joined'];
+}
+"),
+        "true ab!",
     );
 }

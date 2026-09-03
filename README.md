@@ -165,6 +165,11 @@ Both print the same thing, which is not a coincidence — it is
   `==` on two arrays can then mean the obvious thing, **their contents**: once *the
   same array* has a way to be said, the other question is free. See
   [notes/an-array-is-the-only-thing-two-names-can-reach.md](notes/an-array-is-the-only-thing-two-names-can-reach.md).
+- **Pieces side by side join.** `[*Hello, * 'name' *!*]` builds a `str`, which is what
+  juxtaposition has meant since the marks were settled — what is new is that a piece
+  may not be known until the program runs. Nothing converts on its own, so a number
+  among them is an error: `print` shows any type because showing is not joining, and
+  writes one piece after another rather than making one.
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

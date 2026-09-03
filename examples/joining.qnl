@@ -1,0 +1,21 @@
+# Pieces side by side join. The same thing juxtaposition has always meant --
+# what is new is that a piece need not be known until the program runs.
+
+fn.file.str ['greet'] [immut.str 'name'] {
+    give [*Hello, * 'name' *!*];
+}
+
+START {
+    var.immut.str ['name'] = [*Tankun*];
+    var.immut.str ['hello'] = [*Hello, * 'name'];
+    print.stdout['hello' \n];
+
+    # A built piece joins again like any other, and comes back out of a function.
+    var.immut.str ['both'] = ['hello' *  * greet[*Claude*]];
+    print.stdout['both' \n];
+
+    # And compares equal to a written one, because comparing text asks what it
+    # holds rather than which piece it is.
+    var.immut.bool ['same'] = ['hello' == str:*Hello, Tankun*];
+    print.stdout[str:*built equals written: * 'same' \n];
+}

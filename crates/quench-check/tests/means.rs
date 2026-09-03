@@ -158,14 +158,17 @@ fn a_declaration_always_says_whether_it_can_change() {
 }
 
 #[test]
-fn a_name_inside_a_longer_value_needs_something_that_is_not_built() {
-    // Joining a name to text builds a *new* value, which needs the collector. Copying a
-    // whole one does not, and works.
-    let rendered = errors("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }");
-    assert!(rendered.contains("cannot be one piece of a longer value yet"), "{rendered}");
-    assert!(rendered.contains("needs the collector"), "{rendered}");
-
+fn pieces_side_by_side_join_whether_or_not_they_are_known() {
+    // Which is what juxtaposition already meant. This used to be refused as "needing
+    // the collector" -- it needs allocation, which exists, not collection, which does
+    // not: a built piece of text leaks like every array already does.
+    assert!(check("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }").ok());
     assert!(check("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a']; }").ok());
+
+    // Nothing converts on its own, here as everywhere else.
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }");
+    assert!(rendered.contains("this is an `i64`, and text is made of text."), "{rendered}");
+    assert!(rendered.contains("showing is not joining"), "{rendered}");
 }
 
 #[test]

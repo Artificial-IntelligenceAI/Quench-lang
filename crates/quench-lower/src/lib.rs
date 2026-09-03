@@ -730,6 +730,19 @@ fn emit(
             let handle = emit(b, module, of, held, w);
             b.call_host(qir::Host::ArrayLen, &[handle])
         }
+        // One piece at a time, left to right, because that is the order they were
+        // written and joining is not something to be clever about.
+        Value::Join(pieces) => {
+            let mut joined: Option<qir::Value> = None;
+            for piece in pieces {
+                let next = emit(b, module, piece, held, w);
+                joined = Some(match joined {
+                    None => next,
+                    Some(so_far) => b.call_host(qir::Host::TextJoin, &[so_far, next]),
+                });
+            }
+            joined.expect("the checker refused a join with nothing in it")
+        }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);
             b.not(value)
