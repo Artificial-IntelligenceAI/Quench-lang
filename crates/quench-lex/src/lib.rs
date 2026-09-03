@@ -2,7 +2,7 @@
 //!
 //! The lexer decides as little as it can get away with. It does not sort words into
 //! keywords, because Quench reserves none — see [`Kind::Word`]. It does not read what is
-//! written between bars, because what `|1000|` means is decided by the type it is given
+//! written between marks, because what `*1000*` means is decided by the type it is given
 //! to, and deciding it here would be deciding it in the wrong place.
 //!
 //! What it *does* do carefully is stop well. A lexer that gives up at the first odd

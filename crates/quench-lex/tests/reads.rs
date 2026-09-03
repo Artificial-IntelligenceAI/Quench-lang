@@ -21,7 +21,7 @@ fn a_declaration_comes_apart_the_way_the_chain_reads() {
             Word, Dot, Word, Dot, Word, // var . mut . b16
             OpenList, Name, CloseList,  // [ 'x' ]
             Equals,
-            OpenList, Written, CloseList, // [ |1000| ]
+            OpenList, Written, CloseList, // [ *1000* ]
             Semicolon,
             End,
         ]
