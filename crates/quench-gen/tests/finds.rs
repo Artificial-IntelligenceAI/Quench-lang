@@ -19,14 +19,23 @@ fn every_generated_program_checks_out() {
 fn the_same_seed_writes_the_same_program() {
     // Without this a disagreement could not be replayed, and the seed would be useless.
     for seed in [1u64, 7, 999, u64::MAX] {
-        assert_eq!(program(seed, None), program(seed, None), "seed {seed}");
+        // A fresh module each time, so the text a decimal was written with is interned
+        // into the same places and the two are comparable at all.
+        let (mut here, mut there) = (Module::new(), Module::new());
+        assert_eq!(
+            program(&mut here, seed, None),
+            program(&mut there, seed, None),
+            "seed {seed}"
+        );
+        assert_eq!(here.text, there.text, "seed {seed}");
     }
 }
 
 #[test]
 fn different_seeds_write_different_programs() {
-    let one = program(1, None);
-    let two = program(2, None);
+    let (mut here, mut there) = (Module::new(), Module::new());
+    let one = program(&mut here, 1, None);
+    let two = program(&mut there, 2, None);
     assert_ne!(one, two);
 }
 

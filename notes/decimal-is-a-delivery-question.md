@@ -84,9 +84,19 @@ Which is the honest version of "no oracle risk": there is none *in principle*, b
 the values are specified. There is the usual amount in practice, because an untested
 path is an untested path.
 
-## Not built
+## Built, and the settings are still not
 
-`d32` and `d64` themselves are not built, and the settings above are not in
-`QNL-Config.toml`. A setting that parses and does nothing would be worse than one that
-is refused, since the file's whole job is to decide how a program is built. They arrive
-with the types.
+`d32` and `d64` are built: seven significant digits and sixteen, a coefficient that is a
+`Big` so no width is ever a question, cohorts kept, and one implementation both engines
+call — so the arithmetic cannot be a source of disagreement any more than an `e`'s can.
+
+The settings above are still not in `QNL-Config.toml`, and the reason has not changed:
+a setting that parses and does nothing would be worse than one that is refused. Both
+engines that exist are software, so every value of `[build] decimal` and `[run] decimal`
+would mean the same thing today, and `hardware` would be a request nothing could honour
+or refuse. They arrive with the engine that can answer them, which is the LLVM half.
+
+The one thing being built settles that was open before: the *encodings* never came up.
+Nothing in `decimal.rs` writes a BID or a DPD field, because nothing needs to — a
+coefficient and an exponent held as themselves are what every operation reads, and the
+only place an encoding could matter is a bit-cast Quench does not have.

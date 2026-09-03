@@ -124,6 +124,7 @@ fn put_ty(out: &mut Vec<u8>, ty: &Ty) {
         Ty::F16 => 7,
         Ty::Exact => 4,
         Ty::Text => 5,
+        Ty::Decimal => 8,
     });
 }
 
@@ -306,6 +307,13 @@ fn host_code(host: Host) -> u8 {
         Host::PrintFloat => 20,
         Host::ToB16 => 24,
         Host::ExactPow => 21,
+        Host::DecimalRead => 26,
+        Host::DecimalAdd => 27,
+        Host::DecimalSub => 28,
+        Host::DecimalMul => 29,
+        Host::DecimalDiv => 30,
+        Host::DecimalCompare => 31,
+        Host::PrintDecimal => 32,
         Host::PowI64 => 22,
         Host::PowI64Trapping => 23,
     }
@@ -494,6 +502,7 @@ impl<'a> Reader<'a> {
             7 => Ty::F16,
             4 => Ty::Exact,
             5 => Ty::Text,
+            8 => Ty::Decimal,
             code => return Err(Wrong::Unknown { what: "a type", code }),
         })
     }
@@ -630,6 +639,13 @@ impl<'a> Reader<'a> {
             20 => Host::PrintFloat,
             24 => Host::ToB16,
             21 => Host::ExactPow,
+            26 => Host::DecimalRead,
+            27 => Host::DecimalAdd,
+            28 => Host::DecimalSub,
+            29 => Host::DecimalMul,
+            30 => Host::DecimalDiv,
+            31 => Host::DecimalCompare,
+            32 => Host::PrintDecimal,
             22 => Host::PowI64,
             23 => Host::PowI64Trapping,
             code => return Err(Wrong::Unknown { what: "a runtime call", code }),

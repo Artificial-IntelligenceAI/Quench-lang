@@ -336,7 +336,7 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         qir::Ty::Text => types::I64,
         // A handle into the heap, which is an index and so an integer as well. The
         // generated code never dereferences one; it hands it back to the runtime.
-        qir::Ty::Handle | qir::Ty::Exact => types::I64,
+        qir::Ty::Handle | qir::Ty::Exact | qir::Ty::Decimal => types::I64,
         qir::Ty::F64 => types::F64,
         // A `b16` is carried in an `f32`, because there is no half to put in a
         // register and the carrier gives binary16's own answers anyway.
@@ -512,6 +512,92 @@ extern "C" fn exact_div(rt: *mut Runtime, a: i64, b: i64) -> i64 {
     }
 }
 
+/// Put a decimal away, and give back the handle to it.
+fn keep_decimal(value: quench_num::Decimal) -> i64 {
+    HEAP.with(|heap| heap.borrow_mut().decimal(value))
+}
+
+/// Which decimal format a digit count names. The lowering only ever writes the two.
+fn decimal_format(digits: i64) -> quench_num::Format {
+    if digits == 7 { quench_num::D32 } else { quench_num::D64 }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn decimal_read(rt: *mut Runtime, index: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let read = quench_num::Decimal::parse(&text_of(index), decimal_format(digits))
+        .expect("refused by the checker: a decimal that is not a number");
+    keep_decimal(read)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn decimal_add(rt: *mut Runtime, a: i64, b: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let answer =
+        HEAP.with(|h| {
+            let h = h.borrow();
+            h.decimally(a).add(h.decimally(b), decimal_format(digits))
+        });
+    keep_decimal(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn decimal_sub(rt: *mut Runtime, a: i64, b: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let answer =
+        HEAP.with(|h| {
+            let h = h.borrow();
+            h.decimally(a).sub(h.decimally(b), decimal_format(digits))
+        });
+    keep_decimal(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn decimal_mul(rt: *mut Runtime, a: i64, b: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let answer =
+        HEAP.with(|h| {
+            let h = h.borrow();
+            h.decimally(a).mul(h.decimally(b), decimal_format(digits))
+        });
+    keep_decimal(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+///
+/// No trap on a divisor of nought, unlike [`exact_div`]: a decimal float answers that
+/// with infinity, which is the difference between a float and a ratio.
+extern "C" fn decimal_div(rt: *mut Runtime, a: i64, b: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let answer =
+        HEAP.with(|h| {
+            let h = h.borrow();
+            h.decimally(a).div(h.decimally(b), decimal_format(digits))
+        });
+    keep_decimal(answer)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn decimal_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    HEAP.with(|h| {
+        let h = h.borrow();
+        match h.decimally(a).compare(h.decimally(b)) {
+            Some(std::cmp::Ordering::Less) => -1,
+            Some(std::cmp::Ordering::Equal) => 0,
+            Some(std::cmp::Ordering::Greater) => 1,
+            // Not-a-number, which is none of the three.
+            None => 2,
+        }
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn print_decimal(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
+    let shown = HEAP.with(|h| h.borrow().decimally(value).to_string());
+    write_out(stream, shown.as_bytes());
+    0
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
     match trouble {
@@ -680,6 +766,7 @@ fn root_it(
         qir::Ty::Handle => 1i64,
         qir::Ty::Text => 2,
         qir::Ty::Exact => 3,
+        qir::Ty::Decimal => 4,
         _ => return,
     };
     // Which space it is in rides in the top byte, because a root in compiled code is an
@@ -729,6 +816,12 @@ fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> b
             qir::Elements::Exact => {
                 HEAP.with(|h| h.borrow().exactly(*x) == h.borrow().exactly(*y))
             }
+            // By value: `2.50` and `2.5` are one number written two ways, and a
+            // not-a-number is equal to nothing including itself.
+            qir::Elements::Decimal => HEAP.with(|h| {
+                let h = h.borrow();
+                h.decimally(*x).compare(h.decimally(*y)) == Some(std::cmp::Ordering::Equal)
+            }),
             qir::Elements::Float => f64::from_bits(*x as u64) == f64::from_bits(*y as u64),
             qir::Elements::Text => text_of(*x) == text_of(*y),
             _ => x == y,
@@ -766,6 +859,9 @@ fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> Stri
                     format!("*{}*", text_of(*value))
                 }
                 qir::Elements::Exact => HEAP.with(|h| h.borrow().exactly(*value).to_string()),
+                qir::Elements::Decimal => {
+                    HEAP.with(|h| h.borrow().decimally(*value).to_string())
+                }
                 qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
@@ -888,6 +984,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_div", exact_div as *const u8);
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
+    builder.symbol("quench_decimal_read", decimal_read as *const u8);
+    builder.symbol("quench_decimal_add", decimal_add as *const u8);
+    builder.symbol("quench_decimal_sub", decimal_sub as *const u8);
+    builder.symbol("quench_decimal_mul", decimal_mul as *const u8);
+    builder.symbol("quench_decimal_div", decimal_div as *const u8);
+    builder.symbol("quench_decimal_compare", decimal_compare as *const u8);
+    builder.symbol("quench_print_decimal", print_decimal as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
     builder.symbol("quench_to_b16", to_b16 as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
@@ -952,6 +1055,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactDiv, "quench_exact_div"),
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
+        (qir::Host::DecimalRead, "quench_decimal_read"),
+        (qir::Host::DecimalAdd, "quench_decimal_add"),
+        (qir::Host::DecimalSub, "quench_decimal_sub"),
+        (qir::Host::DecimalMul, "quench_decimal_mul"),
+        (qir::Host::DecimalDiv, "quench_decimal_div"),
+        (qir::Host::DecimalCompare, "quench_decimal_compare"),
+        (qir::Host::PrintDecimal, "quench_print_decimal"),
         (qir::Host::PrintFloat, "quench_print_float"),
         (qir::Host::ToB16, "quench_to_b16"),
         (qir::Host::TextCompare, "quench_text_compare"),
@@ -1052,7 +1162,7 @@ fn lower(
     let mut slot_of: Vec<Option<i32>> = vec![None; func.value_tys.len()];
     let mut slots = 0i32;
     for (n, ty) in func.value_tys.iter().enumerate() {
-        if matches!(ty, qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact) {
+        if matches!(ty, qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact | qir::Ty::Decimal) {
             slot_of[n] = Some(slots);
             slots += 1;
         }

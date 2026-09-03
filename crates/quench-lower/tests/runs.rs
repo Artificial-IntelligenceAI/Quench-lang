@@ -96,7 +96,7 @@ fn a_file_with_no_start_is_not_a_program() {
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
         // A type Quench means to have and does not have yet.
-        ("START { print.stdout[d32:*1*]; }", "`d32` is not built yet"),
+        ("START { print.stdout[text:*1*]; }", "`text` is not built yet"),
         // A number is not text, and nothing converts on its own.
         ("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }", "text is made of text"),
     ];
@@ -105,8 +105,10 @@ fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
         assert!(rendered.contains(expected), "{source}\n{rendered}");
     }
 
-    // And joining, which this test used to assert was not built, now is.
+    // And joining, which this test used to assert was not built, now is. So is `d32`,
+    // which it named as the type that was not.
     assert!(lower("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }").ok());
+    assert!(lower("START { print.stdout[d32:*1*]; }").ok());
 }
 
 #[test]
@@ -1670,4 +1672,165 @@ fn a_written_number_is_read_by_the_width_asking_for_it() {
         "2000000000",
         "and an unsigned division has neither edge a signed one has",
     );
+}
+
+#[test]
+fn a_decimal_rounds_in_the_base_it_was_written_in() {
+    // The same sum a `b64` is famous for getting wrong, got right -- not by being more
+    // accurate, but by rounding where a person writing `0.1` expects it to.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d64 ['sum'] = [*0.1* + *0.2*];
+    var.immut.bool ['right'] = [d64:*0.1* + d64:*0.2* == d64:*0.3*];
+    var.immut.b64 ['binary'] = [*0.1* + *0.2*];
+    print.stdout['sum' str:* * 'right' str:* * 'binary'];
+}
+"),
+        "0.3 true 0.30000000000000004",
+    );
+}
+
+#[test]
+fn a_decimal_keeps_the_cohort_it_was_given() {
+    // `2.50` and `2.5` are the same number and not the same *written* number: a
+    // trailing zero in decimal says something about how far the precision goes, so
+    // arithmetic carries it and a comparison ignores it.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d64 ['sum'] = [*2.50* + *1.00*];
+    var.immut.d64 ['product'] = [*1.005* x *100*];
+    var.immut.bool ['equal'] = [d64:*2.50* == d64:*2.5*];
+    print.stdout['sum' str:* * 'product' str:* * 'equal'];
+}
+"),
+        "3.50 100.500 true",
+    );
+}
+
+#[test]
+fn a_d32_keeps_seven_digits_and_a_d64_sixteen() {
+    // Which is the whole difference between the two, and the reason the digit count
+    // rides along with every operation rather than living in the type.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d32 ['narrow'] = [*1* / *3*];
+    var.immut.d64 ['wide'] = [*1* / *3*];
+    var.immut.d32 ['rounded'] = [*12345678*];
+    print.stdout['narrow' str:* * 'wide' str:* * 'rounded'];
+}
+"),
+        "0.3333333 0.3333333333333333 1.234568E+7",
+    );
+}
+
+#[test]
+fn an_exact_decimal_division_does_not_grow_a_tail() {
+    // A division is worked out with a digit to spare and then walked back to the
+    // exponent it would have had if nothing needed sparing. Without that, dividing by
+    // one would lengthen a number every time.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d32 ['same'] = [*2.5* / *1*];
+    var.immut.d64 ['half'] = [*1* / *2*];
+    print.stdout['same' str:* * 'half'];
+}
+"),
+        "2.5 0.5",
+    );
+}
+
+#[test]
+fn a_decimal_answers_where_an_exact_number_stops() {
+    // Dividing by nought is the difference between a float and a ratio: one has a value
+    // to give back and the other has nothing to say.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d64 ['zero'] = [*0*];
+    var.immut.d64 ['big'] = [*1* / 'zero'];
+    var.immut.d64 ['neither'] = ['zero' / 'zero'];
+    print.stdout['big' str:* * 'neither'];
+}
+"),
+        "infinity not-a-number",
+    );
+}
+
+#[test]
+fn a_not_a_number_is_none_of_less_equal_or_greater() {
+    // Four answers, not three -- which is why `<==` and `>==` are not one comparison
+    // against one number the way `<` and `==` are.
+    assert_eq!(
+        said("\
+START {
+    var.immut.d64 ['zero'] = [*0*];
+    var.immut.d64 ['none'] = ['zero' / 'zero'];
+    var.immut.d64 ['one'] = [*1*];
+    var.immut.bool ['under'] = ['none' <== 'one'];
+    var.immut.bool ['over'] = ['none' >== 'one'];
+    var.immut.bool ['same'] = ['none' == 'none'];
+    var.immut.bool ['differs'] = ['none' !== 'none'];
+    print.stdout['under' str:* * 'over' str:* * 'same' str:* * 'differs'];
+}
+"),
+        "false false false true",
+    );
+}
+
+#[test]
+fn decimals_are_collected_too() {
+    // Every answer is a fresh handle, so a loop that works out two hundred of them and
+    // keeps one has to be able to free the rest without freeing that one.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.d64 (grow) ['kept'] = [[]];
+    loop.temp.range.i64 ['i'] = [*1*, *200*] {
+        var.immut.d64 ['made'] = [d64:*1* / d64:*8*];
+        add ['kept'] = ['made'];
+    }
+    var.immut.d64 ['last'] = ['kept'[*200*]];
+    print.stdout['last'];
+}
+"),
+        "0.125",
+    );
+}
+
+#[test]
+fn an_array_of_decimals_compares_by_value() {
+    // Two names for one number are not the only way to hold the same one, so these
+    // compare by what they are -- and `0.10` is `0.1`, however it was written.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.d64 (3) ['xs'] = [*0.1* *0.2* *0.3*];
+    var.immut.arr.d64 (3) ['ys'] = [*0.10* *0.20* *0.30*];
+    var.immut.bool ['same'] = ['xs' == 'ys'];
+    print.stdout['xs' str:* * 'same'];
+}
+"),
+        "[0.1 0.2 0.3] true",
+    );
+}
+
+#[test]
+fn a_decimal_refuses_what_a_binary_float_refuses() {
+    // `^` and `mod` for the same reason: no standard says how a `pow` rounds, and a
+    // remainder is a question for the types that do not round at all.
+    for source in [
+        "START { var.immut.d64 ['x'] = [*2* ^ *3*]; print.stdout['x']; }",
+        "START { var.immut.d64 ['x'] = [*7* mod *3*]; print.stdout['x']; }",
+    ] {
+        let rendered = report(source);
+        assert!(rendered.contains("is not built yet"), "{source}\n{rendered}");
+    }
+
+    // And a ratio, which is written the way an `e` is written and is not a decimal.
+    let rendered = report("START { var.immut.d64 ['x'] = [*1/3*]; print.stdout['x']; }");
+    assert!(rendered.contains("is not a `d64`"), "{rendered}");
 }

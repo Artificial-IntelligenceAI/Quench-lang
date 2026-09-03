@@ -155,6 +155,10 @@ pub enum Ty {
     F64,
     F32,
     F16,
+    /// A decimal number — a `d32` or a `d64`. A handle, for the same reason an `e` is:
+    /// a coefficient and an exponent do not fit in a register, and no machine Quench
+    /// targets has the instructions.
+    Decimal,
     /// A number held exactly, however large it grows. An `e`.
     ///
     /// A handle like [`Ty::Handle`] is, and for the same reason: what an exact number
@@ -180,6 +184,7 @@ impl Ty {
             Ty::Text => "text",
             Ty::Handle => "handle",
             Ty::Exact => "exact",
+            Ty::Decimal => "decimal",
             Ty::F64 => "b64",
             Ty::F32 => "b32",
             Ty::F16 => "b16",
@@ -407,6 +412,25 @@ pub enum Host {
     /// Can stop, on a fractional exponent or one too large to finish.
     ExactPow,
 
+    /// `(text, digits)` — read a decimal number from the text it was written with,
+    /// rounded to that many significant digits. `0.1` is one tenth here too, and unlike
+    /// an `e` it is one tenth *to seven digits* or *to sixteen*: a `d32` and a `d64`
+    /// differ in what they keep, not in what they mean.
+    DecimalRead,
+    /// `(a, b, digits)` — to that many digits, rounded half-even.
+    DecimalAdd,
+    DecimalSub,
+    DecimalMul,
+    /// `(a, b, digits)` — the same. Gives infinity or not-a-number rather than stopping,
+    /// which is what makes it a float and not an `e`.
+    DecimalDiv,
+    /// `(a, b)` — `-1`, `0`, `1`, or `2` when they do not compare at all, which is what
+    /// a not-a-number does to every question asked of it.
+    DecimalCompare,
+    /// `(stream, decimal)` — as IEEE says to write one, which keeps `2.50` from
+    /// printing as `2.5`.
+    PrintDecimal,
+
     /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
     /// negative exponent: the answer to that is a fraction and this is a whole number.
     PowI64,
@@ -441,6 +465,13 @@ impl Host {
             Host::PrintFloat => "print-float",
             Host::ToB16 => "to-b16",
             Host::ExactPow => "exact-pow",
+            Host::DecimalRead => "decimal-read",
+            Host::DecimalAdd => "decimal-add",
+            Host::DecimalSub => "decimal-sub",
+            Host::DecimalMul => "decimal-mul",
+            Host::DecimalDiv => "decimal-div",
+            Host::DecimalCompare => "decimal-compare",
+            Host::PrintDecimal => "print-decimal",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
         }
@@ -473,6 +504,12 @@ impl Host {
             Host::PrintFloat => &[Ty::I64, Ty::F64, Ty::I64],
             Host::ToB16 => &[Ty::F32],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
+            Host::DecimalRead => &[Ty::Text, Ty::I64],
+            Host::DecimalAdd | Host::DecimalSub | Host::DecimalMul | Host::DecimalDiv => {
+                &[Ty::Decimal, Ty::Decimal, Ty::I64]
+            }
+            Host::DecimalCompare => &[Ty::Decimal, Ty::Decimal],
+            Host::PrintDecimal => &[Ty::I64, Ty::Decimal],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
     }
@@ -524,6 +561,11 @@ impl Host {
             | Host::ExactMul
             | Host::ExactDiv
             | Host::ExactPow => Ty::Exact,
+            Host::DecimalRead
+            | Host::DecimalAdd
+            | Host::DecimalSub
+            | Host::DecimalMul
+            | Host::DecimalDiv => Ty::Decimal,
             _ => Ty::I64,
         }
     }
@@ -542,13 +584,14 @@ pub enum Elements {
     Text = 2,
     Exact = 3,
     Float = 4,
+    Decimal = 5,
 }
 
 impl Elements {
     /// Whether a slot holding one of these is something to follow rather than a value
     /// to leave alone. The whole of what tracing needs to know.
     pub fn is_a_reference(self) -> bool {
-        matches!(self, Elements::Text | Elements::Exact)
+        matches!(self, Elements::Text | Elements::Exact | Elements::Decimal)
     }
 }
 
@@ -560,6 +603,7 @@ impl Elements {
             2 => Elements::Text,
             3 => Elements::Exact,
             4 => Elements::Float,
+            5 => Elements::Decimal,
             _ => return None,
         })
     }

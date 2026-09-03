@@ -84,6 +84,7 @@ fn shown(
                 // unreadable without them.
                 qir::Elements::Text => format!("*{}*", heap.said(*value)),
                 qir::Elements::Exact => heap.exactly(*value).to_string(),
+                qir::Elements::Decimal => heap.decimally(*value).to_string(),
                 qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
@@ -112,6 +113,13 @@ fn alike(
             // so these are compared by value rather than by which they are -- and so is
             // text, for the same reason.
             qir::Elements::Exact => heap.exactly(*x) == heap.exactly(*y),
+            // By what they are as well, and for a third reason on top of those two:
+            // `2.50` and `2.5` are one number written two ways, and a not-a-number is
+            // equal to nothing including itself.
+            qir::Elements::Decimal => {
+                heap.decimally(*x).compare(heap.decimally(*y))
+                    == Some(std::cmp::Ordering::Equal)
+            }
             // By what they are, not by their bits: two ways of writing nought are one
             // number, and a not-a-number is not even itself.
             qir::Elements::Float => {
@@ -134,7 +142,10 @@ fn rooted(stack: &[Frame], module: &qir::Module) -> Vec<(qir::Ty, i64)> {
         let func = module.func(frame.func);
         for (n, value) in frame.slots.iter().enumerate() {
             let ty = func.ty_of(qir::Value(n as u32));
-            if matches!(ty, qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact) {
+            if matches!(
+                ty,
+                qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact | qir::Ty::Decimal
+            ) {
                 roots.push((ty, *value));
             }
         }
@@ -160,6 +171,11 @@ fn narrowed(value: i64, bits: u8, signed: bool) -> i64 {
 }
 
 /// Why a power had no answer, as a reason to stop.
+/// Which decimal format a digit count names. The lowering only ever writes the two.
+fn decimal_format(digits: i64) -> quench_num::Format {
+    if digits == 7 { quench_num::D32 } else { quench_num::D64 }
+}
+
 fn no_power(trouble: quench_num::NoPower) -> Trap {
     match trouble {
         quench_num::NoPower::Negative => Trap::NegativePower,
@@ -509,6 +525,49 @@ fn evaluate(
                     );
                     let answer = a.power(&b).map_err(no_power)?;
                     return Ok(heap.exact(answer));
+                }
+                qir::Host::DecimalRead => {
+                    let at = slots[args[0].0 as usize];
+                    let format = decimal_format(slots[args[1].0 as usize]);
+                    let read = quench_num::Decimal::parse(heap.said(at), format)
+                        .expect("refused by the checker: a decimal that is not a number");
+                    return Ok(heap.decimal(read));
+                }
+                qir::Host::DecimalAdd
+                | qir::Host::DecimalSub
+                | qir::Host::DecimalMul
+                | qir::Host::DecimalDiv => {
+                    let (a, b) = (
+                        heap.decimally(slots[args[0].0 as usize]).clone(),
+                        heap.decimally(slots[args[1].0 as usize]).clone(),
+                    );
+                    let format = decimal_format(slots[args[2].0 as usize]);
+                    let answer = match host {
+                        qir::Host::DecimalAdd => a.add(&b, format),
+                        qir::Host::DecimalSub => a.sub(&b, format),
+                        qir::Host::DecimalMul => a.mul(&b, format),
+                        // No trap here, unlike an `e`: dividing by nought is infinity,
+                        // which is an answer a float has and a ratio does not.
+                        _ => a.div(&b, format),
+                    };
+                    return Ok(heap.decimal(answer));
+                }
+                qir::Host::DecimalCompare => {
+                    let (a, b) = (
+                        heap.decimally(slots[args[0].0 as usize]),
+                        heap.decimally(slots[args[1].0 as usize]),
+                    );
+                    return Ok(match a.compare(b) {
+                        Some(std::cmp::Ordering::Less) => -1,
+                        Some(std::cmp::Ordering::Equal) => 0,
+                        Some(std::cmp::Ordering::Greater) => 1,
+                        // Not-a-number, which is none of the three.
+                        None => 2,
+                    });
+                }
+                qir::Host::PrintDecimal => {
+                    let value = heap.decimally(slots[args[1].0 as usize]);
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
                 }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =

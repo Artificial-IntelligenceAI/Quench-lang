@@ -43,6 +43,14 @@ pub enum Ty {
     /// `*3*` is a third, and a third times three is one. What that costs is that an `e`
     /// lives on the heap and a `b64` lives in a register.
     Exact,
+    /// `d32` and `d64` — a decimal float, which rounds in the base it was written in.
+    ///
+    /// The difference from a `b64` is not accuracy, it is *which* tenth: `0.1` in a
+    /// `b64` is the nearest binary fraction to a tenth and in a `d64` it is a tenth,
+    /// held to sixteen digits. What it costs is the same thing an `e` costs — a
+    /// coefficient and an exponent do not fit in a register — and what it buys over an
+    /// `e` is that it stops growing.
+    Decimal { digits: u32 },
     /// `arr.i64 (2 3)` — one allocation, laid out row by row.
     ///
     /// One `arr` link is one allocation however many dimensions it has, which is what
@@ -65,6 +73,11 @@ impl Ty {
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
             Ty::Exact => "e".to_string(),
+            // Named for the bits the format has, the way `b32` is, even though what
+            // Quench keeps is the digits: `d32` is what IEEE calls it.
+            Ty::Decimal { digits } => {
+                format!("d{}", if *digits == 7 { 32 } else { 64 })
+            }
             Ty::F64 => "b64".to_string(),
             Ty::F32 => "b32".to_string(),
             Ty::F16 => "b16".to_string(),
@@ -96,7 +109,7 @@ impl Ty {
             // aloud and `u` starts with a consonant when it is.
             Ty::Int { signed: true, .. } | Ty::Arr { .. } | Ty::Exact => "an",
             Ty::Int { signed: false, .. } => "a",
-            Ty::Str | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16 => "a",
+            Ty::Str | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16 | Ty::Decimal { .. } => "a",
         }
     }
 
@@ -141,6 +154,8 @@ impl Ty {
             "b64" => Some(Ty::F64),
             "b32" => Some(Ty::F32),
             "b16" => Some(Ty::F16),
+            "d32" => Some(Ty::Decimal { digits: 7 }),
+            "d64" => Some(Ty::Decimal { digits: 16 }),
             _ => None,
         }
     }
@@ -254,6 +269,9 @@ pub enum Value {
     /// An `e`, kept as the text it was written with. Reading it is the runtime's job,
     /// because the answer does not fit in anything the IR can carry.
     Exact(String),
+    /// A `d32` or a `d64`, the same way and for the same reason — with how many digits
+    /// to keep, since that is the whole difference between the two.
+    Decimal { written: String, digits: u32 },
     /// The value another variable holds.
     Copy(LocalId),
     Binary { op: OpKind, lhs: Box<Value>, rhs: Box<Value> },
@@ -317,11 +335,22 @@ fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
     }
 }
 
-/// Whether an exact number turns up anywhere inside this.
-fn holds_an_exact(ty: &Ty) -> bool {
+/// The name of that number type, for saying which one it was.
+fn made_number(ty: &Ty) -> String {
     match ty {
-        Ty::Exact => true,
-        Ty::Arr { of, .. } => holds_an_exact(of),
+        Ty::Arr { of, .. } => made_number(of),
+        other => other.name(),
+    }
+}
+
+/// Whether a number the runtime has to build turns up anywhere inside this.
+///
+/// An `e` and a decimal are both handles to something made while running, so neither
+/// can be written into a table before anything runs.
+fn holds_a_made_number(ty: &Ty) -> bool {
+    match ty {
+        Ty::Exact | Ty::Decimal { .. } => true,
+        Ty::Arr { of, .. } => holds_a_made_number(of),
         _ => false,
     }
 }
@@ -677,11 +706,11 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            if holds_an_exact(&ty) {
+            if holds_a_made_number(&ty) {
                 self.errors.push(
-                    Diagnostic::new("E0485", "a constant array of `e` is not built yet.")
+                    Diagnostic::new("E0485", format!("a constant array of `{}` is not built yet.", made_number(&ty)))
                         .primary(at, "here")
-                        .rule("a table holds what each slot holds, and an `e` slot holds a handle the runtime makes rather than a number the module can carry")
+                        .rule("a table holds what each slot holds, and this kind of slot holds a handle the runtime makes rather than a number the module can carry")
                         .tip("every other element type is a number, a nought-or-one, or which piece of text — all of them known before anything runs.")
                         .fix("declare it inside a function with `var` for now"),
                 );
@@ -1018,6 +1047,29 @@ impl<'a> Checker<'a> {
                         .primary(at, "here")
                         .rule("a binary float is written as a number with or without a point: `*1.5*`, `*-0.25*`, `*3*`")
                         .tip("`infinity` and `not-a-number` are answers a program can reach, and not things it can write.")
+                        .fix("write a number"),
+                );
+                None
+            }
+        }
+    }
+
+    /// A decimal float, read to however many digits its type keeps.
+    ///
+    /// Reading happens twice: here, to refuse what is not a number at all, and again at
+    /// runtime, because what it reads to is a coefficient and an exponent rather than
+    /// something the IR can carry.
+    fn a_decimal(&mut self, written: &str, digits: u32, at: Span) -> Option<Value> {
+        let format = if digits == 7 { quench_num::D32 } else { quench_num::D64 };
+        match quench_num::Decimal::parse(written, format) {
+            Some(_) => Some(Value::Decimal { written: written.to_string(), digits }),
+            None => {
+                let name = if digits == 7 { "d32" } else { "d64" };
+                self.errors.push(
+                    Diagnostic::new("E0489", format!("`{written}` is not a `{name}`."))
+                        .primary(at, "here")
+                        .rule("a decimal float is written as a number with or without a point: `*1.5*`, `*-0.25*`, `*3*`")
+                        .tip("a ratio is not one of them — `*1/3*` is an `e`, and a third is what a decimal cannot hold.")
                         .fix("write a number"),
                 );
                 None
@@ -1396,6 +1448,7 @@ impl<'a> Checker<'a> {
         // `*1000*` a number under `i64` and four characters under `str`.
         let outer = std::mem::replace(&mut self.reading, match ty {
             Ty::Exact => Ty::Exact,
+            Ty::Decimal { digits } => Ty::Decimal { digits: *digits },
             Ty::F64 => Ty::F64,
             Ty::F32 => Ty::F32,
             Ty::F16 => Ty::F16,
@@ -1463,6 +1516,29 @@ impl<'a> Checker<'a> {
             return self.array(value, of, shape, *grows, ty_span);
         }
 
+        // Exactly one thing that is not a written value -- an index, a call, brackets.
+        // Every arm below reads a *written* value under the chain's type, and none of
+        // these is written: whatever it is, it already knows what it is, so the only
+        // question left is whether that agrees with the chain.
+        if !matches!(ty, Ty::Str | Ty::Arr { .. })
+            && let [one] = value.terms.as_slice()
+            && !matches!(one, ast::Term::Piece(ast::Piece::Written { .. }))
+        {
+            let built = self.term(one)?;
+            let found = self.type_of(&built, one.span())?;
+            if &found != ty {
+                self.errors.push(
+                    Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                        .primary(one.span(), format!("{} `{}`", found.article(), found.name()))
+                        .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                        .rule("nothing converts on its own — two types meet only where something says they should")
+                        .fix("declare it the same type"),
+                );
+                return None;
+            }
+            return Some(built);
+        }
+
         match ty {
             Ty::Arr { .. } => unreachable!("handled above"),
             // `*1.5*`, `*-0.25*`, `*3*`. A decimal point here is the nearest value of
@@ -1471,6 +1547,23 @@ impl<'a> Checker<'a> {
             Ty::F64 | Ty::F32 | Ty::F16 => match value.terms.as_slice() {
                 [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
                     self.a_float(&unmarked(self.text(*mark)), ty, *mark)
+                }
+                _ => {
+                    self.errors.push(
+                        Diagnostic::new("E0487", format!("a `{}` is one written value, not several.", ty.name()))
+                            .primary(value.span, "here")
+                            .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                            .rule("pieces side by side build text; a number is written once")
+                            .fix("write it as one value, or put an operator between them"),
+                    );
+                    None
+                }
+            },
+            // `*1.5*`, `*0.1*`, `*3*`. A decimal point is exact *in this many digits*:
+            // one tenth is one tenth, and a third is not a third.
+            Ty::Decimal { digits } => match value.terms.as_slice() {
+                [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
+                    self.a_decimal(&unmarked(self.text(*mark)), *digits, *mark)
                 }
                 _ => {
                     self.errors.push(
@@ -2056,6 +2149,9 @@ impl<'a> Checker<'a> {
                     let reading = self.reading.clone();
                     return self.a_float(&digits, &reading, *mark);
                 }
+                if let Ty::Decimal { digits: keep } = self.reading {
+                    return self.a_decimal(&digits, keep, *mark);
+                }
                 if self.reading == Ty::Exact {
                     return match quench_num::Exact::parse(&digits) {
                         Some(_) => Some(Value::Exact(digits)),
@@ -2124,6 +2220,9 @@ impl<'a> Checker<'a> {
                     Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
                         self.a_float(&digits, &ty, *mark)
                     }
+                    Some(Ty::Decimal { digits: keep }) => {
+                        self.a_decimal(&digits, keep, *mark)
+                    }
                     Some(Ty::Str) => Some(Value::Text(digits)),
                     Some(Ty::Bool) => match digits.as_str() {
                         "true" => Some(Value::Bool(true)),
@@ -2187,6 +2286,7 @@ impl<'a> Checker<'a> {
             Value::Text(_) => Some(Ty::Str),
             Value::Number { bits, signed, .. } => Some(Ty::Int { bits: *bits, signed: *signed }),
             Value::Exact(_) => Some(Ty::Exact),
+            Value::Decimal { digits, .. } => Some(Ty::Decimal { digits: *digits }),
             Value::Float { width, .. } => Some(match width {
                 16 => Ty::F16,
                 32 => Ty::F32,
@@ -2239,7 +2339,17 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
-                if l != r || !matches!(l, Ty::Int { .. } | Ty::Exact | Ty::F64 | Ty::F32 | Ty::F16) {
+                if l != r
+                    || !matches!(
+                        l,
+                        Ty::Int { .. }
+                            | Ty::Exact
+                            | Ty::F64
+                            | Ty::F32
+                            | Ty::F16
+                            | Ty::Decimal { .. }
+                    )
+                {
                     self.errors.push(
                         Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
                             .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
@@ -2253,7 +2363,9 @@ impl<'a> Checker<'a> {
                 // `^` on a float is `pow`, which no standard requires to be rounded
                 // the same way twice — so it is one of the two things a differential
                 // oracle actually has to worry about, and it waits for the answer.
-                if matches!(l, Ty::F64 | Ty::F32 | Ty::F16) && matches!(op, OpKind::Pow | OpKind::Mod) {
+                if matches!(l, Ty::F64 | Ty::F32 | Ty::F16 | Ty::Decimal { .. })
+                    && matches!(op, OpKind::Pow | OpKind::Mod)
+                {
                     self.errors.push(
                         Diagnostic::new("E0488", format!("`{}` on a `{}` is not built yet.", op.written(), l.name()))
                             .primary(span, "here")
@@ -2885,6 +2997,12 @@ impl<'a> Checker<'a> {
                         Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
                             let written = unmarked(self.text(*mark));
                             if let Some(value) = self.a_float(&written, &ty, *mark) {
+                                pieces.push(Printed::Value { value, ty });
+                            }
+                        }
+                        Some(ty @ Ty::Decimal { digits }) => {
+                            let written = unmarked(self.text(*mark));
+                            if let Some(value) = self.a_decimal(&written, digits, *mark) {
                                 pieces.push(Printed::Value { value, ty });
                             }
                         }

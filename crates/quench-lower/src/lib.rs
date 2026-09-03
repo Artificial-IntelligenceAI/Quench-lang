@@ -159,6 +159,7 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
         Ty::Bool => qir::Ty::Bool,
         Ty::Str => qir::Ty::Text,
         Ty::Exact => qir::Ty::Exact,
+        Ty::Decimal { .. } => qir::Ty::Decimal,
         Ty::F64 => qir::Ty::F64,
         Ty::F32 => qir::Ty::F32,
         Ty::F16 => qir::Ty::F16,
@@ -281,6 +282,7 @@ fn lower_body(
                                 Ty::Int { .. } => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
                                 Ty::Exact => qir::Host::PrintExact,
+                                Ty::Decimal { .. } => qir::Host::PrintDecimal,
                                 // All three arrive in the same register, so the
                                 // runtime is told which it is holding.
                                 Ty::F64 | Ty::F32 | Ty::F16 => {
@@ -582,6 +584,7 @@ fn elements(of: &Ty) -> (qir::Elements, i64) {
         Ty::Bool => (qir::Elements::Bool, 0),
         Ty::Str => (qir::Elements::Text, 0),
         Ty::Exact => (qir::Elements::Exact, 0),
+        Ty::Decimal { .. } => (qir::Elements::Decimal, 0),
         Ty::F64 | Ty::F32 | Ty::F16 => (qir::Elements::Float, 0),
         Ty::Arr { of, .. } => {
             let (kind, depth) = elements(of);
@@ -595,6 +598,22 @@ fn elements_of(value: &Value, w: &Where<'_>) -> (qir::Elements, i64) {
     match ty_of(value, w) {
         Some(Ty::Arr { of, .. }) => elements(&of),
         _ => unreachable!("refused by the checker: not an array"),
+    }
+}
+
+/// How many digits the decimal type of this value keeps.
+///
+/// Walked rather than looked up, because a written value carries its own digit count
+/// and an operation between two of them carries whatever they had: the checker has
+/// already refused every case where the two sides differ, so either side will do.
+fn digits_of(value: &Value, w: &Where<'_>) -> i64 {
+    match value {
+        Value::Decimal { digits, .. } => i64::from(*digits),
+        Value::Binary { lhs, .. } => digits_of(lhs, w),
+        other => match ty_of(other, w) {
+            Some(Ty::Decimal { digits }) => i64::from(digits),
+            _ => unreachable!("refused by the checker: not a decimal"),
+        },
     }
 }
 
@@ -631,6 +650,66 @@ fn exactly(b: &mut qir::Builder, op: OpKind, l: qir::Value, r: qir::Value) -> qi
     b.call_host(host, &[l, r])
 }
 
+/// Arithmetic on decimal numbers, which is a call for the same reason an `e`'s is —
+/// plus one of its own: rounding to seven digits or to sixteen is what the type *is*,
+/// and no machine Quench targets does it.
+///
+/// How many digits to keep rides along as an argument rather than in the type, because
+/// a `d32` and a `d64` are the same thing in a register and differ only in what each
+/// operation rounds to.
+fn decimally(
+    b: &mut qir::Builder,
+    op: OpKind,
+    l: qir::Value,
+    r: qir::Value,
+    digits: i64,
+) -> qir::Value {
+    let host = match op {
+        OpKind::Add => qir::Host::DecimalAdd,
+        OpKind::Sub => qir::Host::DecimalSub,
+        OpKind::Mul => qir::Host::DecimalMul,
+        OpKind::Div => qir::Host::DecimalDiv,
+        // Four answers rather than three: a not-a-number compares as none of less,
+        // equal or greater, and every comparison has to hear about it separately.
+        // `!==` is the one that says yes to it, and it says yes by not being `Eq`.
+        _ => {
+            let how = b.call_host(qir::Host::DecimalCompare, &[l, r]);
+            let against = b.const_i64(match op {
+                OpKind::Lt => -1,
+                OpKind::Gt => 1,
+                OpKind::Eq | OpKind::Ne => 0,
+                // Less-or-equal and greater-or-equal are the two that cannot be one
+                // comparison against one number, so they are one against two.
+                OpKind::Le | OpKind::Ge => 0,
+                _ => unreachable!("refused by the checker, or handled above"),
+            });
+            return match op {
+                OpKind::Lt | OpKind::Gt | OpKind::Eq => b.cmp(qir::CmpOp::Eq, how, against),
+                OpKind::Ne => b.cmp(qir::CmpOp::Ne, how, against),
+                OpKind::Le => {
+                    let one = b.const_i64(1);
+                    let above = b.cmp(qir::CmpOp::Eq, how, one);
+                    let unordered = b.const_i64(2);
+                    let strange = b.cmp(qir::CmpOp::Eq, how, unordered);
+                    let out = b.bin(qir::BinOp::Or, above, strange);
+                    b.not(out)
+                }
+                OpKind::Ge => {
+                    let less = b.const_i64(-1);
+                    let below = b.cmp(qir::CmpOp::Eq, how, less);
+                    let unordered = b.const_i64(2);
+                    let strange = b.cmp(qir::CmpOp::Eq, how, unordered);
+                    let out = b.bin(qir::BinOp::Or, below, strange);
+                    b.not(out)
+                }
+                _ => unreachable!("handled above"),
+            };
+        }
+    };
+    let digits = b.const_i64(digits);
+    b.call_host(host, &[l, r, digits])
+}
+
 /// A value of this type, standing for one that is never looked at.
 fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qir::Value {
     match ty {
@@ -642,7 +721,7 @@ fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qi
         qir::Ty::I64 | qir::Ty::Handle => b.const_i64(0),
         // Never looked at, and so never read. Making one would mean calling into the
         // runtime for a number the checker has already promised nobody wants.
-        qir::Ty::Exact => b.const_i64(0),
+        qir::Ty::Exact | qir::Ty::Decimal => b.const_i64(0),
         qir::Ty::F64 => b.const_float(0f64.to_bits(), qir::Ty::F64),
         qir::Ty::F32 => b.const_float(u64::from(0f32.to_bits()), qir::Ty::F32),
         qir::Ty::F16 => b.const_float(u64::from(0f32.to_bits()), qir::Ty::F16),
@@ -706,6 +785,14 @@ fn emit(
             let at = module.intern(written);
             let text = b.const_text(at);
             b.call_host(qir::Host::ExactRead, &[text])
+        }
+        // The same, and rounded to the digits its type keeps as it is read: `*0.1*`
+        // under a `d32` is a tenth to seven digits from the moment it exists.
+        Value::Decimal { written, digits } => {
+            let at = module.intern(written);
+            let text = b.const_text(at);
+            let digits = b.const_i64(i64::from(*digits));
+            b.call_host(qir::Host::DecimalRead, &[text, digits])
         }
         Value::Bool(yes) => b.const_bool(*yes),
         // Values do not change, so copying one is naming the same value again rather
@@ -826,6 +913,9 @@ fn emit(
             // a register and the two engines must not each have their own idea of it.
             if b.ty_of(l) == qir::Ty::Exact {
                 return exactly(b, *op, l, r);
+            }
+            if b.ty_of(l) == qir::Ty::Decimal {
+                return decimally(b, *op, l, r, digits_of(lhs, w));
             }
             // Two arrays hold the same things or they do not, which is a walk of both
             // and so a call. Not whether they are the same array — `share` is what makes

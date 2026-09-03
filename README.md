@@ -63,10 +63,10 @@ Both print the same thing, which is not a coincidence — it is
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
-| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; `i64`, `b64`, `e`, `str`, `bool` and `arr` all the way down |
+| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
-| **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division) and `Exact` rationals behind `e` |
-| **QIR** (`quench-qir`) | **Working** — six types, SSA with block parameters, verified before any backend sees it, and written down |
+| **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, and `Decimal` behind `d32` and `d64` |
+| **QIR** (`quench-qir`) | **Working** — nine types, SSA with block parameters, verified before any backend sees it, and written down |
 | **Interpreter** (`quench-interp`) | **Working** — QIR run directly, the engine that does the least |
 | **Dev JIT** (`quench-dev`) | **Working** — QIR lowered by Cranelift and run in process |
 | Hot JIT / AOT (LLVM, C++) | Not started |
@@ -196,6 +196,29 @@ Both print the same thing, which is not a coincidence — it is
   becoming nought. A narrow type finds its own overflow that way; only `u64` needs the
   operation itself to notice, and it is also the only one whose *comparison*, *division*
   and *printing* have to read the bits as unsigned.
+- **`d32` and `d64` round in the base they were written in.** Not more accurate than a
+  `b64` — differently wrong, in the direction a person reading the number expects:
+
+  ```quench
+  START {
+      var.immut.d64 ['a'] = [*0.1*];
+      var.immut.d64 ['b'] = [*0.2*];
+      var.immut.b64 ['x'] = [*0.1*];
+      var.immut.b64 ['y'] = [*0.2*];
+      print.stdout[str:*d64  * ['a' + 'b'] str:*  b64  * ['x' + 'y'] \n];
+  }
+  ```
+
+  ```text
+  d64  0.3  b64  0.30000000000000004
+  ```
+
+  A `d64` keeps sixteen significant digits and a `d32` seven, and both keep the cohort
+  they were given: `*2.50* + *1.00*` is `3.50` and not `3.5`, because a trailing zero in
+  decimal is a statement about precision. Dividing by nought is `infinity` rather than a
+  stop, which is the difference between a float and an `e`. `^` and `mod` are refused
+  for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
+  they cannot round differently.
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit
@@ -288,7 +311,7 @@ Both print the same thing, which is not a coincidence — it is
 | | |
 | --- | --- |
 | `b16` `b32` `b64` | IEEE 754 binary, all three built. `b64` is the widest — no `b128`, no `b256` |
-| `d32` `d64` | IEEE 754 decimal. Not built — and whether they are software or hardware is a *delivery* setting, because no program can see an encoding. See [notes/decimal-is-a-delivery-question.md](notes/decimal-is-a-delivery-question.md) |
+| `d32` `d64` | IEEE 754 decimal, both built — in software, and whether they *stay* software is a *delivery* setting rather than a semantic one, because no program can see an encoding. See [notes/decimal-is-a-delivery-question.md](notes/decimal-is-a-delivery-question.md) |
 | `u8` `u16` `u32` `u64` | unsigned integers, two's complement |
 | `i8` `i16` `i32` `i64` | signed integers, two's complement |
 | `e` | exact, unbounded **rationals**, for numbers too large to hold any other way. Never rounds — including on division. See [notes/e-is-big-and-exact.md](notes/e-is-big-and-exact.md) |
@@ -305,8 +328,9 @@ behaves — what overflow does, how division rounds — is a `QNL-Config.toml` s
 those land in the semantic pile, so each one multiplies what the oracle has to prove.
 See [Settings](#settings).
 
-Only two of these allocate: `str`, and `e` because it is unbounded. Capping binary
-floats at `b64` is what keeps the rest of them out of the heap.
+Three of these allocate: `str`, `e` because it is unbounded, and `d32`/`d64` because a
+coefficient and an exponent do not fit in a register on any machine Quench targets.
+Capping *binary* floats at `b64` is what keeps those out of the heap.
 
 ## Errors
 

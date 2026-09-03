@@ -21,7 +21,7 @@
 //! second is permanent — a constant array or a written piece of text is in the artefact
 //! and outlives every collection.
 
-use quench_num::Exact;
+use quench_num::{Decimal, Exact};
 use quench_qir::{self as qir, Elements};
 
 /// Which space a handle is an index into, packed into the top byte of a root.
@@ -38,6 +38,7 @@ pub fn rooted(ty: qir::Ty, handle: i64) -> i64 {
         qir::Ty::Handle => 1,
         qir::Ty::Text => 2,
         qir::Ty::Exact => 3,
+        qir::Ty::Decimal => 4,
         _ => 0,
     };
     (space << SPACE_SHIFT) | (handle & ((1 << SPACE_SHIFT) - 1))
@@ -50,6 +51,7 @@ pub fn unrooted(packed: i64) -> Option<(qir::Ty, i64)> {
         1 => (qir::Ty::Handle, handle),
         2 => (qir::Ty::Text, handle),
         3 => (qir::Ty::Exact, handle),
+        4 => (qir::Ty::Decimal, handle),
         _ => return None,
     })
 }
@@ -137,6 +139,7 @@ pub struct Heap {
     arrays: Space<Object>,
     texts: Space<String>,
     exacts: Space<Exact>,
+    decimals: Space<Decimal>,
     /// How many things have been made since the last collection.
     since: usize,
     /// How many to allow before collecting again. Grows with the live set, so a program
@@ -166,6 +169,7 @@ impl Heap {
             arrays: Space::new(tables),
             texts: Space::new(text.to_vec()),
             exacts: Space::new(Vec::new()),
+            decimals: Space::new(Vec::new()),
             since: 0,
             allow: FIRST,
             collections: 0,
@@ -193,6 +197,15 @@ impl Heap {
         self.exacts.put(value)
     }
 
+    pub fn decimal(&mut self, value: Decimal) -> i64 {
+        self.since += 1;
+        self.decimals.put(value)
+    }
+
+    pub fn decimally(&self, at: i64) -> &Decimal {
+        self.decimals.get(at)
+    }
+
     pub fn at(&self, handle: i64) -> &Object {
         self.arrays.get(handle)
     }
@@ -216,7 +229,7 @@ impl Heap {
 
     /// How many things are alive in each space, for a test to look at.
     pub fn live(&self) -> (usize, usize, usize) {
-        (self.arrays.live(), self.texts.live(), self.exacts.live())
+        (self.arrays.live(), self.texts.live(), self.exacts.live() + self.decimals.live())
     }
 
     /// Mark from these roots, then let go of everything else.
@@ -227,6 +240,7 @@ impl Heap {
         let mut arrays = vec![false; self.arrays.held.len()];
         let mut texts = vec![false; self.texts.held.len()];
         let mut exacts = vec![false; self.exacts.held.len()];
+        let mut decimals = vec![false; self.decimals.held.len()];
 
         // What the program was written with is always reachable: it is in the artefact.
         for slot in arrays.iter_mut().take(self.arrays.written) {
@@ -254,6 +268,11 @@ impl Heap {
                 }
                 qir::Ty::Exact => {
                     if let Some(seen) = exacts.get_mut(*value as usize) {
+                        *seen = true;
+                    }
+                }
+                qir::Ty::Decimal => {
+                    if let Some(seen) = decimals.get_mut(*value as usize) {
                         *seen = true;
                     }
                 }
@@ -292,6 +311,11 @@ impl Heap {
                             *seen = true;
                         }
                     }
+                    Elements::Decimal => {
+                        if let Some(seen) = decimals.get_mut(slot as usize) {
+                            *seen = true;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -300,6 +324,7 @@ impl Heap {
         self.arrays.sweep(&arrays);
         self.texts.sweep(&texts);
         self.exacts.sweep(&exacts);
+        self.decimals.sweep(&decimals);
 
         // Twice what survived, so a program that genuinely holds a lot stops collecting
         // on every allocation and one that holds nothing keeps its heap small.

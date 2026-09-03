@@ -75,12 +75,20 @@ pub fn settings_for(seed: u64) -> Settings {
 ///
 /// `helper`, when given, is something the program may call — which is how a generated
 /// program exercises calls at all without being able to recurse.
-pub fn program(seed: u64, helper: Option<FuncId>) -> Function {
-    program_under(seed, helper, settings_for(seed))
+pub fn program(module: &mut Module, seed: u64, helper: Option<FuncId>) -> Function {
+    program_under(module, seed, helper, settings_for(seed))
 }
 
 /// The same, under settings chosen by the caller.
-pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> Function {
+///
+/// The module comes in because a decimal is read from the text it was written with, and
+/// that text lives in the module's table.
+pub fn program_under(
+    module: &mut Module,
+    seed: u64,
+    helper: Option<FuncId>,
+    settings: Settings,
+) -> Function {
     let mut rng = Seeded::from(seed);
     let mut b = Builder::new(name_of(seed), &[], Ty::I64);
 
@@ -120,9 +128,29 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
         b.const_float(carrier(-1.0), float_ty),
     ];
 
+    // One decimal format per program, for the same reason there is one binary width:
+    // a seed sweeps both rather than mixing them in a way no source could.
+    let keep = if rng.upto(2) == 0 { 7i64 } else { 16 };
+    let digits = b.const_i64(keep);
+    let written = |b: &mut Builder, module: &mut Module, text: &str| {
+        let at = module.intern(text);
+        let piece = b.const_text(at);
+        let held = b.const_i64(keep);
+        b.call_host(Host::DecimalRead, &[piece, held])
+    };
+    // Written values rather than made ones, because reading is what a source does and
+    // the cohort a literal arrives with is part of what the arithmetic has to keep.
+    let mut decimals: Vec<Value> = vec![
+        written(&mut b, module, "0.1"),
+        written(&mut b, module, "2.50"),
+        written(&mut b, module, "0"),
+        written(&mut b, module, "-1"),
+        written(&mut b, module, &format!("{}", rng.upto(1000) as i64 - 500)),
+    ];
+
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(11) {
+        match rng.upto(13) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -249,6 +277,80 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                     flags.push(b.fcmp(how, lhs, rhs));
                 }
             }
+            10 => {
+                // Every decimal answer is rounded to the format's digits, so this
+                // checks the plumbing rather than the arithmetic: both engines call the
+                // same code to work one out, and could still differ in how a handle is
+                // kept alive across the call or how a comparison is turned into a flag.
+                let (lhs, rhs) = (rng.pick(&decimals), rng.pick(&decimals));
+                let host = match rng.upto(4) {
+                    0 => Host::DecimalAdd,
+                    1 => Host::DecimalSub,
+                    2 => Host::DecimalMul,
+                    // Nought is left in on purpose: a decimal division by nought is
+                    // infinity rather than a trap, and that is the difference from `e`.
+                    _ => Host::DecimalDiv,
+                };
+                decimals.push(b.call_host(host, &[lhs, rhs, digits]));
+
+                // Sometimes a literal, so a program keeps meeting values it has not
+                // worked out -- and so the read itself is exercised more than five
+                // times per program.
+                if rng.upto(4) == 0 {
+                    let text = match rng.upto(5) {
+                        0 => "1E+90".to_string(),
+                        1 => "1E-90".to_string(),
+                        2 => "0.000".to_string(),
+                        3 => "9999999999999999".to_string(),
+                        _ => format!("{}.{}", rng.upto(1000), rng.upto(1000)),
+                    };
+                    let made = written(&mut b, module, &text);
+                    decimals.push(made);
+                }
+
+                // And a comparison, so a decimal can reach the answer: a program hands
+                // back an `i64`, and a flag is how the two meet. These are the shapes
+                // the lowering writes, including the two that a not-a-number makes
+                // awkward -- `<==` and `>==` cannot be one comparison against one
+                // number, because unordered is a fourth answer.
+                if rng.upto(3) == 0 {
+                    let how = b.call_host(Host::DecimalCompare, &[lhs, rhs]);
+                    let unordered = b.const_i64(2);
+                    let flag = match rng.upto(6) {
+                        0 => {
+                            let zero = b.const_i64(0);
+                            b.cmp(CmpOp::Eq, how, zero)
+                        }
+                        1 => {
+                            let zero = b.const_i64(0);
+                            b.cmp(CmpOp::Ne, how, zero)
+                        }
+                        2 => {
+                            let less = b.const_i64(-1);
+                            b.cmp(CmpOp::Eq, how, less)
+                        }
+                        3 => {
+                            let more = b.const_i64(1);
+                            b.cmp(CmpOp::Eq, how, more)
+                        }
+                        4 => {
+                            let more = b.const_i64(1);
+                            let above = b.cmp(CmpOp::Eq, how, more);
+                            let strange = b.cmp(CmpOp::Eq, how, unordered);
+                            let out = b.bin(BinOp::Or, above, strange);
+                            b.not(out)
+                        }
+                        _ => {
+                            let less = b.const_i64(-1);
+                            let below = b.cmp(CmpOp::Eq, how, less);
+                            let strange = b.cmp(CmpOp::Eq, how, unordered);
+                            let out = b.bin(BinOp::Or, below, strange);
+                            b.not(out)
+                        }
+                    };
+                    flags.push(flag);
+                }
+            }
             7 => {
                 let Some(&flag) = flags.last() else { continue };
                 if flags.len() < 2 || rng.upto(2) == 0 {
@@ -368,7 +470,8 @@ pub fn batch(seeds: &[u64]) -> Module {
     module.add(h.finish());
 
     for &seed in seeds {
-        module.add(program(seed, Some(helper_id)));
+        let written = program(&mut module, seed, Some(helper_id));
+        module.add(written);
     }
 
     // A module wants an entry even when the oracle calls each program by name.
