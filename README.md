@@ -288,7 +288,7 @@ Both print the same thing, which is not a coincidence — it is
 | | |
 | --- | --- |
 | `b16` `b32` `b64` | IEEE 754 binary, all three built. `b64` is the widest — no `b128`, no `b256` |
-| `d32` `d64` | IEEE 754 decimal |
+| `d32` `d64` | IEEE 754 decimal. Not built — and whether they are software or hardware is a *delivery* setting, because no program can see an encoding. See [notes/decimal-is-a-delivery-question.md](notes/decimal-is-a-delivery-question.md) |
 | `u8` `u16` `u32` `u64` | unsigned integers, two's complement |
 | `i8` `i16` `i32` `i64` | signed integers, two's complement |
 | `e` | exact, unbounded **rationals**, for numbers too large to hold any other way. Never rounds — including on division. See [notes/e-is-big-and-exact.md](notes/e-is-big-and-exact.md) |
