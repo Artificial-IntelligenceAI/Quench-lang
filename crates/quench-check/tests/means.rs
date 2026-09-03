@@ -40,13 +40,22 @@ START {
 }
 
 #[test]
-fn a_type_that_is_not_built_does_not_hide_a_name_declared_twice() {
-    // Two separate mistakes on one line, and both get said. Reporting only the type
-    // would leave the reader to discover the collision on their own after fixing it.
-    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.text ['x'] = [*1*]; }";
+fn a_type_that_is_not_a_type_does_not_hide_the_rest_of_the_file() {
+    // A declaration whose type is a typo is abandoned -- there is nothing to declare
+    // it as -- but everything after it is still checked. Stopping there would leave a
+    // reader fixing one mistake at a time and running again to find the next.
+    let source = "\
+START {
+    var.immut.b17 ['x'] = [*1*];
+    var.immut.str ['y'] = [*a*];
+    var.immut.i64 ['y'] = [*2*];
+    print.stdout['nope'];
+}
+";
     let found = codes(source);
-    assert!(found.contains(&"E0405".to_string()), "{}", errors(source));
+    assert!(found.contains(&"E0402".to_string()), "{}", errors(source));
     assert!(found.contains(&"E0201".to_string()), "{}", errors(source));
+    assert!(found.contains(&"E0413".to_string()), "{}", errors(source));
 }
 
 #[test]
@@ -87,16 +96,21 @@ fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
 }
 
 #[test]
-fn a_type_that_is_meant_to_exist_and_a_type_that_is_not_are_different_errors() {
-    // `text` is a type Quench means to have. `b17` is a typo. A reader deserves to
-    // know which of those happened.
-    let not_built = errors("START { var.immut.text ['x'] = [*1*]; }");
-    assert!(not_built.contains("`text` is not built yet"), "{not_built}");
-    assert!(not_built.contains("Error code: E0405"), "{not_built}");
-
-    let nonsense = errors("START { var.immut.b17 ['x'] = [*1*]; }");
-    assert!(nonsense.contains("`b17` is not a type"), "{nonsense}");
-    assert!(nonsense.contains("Error code: E0402"), "{nonsense}");
+fn a_word_that_is_not_a_type_says_so_wherever_it_is_written() {
+    // There used to be a second answer here -- "not built yet", for a type Quench meant
+    // to have and did not. Every type on that list is built, so the only thing left to
+    // say is that a word is not one, and it is said the same way in all three places a
+    // type can be written.
+    for source in [
+        "START { var.immut.b17 ['x'] = [*1*]; }",
+        "START { print.stdout[b17:*1*]; }",
+        "START { loop.temp.range.b17 ['i'] = [*1*, *2*] { } }",
+        "fn.file.b17 ['f'] [] { give [*1*]; } START { }",
+    ] {
+        let rendered = errors(source);
+        assert!(rendered.contains("`b17` is not a type"), "{source}\n{rendered}");
+        assert!(rendered.contains("Error code: E0402"), "{source}\n{rendered}");
+    }
 }
 
 #[test]
@@ -885,4 +899,48 @@ fn count_counts_any_array_and_folds_where_it_can() {
         quench_check::Value::Number { value: 6, bits: 64, signed: true },
         "a fixed shape is known here"
     );
+}
+
+#[test]
+fn a_name_holds_whatever_a_line_holds() {
+    // The marks do the delimiting, so there is no identifier grammar to break. Emoji,
+    // scripts that are not Latin, spaces, and the mark itself escaped.
+    let source = "\
+START {
+    var.immut.str ['🔥'] = [*ไฟ*];
+    var.immut.i64 ['ผลลัพธ์'] = [*42*];
+    var.immut.str ['a name with spaces'] = [*works*];
+    var.immut.str ['it\\'s'] = [*escaped*];
+    print.stdout['🔥' 'ผลลัพธ์' 'a name with spaces' 'it\\'s'];
+}
+";
+    assert!(codes(source).is_empty(), "{}", errors(source));
+}
+
+#[test]
+fn a_function_is_named_with_what_a_call_can_be_written_with() {
+    // A function's name is the only one written twice: between marks where it is
+    // declared, and as a bare word at every call. One that cannot be a bare word
+    // declares a function nothing can reach, so it is refused where it is declared.
+    for (name, expected) in [
+        ("'🔥'", "`🔥` cannot be part of a call"),
+        ("'two words'", "` ` cannot be part of a call"),
+        ("'2fast'", "`2` cannot be part of a call"),
+        ("'it\\'s'", "`'` cannot be part of a call"),
+        ("''", "there is no name here"),
+    ] {
+        let source = format!("fn.file.i64 [{name}] [immut.i64 'n'] {{ give ['n']; }} START {{ }}");
+        let rendered = errors(&source);
+        assert!(rendered.contains("cannot be written where it would be called"), "{rendered}");
+        assert!(rendered.contains("Error code: E0490"), "{rendered}");
+        assert!(rendered.contains(expected), "{name}\n{rendered}");
+    }
+
+    // Letters are Unicode's letters, not ASCII's, so this is a word and this is called.
+    let fine = "\
+fn.file.i64 ['ทวีคูณ'] [immut.i64 'n'] { give ['n' x *2*]; }
+fn.file.i64 ['_ok2'] [immut.i64 'n'] { give ['n']; }
+START { var.immut.i64 ['a'] = [ทวีคูณ[*21*]]; print.stdout['a']; }
+";
+    assert!(codes(fine).is_empty(), "{}", errors(fine));
 }

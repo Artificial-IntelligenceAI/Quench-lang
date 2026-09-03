@@ -95,8 +95,9 @@ fn a_file_with_no_start_is_not_a_program() {
 #[test]
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
-        // A type Quench means to have and does not have yet.
-        ("START { print.stdout[text:*1*]; }", "`text` is not built yet"),
+        // A word that is not a type. There is no longer a second answer here -- every
+        // type Quench meant to have is built, so "not built yet" has nothing to say.
+        ("START { print.stdout[text:*1*]; }", "`text` is not a type"),
         // A number is not text, and nothing converts on its own.
         ("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }", "text is made of text"),
     ];

@@ -95,6 +95,13 @@ Both print the same thing, which is not a coincidence — it is
   chain supplies a type, the value carries it — `print.stdout[str:*Hello* 'name' \n];` —
   and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
+- **A name holds whatever a line holds**, because the marks do the delimiting and
+  there is no identifier grammar to break: `'ผลลัพธ์'`, `'🔥'`, `'a name with spaces'`
+  and `'it\'s'` are all names. **A function's is the exception**, and only because it
+  is the one name written *twice* — once between marks where it is declared, and once
+  at every call, where it is a bare word. So a function is named with letters, digits
+  and `_`, letters being Unicode's idea of them: `'ทวีคูณ'` is a fine function name
+  and `'🔥'` is refused where it is declared rather than where it is first called.
 - **Precedence stops where mathematics stopped.** `x` binds tighter than `+`, and
   comparison looser than both, because that was settled before computers existed.
   Everything programming invented — `mod` infix, `and` against `or`, bitwise — has no

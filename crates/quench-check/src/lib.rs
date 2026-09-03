@@ -161,15 +161,6 @@ impl Ty {
     }
 }
 
-/// Every type Quench means to have, whether or not it is built.
-///
-/// Kept so that `b16` gets "not built yet" and `b17` gets "there is no such type",
-/// which are different things and a reader deserves to know which happened.
-const INTENDED: [&str; 17] = [
-    "b16", "b32", "b64", "d32", "d64", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "e",
-    "bool", "str", "text",
-];
-
 /// Who can name a thing. Required on everything at the top of a file, because a
 /// missing one would be a fourth answer given by silence.
 ///
@@ -333,6 +324,26 @@ fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
         let high = if bits >= 64 { -1i64 } else { (1i64 << bits) - 1 };
         (0, high)
     }
+}
+
+/// Whether a name can be written as a bare word, and the character that stops it.
+///
+/// `None` means it can. `Some(Some(c))` names the character in the way; `Some(None)` is
+/// a name with no characters at all.
+///
+/// Letters are Unicode's idea of letters, not ASCII's: `'ทวีคูณ'` is a word and is
+/// called the way any other function is. An emoji is not a letter in any language, so
+/// it is not one here either.
+fn not_a_word(name: &str) -> Option<Option<char>> {
+    let mut characters = name.chars();
+    match characters.next() {
+        // Nothing at all, which is a name that is wrong without any character being
+        // the wrong one.
+        None => return Some(None),
+        Some(first) if !(first.is_alphabetic() || first == '_') => return Some(Some(first)),
+        Some(_) => {}
+    }
+    characters.find(|&c| !(c.is_alphanumeric() || c == '_')).map(Some)
 }
 
 /// The name of that number type, for saying which one it was.
@@ -753,6 +764,27 @@ impl<'a> Checker<'a> {
             );
             return;
         }
+        // Every other name in Quench is only ever written between marks, so it can
+        // hold anything a line can. A function's is the one written twice -- once here
+        // between marks, and once at every call, where it is a bare word. A name that
+        // cannot be a bare word declares a function nothing can reach, and the honest
+        // place to say so is here rather than at the first call that fails.
+        if let Some(wrong) = not_a_word(&name) {
+            // An empty name has no character to point at, and "` ` cannot be part of a
+            // call" would be pointing at a space that is not there.
+            let said = match wrong {
+                Some(c) => format!("`{c}` cannot be part of a call"),
+                None => "there is no name here".to_string(),
+            };
+            self.errors.push(
+                Diagnostic::new("E0490", format!("`'{name}'` cannot be written where it would be called."))
+                    .primary(func.name, said)
+                    .rule("a call is a bare word, so a function's name is one: a letter or `_` to start, then letters, digits and `_`")
+                    .tip("every other name is only ever written between marks, which is why `'a name with spaces'` is a fine variable and not a fine function.")
+                    .fix("name it with letters, digits and `_`"),
+            );
+            return;
+        }
         if name == "count" {
             self.errors.push(
                 Diagnostic::new("E0462", "`count` is already something.")
@@ -1083,15 +1115,7 @@ impl<'a> Checker<'a> {
         if let Some(ty) = Ty::simple(word) {
             return Some(ty);
         }
-        if INTENDED.contains(&word) {
-            self.errors.push(
-                Diagnostic::new("E0405", format!("`{word}` is not built yet."))
-                    .primary(link, "here")
-                    .rule("Quench means to have this type, and does not have it today")
-                    .tip("`i64`, `str` and `bool` are the ones that work all the way down.")
-                    .fix("one of those for now"),
-            );
-        } else {
+        {
             self.errors.push(
                 Diagnostic::new("E0402", format!("`{word}` is not a type."))
                     .primary(link, "here")
@@ -1272,7 +1296,7 @@ impl<'a> Checker<'a> {
                 }
                 "arr" if ty_span.is_none() => arrays.push(*link),
                 word if ty_span.is_none() => {
-                    if !INTENDED.contains(&word) {
+                    if Ty::simple(word).is_none() {
                         self.errors.push(
                             Diagnostic::new("E0402", format!("`{word}` is not a type."))
                                 .primary(*link, "here")
@@ -1324,11 +1348,11 @@ impl<'a> Checker<'a> {
         let mut ty = Ty::simple(word);
         if ty.is_none() {
             self.errors.push(
-                Diagnostic::new("E0405", format!("`{word}` is not built yet."))
+                Diagnostic::new("E0402", format!("`{word}` is not a type."))
                     .primary(ty_span, "here")
-                    .rule("Quench means to have this type, and does not have it today")
-                    .tip("`i64`, `str` and `bool` are the ones that work all the way down.")
-                    .fix("one of those for now"),
+                    .rule("a chain says the type of what it is describing")
+                    .tip("the types are the numbers, `e`, `bool` and `str`.")
+                    .fix("check the spelling"),
             );
         }
 
@@ -2733,7 +2757,7 @@ impl<'a> Checker<'a> {
                 },
                 "range" | "while" => {}
                 word if counting && ty_span.is_none() => {
-                    if !INTENDED.contains(&word) {
+                    if Ty::simple(word).is_none() {
                         self.errors.push(
                             Diagnostic::new("E0402", format!("`{word}` is not a type."))
                                 .primary(*link, "here")
@@ -3048,10 +3072,10 @@ impl<'a> Checker<'a> {
                             }
                         }
                         None => self.errors.push(
-                            Diagnostic::new("E0405", format!("`{word}` is not built yet."))
+                            Diagnostic::new("E0402", format!("`{word}` is not a type."))
                                 .primary(*span, "here")
-                                .rule("Quench means to have this type, and does not have it today")
-                                .fix("`i64` or `str` for now"),
+                                .rule("a value that says its own type says one of the types there are")
+                                .fix("check the spelling"),
                         ),
                     }
                 }
