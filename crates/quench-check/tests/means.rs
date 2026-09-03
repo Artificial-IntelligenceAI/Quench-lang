@@ -717,3 +717,35 @@ fn the_logical_operators_have_no_agreed_order() {
     // With brackets, it is one reading and it checks out.
     assert!(check("START { var.immut.i64 ['n'] = [*1*]; var.immut.bool ['b'] = [('n' > *0*) and ('n' < *9*)]; }").ok());
 }
+
+#[test]
+fn two_arrays_are_two_questions() {
+    // Comparing them could mean *the same array* or *the same contents*, and those
+    // come apart the moment you assign one to another -- which shares rather than copies.
+    let source = "START {
+    var.immut.arr.i64 (2) ['a'] = [[*1* *2*]];
+    var.immut.arr.i64 (2) ['b'] = [[*1* *2*]];
+    var.immut.bool ['s'] = ['a' == 'b'];
+}";
+    let rendered = errors(source);
+    assert!(rendered.contains("`==` asks one question, and two arrays are two questions."), "{rendered}");
+    assert!(rendered.contains("Error code: E0477"), "{rendered}");
+}
+
+#[test]
+fn text_and_flags_can_be_compared_and_not_ordered() {
+    assert!(check("START { var.immut.str ['a'] = [*x*]; var.immut.bool ['s'] = ['a' == 'a']; }").ok());
+    assert!(check("START { var.immut.bool ['a'] = [*true*]; var.immut.bool ['s'] = ['a' != 'a']; }").ok());
+    // Which of two is *larger* still only means something for numbers.
+    assert_eq!(
+        codes("START { var.immut.str ['a'] = [*x*]; var.immut.bool ['s'] = ['a' < 'a']; }"),
+        ["E0420"]
+    );
+}
+
+#[test]
+fn an_array_can_be_printed() {
+    // It used to reach an `unreachable!` in the lowering, which is the worst answer a
+    // language with this one's selling point could give.
+    assert!(check("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs' \\n]; }").ok());
+}

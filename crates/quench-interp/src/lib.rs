@@ -303,6 +303,11 @@ fn evaluate(
                 qir::Host::ArrayLen => {
                     return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
                 }
+                qir::Host::PrintArray => {
+                    let shown =
+                        qir::show_array(&heap[slots[args[1].0 as usize] as usize]);
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
+                }
                 qir::Host::ExactRead => {
                     let at = slots[args[0].0 as usize] as usize;
                     let text = &module.text[at];
@@ -343,6 +348,17 @@ fn evaluate(
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);
                     let wrapping = *host == qir::Host::PowI64;
                     return quench_num::power_i64(base, exponent, wrapping).map_err(no_power);
+                }
+                qir::Host::TextCompare => {
+                    let (a, b) = (
+                        &module.text[slots[args[0].0 as usize] as usize],
+                        &module.text[slots[args[1].0 as usize] as usize],
+                    );
+                    return Ok(match a.cmp(b) {
+                        std::cmp::Ordering::Less => -1,
+                        std::cmp::Ordering::Equal => 0,
+                        std::cmp::Ordering::Greater => 1,
+                    });
                 }
                 qir::Host::ExactCompare => {
                     let (a, b) = (

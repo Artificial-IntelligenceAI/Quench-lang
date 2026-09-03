@@ -235,9 +235,7 @@ fn lower_body(
                                 Ty::I64 => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
                                 Ty::Exact => qir::Host::PrintExact,
-                                Ty::Arr { .. } => {
-                                    unreachable!("refused by the checker: an array is not printed")
-                                }
+                                Ty::Arr { .. } => qir::Host::PrintArray,
                             };
                             b.print(host, *to, value);
                         }
@@ -646,6 +644,18 @@ fn emit(
             // a register and the two engines must not each have their own idea of it.
             if b.ty_of(l) == qir::Ty::Exact {
                 return exactly(b, *op, l, r);
+            }
+            // Text is compared by what it holds rather than by which piece it is, which
+            // is also a call: an index is not the thing it points at.
+            if b.ty_of(l) == qir::Ty::Text {
+                let order = b.call_host(qir::Host::TextCompare, &[l, r]);
+                let zero = b.const_i64(0);
+                let how = match op {
+                    OpKind::Eq => qir::CmpOp::Eq,
+                    OpKind::Ne => qir::CmpOp::Ne,
+                    _ => unreachable!("refused by the checker: text has no order yet"),
+                };
+                return b.cmp(how, order, zero);
             }
 
             let floored = w.settings.division == Division::Floored;

@@ -138,7 +138,11 @@ Both print the same thing, which is not a coincidence — it is
   shape is written **without marks** — it is part of the type, and the `64` in
   `i64` wears none either. Counted from one, because an inclusive loop with an
   unsigned counter walks `[1, count]` exactly while `[0, count - 1]` wraps on an
-  empty one.
+  empty one. `print.stdout['xs']` shows everything it holds, flat however many
+  dimensions it has, because flat is how the elements were written. **Assignment
+  shares an array rather than copying it** — `['b'] = ['a']` makes two names for one
+  array — which is why `==` on two of them is refused: *the same array* and *the same
+  contents* are two questions and Quench will not pick one for you.
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

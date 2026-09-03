@@ -963,3 +963,45 @@ START {
         "the guard is not a guard when both sides are always asked",
     );
 }
+
+#[test]
+fn an_array_prints_everything_it_holds() {
+    // Flat, however many dimensions it has, because flat is how the elements are
+    // written: `[*1* *2* *3* *4* *5* *6*]` is a `(2 3)`, and nesting the output would
+    // show a shape the input deliberately does not.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.i64 (3) ['xs'] = [[*10* *20* *30*]];
+    var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
+    print.stdout['xs' str:* * 'm'];
+}
+"),
+        "[10 20 30] [1 2 3 4 5 6]",
+    );
+}
+
+#[test]
+fn everything_that_can_be_the_same_can_be_compared() {
+    // `==` used to work on `i64` and `e` and reach the IR verifier on everything else.
+    assert_eq!(
+        said("\
+START {
+    var.immut.str ['a'] = [*hello*];
+    var.immut.str ['b'] = [*hello*];
+    var.immut.str ['c'] = [*world*];
+    var.immut.bool ['t'] = [*true*];
+    var.immut.e ['half'] = [*1/2*];
+    var.immut.e ['point'] = [*0.5*];
+
+    var.immut.bool ['text'] = ['a' == 'b'];
+    var.immut.bool ['other'] = ['a' != 'c'];
+    var.immut.bool ['flags'] = ['t' == 'text'];
+    var.immut.bool ['exact'] = ['half' == 'point'];
+    print.stdout['text' str:* * 'other' str:* * 'flags' str:* * 'exact'];
+}
+"),
+        "true true true true",
+        "and a half written two ways is one number",
+    );
+}

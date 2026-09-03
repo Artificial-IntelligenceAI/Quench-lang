@@ -195,13 +195,28 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                         }
                     }
                     Inst::Cmp { op, lhs, rhs } => {
+                        // Two of the same thing, and a thing that fits in a register.
+                        // Text and exact numbers are compared by a host call instead,
+                        // because what they hold is not what their value is.
                         for v in [lhs, rhs] {
-                            if known(*v, &mut say) && func.ty_of(*v) != Ty::I64 {
+                            if known(*v, &mut say)
+                                && !matches!(func.ty_of(*v), Ty::I64 | Ty::Bool)
+                            {
                                 say(format!(
-                                    "block {i}: {op:?} wants i64 and {v:?} is {}",
+                                    "block {i}: {op:?} wants i64 or bool and {v:?} is {}",
                                     func.ty_of(*v).name()
                                 ));
                             }
+                        }
+                        if known(*lhs, &mut say)
+                            && known(*rhs, &mut say)
+                            && func.ty_of(*lhs) != func.ty_of(*rhs)
+                        {
+                            say(format!(
+                                "block {i}: {op:?} compares {} against {}",
+                                func.ty_of(*lhs).name(),
+                                func.ty_of(*rhs).name()
+                            ));
                         }
                     }
                     Inst::Not(v) => {

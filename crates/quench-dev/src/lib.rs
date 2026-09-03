@@ -471,6 +471,19 @@ extern "C" fn pow_i64_trapping(rt: *mut Runtime, base: i64, exponent: i64) -> i6
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn text_compare(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let of = |index: i64| -> &[u8] {
+        let piece = unsafe { &*(*rt).pieces.add(index as usize) };
+        unsafe { std::slice::from_raw_parts(piece.at, piece.len) }
+    };
+    match of(a).cmp(of(b)) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
     EXACTS.with(|e| {
         let e = e.borrow();
@@ -539,6 +552,13 @@ extern "C" fn array_get(rt: *mut Runtime, handle: i64, at: i64) -> i64 {
 /// Called by compiled code. Not called by anything else.
 extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
     HEAP.with(|heap| heap.borrow()[handle as usize].len() as i64)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn print_array(_rt: *mut Runtime, stream: i64, handle: i64) -> i64 {
+    let shown = HEAP.with(|heap| qir::show_array(&heap.borrow()[handle as usize]));
+    write_out(stream, shown.as_bytes());
+    0
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -642,6 +662,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_array_set", array_set as *const u8);
     builder.symbol("quench_array_get", array_get as *const u8);
     builder.symbol("quench_array_len", array_len as *const u8);
+    builder.symbol("quench_print_array", print_array as *const u8);
     builder.symbol("quench_exact_read", exact_read as *const u8);
     builder.symbol("quench_exact_add", exact_add as *const u8);
     builder.symbol("quench_exact_sub", exact_sub as *const u8);
@@ -649,6 +670,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_div", exact_div as *const u8);
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
+    builder.symbol("quench_text_compare", text_compare as *const u8);
     builder.symbol("quench_exact_pow", exact_pow as *const u8);
     builder.symbol("quench_pow_i64", pow_i64 as *const u8);
     builder.symbol("quench_pow_i64_trapping", pow_i64_trapping as *const u8);
@@ -691,6 +713,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ArraySet, "quench_array_set"),
         (qir::Host::ArrayGet, "quench_array_get"),
         (qir::Host::ArrayLen, "quench_array_len"),
+        (qir::Host::PrintArray, "quench_print_array"),
         (qir::Host::ExactRead, "quench_exact_read"),
         (qir::Host::ExactAdd, "quench_exact_add"),
         (qir::Host::ExactSub, "quench_exact_sub"),
@@ -698,6 +721,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactDiv, "quench_exact_div"),
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
+        (qir::Host::TextCompare, "quench_text_compare"),
         (qir::Host::ExactPow, "quench_exact_pow"),
         (qir::Host::PowI64, "quench_pow_i64"),
         (qir::Host::PowI64Trapping, "quench_pow_i64_trapping"),

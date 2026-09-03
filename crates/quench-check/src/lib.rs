@@ -1641,6 +1641,21 @@ impl<'a> Checker<'a> {
                 // Two things are the same or they are not, whatever they are. Which of
                 // two is *larger* only means something for numbers.
                 let same_or_not = matches!(op, OpKind::Eq | OpKind::Ne);
+
+                // Two arrays are two allocations, so there are two questions here and
+                // Quench will not pick one for you: are these the same array, or do
+                // they hold the same things? Neither is built.
+                if same_or_not && l == r && matches!(l, Ty::Arr { .. }) {
+                    self.errors.push(
+                        Diagnostic::new("E0477", format!("`{}` asks one question, and two arrays are two questions.", op.written()))
+                            .primary(span, format!("two `{}`", l.name()))
+                            .rule("comparing arrays could mean *the same array* or *the same contents*, and those are different questions with different answers")
+                            .tip("assignment shares an array rather than copying it, so `['b'] = ['a']` makes two names for one array and the two questions come apart at once.")
+                            .fix("compare their elements, or ask for whichever of the two was meant"),
+                    );
+                    return None;
+                }
+
                 if same_or_not && l == r {
                     return Some(Ty::Bool);
                 }

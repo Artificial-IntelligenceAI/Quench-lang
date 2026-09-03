@@ -289,6 +289,13 @@ pub enum Host {
     ArrayGet,
     /// How many elements it has.
     ArrayLen,
+    /// `(stream, handle)` — every element it holds, in the order they are laid out,
+    /// between brackets and separated by spaces.
+    ///
+    /// Flat, however many dimensions the array has, because that is how the elements
+    /// are written in the first place: `[*1* *2* *3* *4* *5* *6*]` is a `(2 3)`, and
+    /// nesting the output would show a shape the input deliberately does not.
+    PrintArray,
 
     /// `(text)` — read an exact number from a piece of text the program was written
     /// with. `12`, `-3/4` and `0.1` are all exact, and the last is the point of the
@@ -303,6 +310,10 @@ pub enum Host {
     /// `(a, b)` — `-1`, `0` or `1`. One host rather than six, because a comparison of
     /// exact numbers is a comparison of the answer against zero and always was.
     ExactCompare,
+    /// `(a, b)` — `-1`, `0` or `1`, comparing what two pieces of text hold rather than
+    /// which pieces they are. Interning would make the indices agree today, and would
+    /// stop doing so the moment text can be built while a program runs.
+    TextCompare,
     /// `(stream, exact)` — a whole number wears no denominator.
     PrintExact,
     /// `(base, exponent)` — exactly. A negative exponent is fine and gives a ratio.
@@ -326,12 +337,14 @@ impl Host {
             Host::ArraySet => "array-set",
             Host::ArrayGet => "array-get",
             Host::ArrayLen => "array-len",
+            Host::PrintArray => "print-array",
             Host::ExactRead => "exact-read",
             Host::ExactAdd => "exact-add",
             Host::ExactSub => "exact-sub",
             Host::ExactMul => "exact-mul",
             Host::ExactDiv => "exact-div",
             Host::ExactCompare => "exact-compare",
+            Host::TextCompare => "text-compare",
             Host::PrintExact => "print-exact",
             Host::ExactPow => "exact-pow",
             Host::PowI64 => "pow-i64",
@@ -349,11 +362,13 @@ impl Host {
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
+            Host::PrintArray => &[Ty::I64, Ty::Handle],
             Host::ExactRead => &[Ty::Text],
             Host::ExactAdd | Host::ExactSub | Host::ExactMul | Host::ExactDiv => {
                 &[Ty::Exact, Ty::Exact]
             }
             Host::ExactCompare => &[Ty::Exact, Ty::Exact],
+            Host::TextCompare => &[Ty::Text, Ty::Text],
             Host::PrintExact => &[Ty::I64, Ty::Exact],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
@@ -389,6 +404,22 @@ impl Host {
             _ => Ty::I64,
         }
     }
+}
+
+/// How an array is shown, written once so that no engine can have its own idea of it.
+///
+/// Flat and bracketed: `[1 2 3]`. A `(2 3)` shows six numbers rather than two rows,
+/// because six numbers is how one is written.
+pub fn show_array(elements: &[i64]) -> String {
+    let mut out = String::from("[");
+    for (n, value) in elements.iter().enumerate() {
+        if n > 0 {
+            out.push(' ');
+        }
+        out.push_str(&value.to_string());
+    }
+    out.push(']');
+    out
 }
 
 /// An instruction. Each one produces exactly one value.
