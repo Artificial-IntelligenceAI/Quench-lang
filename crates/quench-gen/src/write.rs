@@ -21,7 +21,7 @@
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
 use quench_conf::{Division, Overflow, Settings};
-use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Module, Ty, Value};
+use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
 /// disagreement is replayed by writing the seed down.
@@ -129,6 +129,23 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                         (BinOp::AddTrapping, BinOp::SubTrapping, BinOp::MulTrapping)
                     }
                 };
+                // A power, sometimes. Its exponent is kept small and is sometimes
+                // negative on purpose, because a whole number raised to a negative
+                // power is a trap and a trap the generator never writes is a trap the
+                // oracle never checks.
+                if rng.upto(12) == 0 {
+                    let host = match settings.overflow {
+                        Overflow::Wrap => Host::PowI64,
+                        Overflow::Trap => Host::PowI64Trapping,
+                    };
+                    let exponent = match rng.upto(8) {
+                        0 => b.const_i64(rng.upto(4) as i64 - 3),
+                        _ => b.const_i64(rng.upto(12) as i64),
+                    };
+                    let value = b.call_host(host, &[lhs, exponent]);
+                    numbers.push(value);
+                    continue;
+                }
                 let op = match rng.upto(5) {
                     0 => add,
                     1 => sub,

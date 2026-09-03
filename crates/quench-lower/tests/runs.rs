@@ -834,3 +834,39 @@ START {
         "1/3<1/2: true true",
     );
 }
+
+#[test]
+fn a_power_binds_tightest_and_answers_by_squaring() {
+    // Which mathematics settled long before computers, so Quench does not choose it.
+    assert_eq!(
+        said("START {\n    var.immut.i64 ['n'] = [*2* + *3* ^ *2*];\n    print.stdout['n'];\n}\n"),
+        "11",
+        "2 + (3^2), not (2 + 3)^2",
+    );
+    assert_eq!(
+        said("START {\n    var.immut.i64 ['n'] = [*3* xx *4*];\n    print.stdout['n'];\n}\n"),
+        "81",
+        "`xx` is the other spelling of the same operator",
+    );
+}
+
+#[test]
+fn an_exact_number_takes_a_negative_power_and_a_whole_one_does_not() {
+    // Two to the minus one is a half, and a half is a number an `e` holds.
+    assert_eq!(
+        said("\
+START {
+    var.immut.e ['half'] = [*2* ^ *-1*];
+    var.immut.e ['big'] = [*2* ^ *100*];
+    var.immut.e ['cube'] = [e:*2/3* ^ *3*];
+    print.stdout['half' str:* * 'big' str:* * 'cube'];
+}
+"),
+        "1/2 1267650600228229401496703205376 8/27",
+    );
+    assert_eq!(
+        ended("START {\n    var.immut.i64 ['n'] = [*2* ^ *-1*];\n    print.stdout['n'];\n}\n"),
+        quench_qir::Outcome::Trapped(quench_qir::Trap::NegativePower),
+        "and a whole number does not: the answer to that is a fraction",
+    );
+}

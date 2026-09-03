@@ -62,6 +62,15 @@ pub const DEPTH: usize = 10_000;
 /// Where a running program's output goes.
 ///
 /// Two of them, because a program says which it means. See [`qir::Stream`].
+/// Why a power had no answer, as a reason to stop.
+fn no_power(trouble: quench_num::NoPower) -> Trap {
+    match trouble {
+        quench_num::NoPower::Negative => Trap::NegativePower,
+        quench_num::NoPower::Fractional => Trap::FractionalPower,
+        quench_num::NoPower::TooLarge => Trap::Overflowed,
+    }
+}
+
 pub struct Writing<'a> {
     pub out: &'a mut dyn Write,
     pub err: &'a mut dyn Write,
@@ -320,6 +329,20 @@ fn evaluate(
                     };
                     exacts.push(answer);
                     return Ok(exacts.len() as i64 - 1);
+                }
+                qir::Host::ExactPow => {
+                    let (a, b) = (
+                        exacts[slots[args[0].0 as usize] as usize].clone(),
+                        exacts[slots[args[1].0 as usize] as usize].clone(),
+                    );
+                    exacts.push(a.power(&b).map_err(no_power)?);
+                    return Ok(exacts.len() as i64 - 1);
+                }
+                qir::Host::PowI64 | qir::Host::PowI64Trapping => {
+                    let (base, exponent) =
+                        (slots[args[0].0 as usize], slots[args[1].0 as usize]);
+                    let wrapping = *host == qir::Host::PowI64;
+                    return quench_num::power_i64(base, exponent, wrapping).map_err(no_power);
                 }
                 qir::Host::ExactCompare => {
                     let (a, b) = (

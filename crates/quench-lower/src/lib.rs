@@ -484,6 +484,9 @@ fn exactly(b: &mut qir::Builder, op: OpKind, l: qir::Value, r: qir::Value) -> qi
         OpKind::Sub => qir::Host::ExactSub,
         OpKind::Mul => qir::Host::ExactMul,
         OpKind::Div => qir::Host::ExactDiv,
+        // A negative exponent is fine for an `e` and is where it parts company with
+        // `i64`: two to the minus one is a half, and a half is a number this holds.
+        OpKind::Pow => qir::Host::ExactPow,
         // Six comparisons, one call: an `e` against an `e` is the sign of their
         // difference, and every comparison is that sign against zero.
         _ => {
@@ -635,13 +638,20 @@ fn emit(
                 OpKind::Mod => {
                     if floored { b.rem_floored(l, r) } else { b.rem(l, r) }
                 }
+                // By squaring, in the runtime rather than as an instruction: it needs
+                // a loop, and two engines each writing their own would be two chances
+                // to write it differently.
+                OpKind::Pow if w.settings.overflow == Overflow::Trap => {
+                    b.call_host(qir::Host::PowI64Trapping, &[l, r])
+                }
+                OpKind::Pow => b.call_host(qir::Host::PowI64, &[l, r]),
                 OpKind::Lt => b.cmp(qir::CmpOp::Lt, l, r),
                 OpKind::Gt => b.cmp(qir::CmpOp::Gt, l, r),
                 OpKind::Le => b.cmp(qir::CmpOp::Le, l, r),
                 OpKind::Ge => b.cmp(qir::CmpOp::Ge, l, r),
                 OpKind::Eq => b.cmp(qir::CmpOp::Eq, l, r),
                 OpKind::Ne => b.cmp(qir::CmpOp::Ne, l, r),
-                OpKind::Pow | OpKind::And | OpKind::Or => {
+                OpKind::And | OpKind::Or => {
                     unreachable!("refused by the checker as not built yet")
                 }
             }

@@ -250,10 +250,17 @@ fn a_comparison_is_a_bool_and_a_sum_is_not() {
 }
 
 #[test]
+fn a_power_is_built_now() {
+    assert!(check("START { var.immut.i64 ['n'] = [*2* ^ *8*]; }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [*2* xx *8*]; }").ok(), "the other spelling");
+    assert!(check("START { var.immut.e ['n'] = [*2* ^ *-1*]; }").ok(), "an `e` takes a negative one");
+}
+
+#[test]
 fn the_operators_that_are_not_built_say_so() {
     for (source, which) in [
-        ("START { var.immut.i64 ['n'] = [*2* ^ *8*]; }", "`^` is not built yet"),
         ("START { var.immut.bool ['b'] = [*true* and *false*]; }", "`and` is not built yet"),
+        ("START { var.immut.bool ['b'] = [*true* or *false*]; }", "`or` is not built yet"),
     ] {
         assert!(errors(source).contains(which), "{source}\n{}", errors(source));
     }

@@ -123,3 +123,29 @@ where it sat — which is precisely what the marks exist to prevent, and would h
 
 So equality is `==`, or the word `eq-to`. Removing a block cost an operator, which is
 the sort of thing that is only visible once both decisions are on the table.
+
+## `^` is built now, and takes its exponent from the type
+
+The exponent binds tightest, which mathematics settled: `[*2* + *3* ^ *2*]` is 11.
+Two spellings, `^` and `xx`, because `**` lexes as an empty written value and could
+never have been available.
+
+It answers **by squaring**, in the runtime rather than as an instruction. A power
+needs a loop, and two engines each writing their own loop would be two chances to
+write it differently — so there is one `power_i64` in `quench-num` and every engine
+calls it, the same arrangement `e` arithmetic already has. Whether an answer that
+does not fit wraps or stops is the `overflow` setting, like every other sum.
+
+The two number types part company on the negative exponent:
+
+```quench
+[*2* ^ *-1*]     # under `e`:   a half, exactly
+[*2* ^ *-1*]     # under `i64`: stops — a whole number raised to a negative power
+```
+
+A half is a number an `e` holds and an `i64` does not, so the same line means two
+different things and one of them has no answer. That is not an inconsistency; it is
+the types being different, said out loud at the point it matters.
+
+A *fractional* exponent stops for an `e` too. The square root of two is the oldest
+number known not to be a ratio, and `e` holds ratios.

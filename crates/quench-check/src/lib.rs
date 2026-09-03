@@ -1612,12 +1612,12 @@ impl<'a> Checker<'a> {
                 }
             }
             Value::Binary { op, lhs, rhs } => {
-                if matches!(op, OpKind::Pow | OpKind::And | OpKind::Or) {
+                if matches!(op, OpKind::And | OpKind::Or) {
                     self.errors.push(
                         Diagnostic::new("E0422", format!("`{}` is not built yet.", op.written()))
                             .primary(span, "here")
                             .rule("the parts of Quench arrive one at a time, and this one has not")
-                            .tip("`+`, `-`, `x`, `/`, `mod` and the comparisons work.")
+                            .tip("`+`, `-`, `x`, `/`, `mod`, `^` and the comparisons work.")
                             .fix("use one of those for now"),
                     );
                     return None;

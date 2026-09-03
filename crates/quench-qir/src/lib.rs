@@ -60,6 +60,11 @@ pub enum Trap {
     TooDeep = 4,
     /// An answer too large for the type it was going into.
     Overflowed = 5,
+    /// A whole number raised to a negative power, whose answer is a fraction.
+    NegativePower = 6,
+    /// An exact number raised to a fraction, whose answer is generally not a ratio —
+    /// the square root of two is the oldest number known not to be one.
+    FractionalPower = 7,
 }
 
 impl Trap {
@@ -71,6 +76,8 @@ impl Trap {
             Trap::OutsideTheArray => "an index outside the array",
             Trap::TooDeep => "calls nested too deep",
             Trap::Overflowed => "a number too large to hold",
+            Trap::NegativePower => "a whole number raised to a negative power",
+            Trap::FractionalPower => "an exact number raised to a fraction",
         }
     }
 
@@ -82,6 +89,8 @@ impl Trap {
             3 => Trap::OutsideTheArray,
             4 => Trap::TooDeep,
             5 => Trap::Overflowed,
+            6 => Trap::NegativePower,
+            7 => Trap::FractionalPower,
             _ => return None,
         })
     }
@@ -291,6 +300,15 @@ pub enum Host {
     ExactCompare,
     /// `(stream, exact)` — a whole number wears no denominator.
     PrintExact,
+    /// `(base, exponent)` — exactly. A negative exponent is fine and gives a ratio.
+    /// Can stop, on a fractional exponent or one too large to finish.
+    ExactPow,
+
+    /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
+    /// negative exponent: the answer to that is a fraction and this is a whole number.
+    PowI64,
+    /// The same, stopping rather than wrapping.
+    PowI64Trapping,
 }
 
 impl Host {
@@ -310,6 +328,9 @@ impl Host {
             Host::ExactDiv => "exact-div",
             Host::ExactCompare => "exact-compare",
             Host::PrintExact => "print-exact",
+            Host::ExactPow => "exact-pow",
+            Host::PowI64 => "pow-i64",
+            Host::PowI64Trapping => "pow-i64-trapping",
         }
     }
 
@@ -329,6 +350,8 @@ impl Host {
             }
             Host::ExactCompare => &[Ty::Exact, Ty::Exact],
             Host::PrintExact => &[Ty::I64, Ty::Exact],
+            Host::ExactPow => &[Ty::Exact, Ty::Exact],
+            Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
     }
 
@@ -337,7 +360,15 @@ impl Host {
     /// What it costs is a check afterwards in compiled code, so it is worth knowing
     /// which calls need one rather than guarding all of them.
     pub fn can_stop(self) -> bool {
-        matches!(self, Host::ArrayGet | Host::ArraySet | Host::ExactDiv)
+        matches!(
+            self,
+            Host::ArrayGet
+                | Host::ArraySet
+                | Host::ExactDiv
+                | Host::ExactPow
+                | Host::PowI64
+                | Host::PowI64Trapping
+        )
     }
 
     /// What it gives back. Most give an `i64` nothing is expected to use.
@@ -348,7 +379,8 @@ impl Host {
             | Host::ExactAdd
             | Host::ExactSub
             | Host::ExactMul
-            | Host::ExactDiv => Ty::Exact,
+            | Host::ExactDiv
+            | Host::ExactPow => Ty::Exact,
             _ => Ty::I64,
         }
     }

@@ -424,6 +424,52 @@ extern "C" fn exact_div(rt: *mut Runtime, a: i64, b: i64) -> i64 {
     }
 }
 
+/// Why a power had no answer, as a reason to stop.
+fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
+    match trouble {
+        quench_num::NoPower::Negative => qir::Trap::NegativePower,
+        quench_num::NoPower::Fractional => qir::Trap::FractionalPower,
+        quench_num::NoPower::TooLarge => qir::Trap::Overflowed,
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn exact_pow(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    let answer = EXACTS.with(|e| {
+        let e = e.borrow();
+        e[a as usize].power(&e[b as usize])
+    });
+    match answer {
+        Ok(value) => keep(value),
+        Err(trouble) => {
+            stop(rt, no_power(trouble));
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn pow_i64(rt: *mut Runtime, base: i64, exponent: i64) -> i64 {
+    match quench_num::power_i64(base, exponent, true) {
+        Ok(n) => n,
+        Err(trouble) => {
+            stop(rt, no_power(trouble));
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn pow_i64_trapping(rt: *mut Runtime, base: i64, exponent: i64) -> i64 {
+    match quench_num::power_i64(base, exponent, false) {
+        Ok(n) => n,
+        Err(trouble) => {
+            stop(rt, no_power(trouble));
+            0
+        }
+    }
+}
+
 /// Called by compiled code. Not called by anything else.
 extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
     EXACTS.with(|e| {
@@ -603,6 +649,9 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_div", exact_div as *const u8);
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
+    builder.symbol("quench_exact_pow", exact_pow as *const u8);
+    builder.symbol("quench_pow_i64", pow_i64 as *const u8);
+    builder.symbol("quench_pow_i64_trapping", pow_i64_trapping as *const u8);
     let mut jit = JITModule::new(builder);
 
     // The text, owned here and pointed at by a table whose address the code will carry.
@@ -649,6 +698,9 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactDiv, "quench_exact_div"),
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
+        (qir::Host::ExactPow, "quench_exact_pow"),
+        (qir::Host::PowI64, "quench_pow_i64"),
+        (qir::Host::PowI64Trapping, "quench_pow_i64_trapping"),
     ] {
         let mut sig = jit.make_signature();
         sig.params.push(AbiParam::new(types::I64)); // the table
