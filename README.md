@@ -339,10 +339,24 @@ be dual licensed as above, without any additional terms or conditions.
 
 `quench-diag` is derived from `luarust-diag` in Luarust, which is MIT and
 copyright the same author. Relicensing it under the dual licence here is the
-copyright holder's to do. Quench has no third-party code and, at present, no
-third-party dependencies at all.
+copyright holder's to do.
+
+No third-party code is vendored into this repository — every file here was
+written for it. There is one third-party *dependency*, Cranelift, which
+`quench-dev` builds on and which brings a tree of sixty crates behind it. All of
+them are permissive: **Apache-2.0 WITH LLVM-exception** for Cranelift and its
+own dependencies, **MIT OR Apache-2.0** for most of the rest, and MIT, Zlib or
+BSD-2-Clause for a handful. Nothing in the tree is copyleft and nothing in it
+puts a condition on Quench's own licence. A binary that ships Cranelift inside
+it carries their notices too; the source in this repository does not, because it
+contains none of their code.
 
 ## Credit
+
+Quench is one person's language. What it stands on is that person's own earlier
+work, and two compiler backends written by other people.
+
+### Luarust
 
 Quench stands on [**Luarust**](https://github.com/Artificial-IntelligenceAI/Luarust),
 the author's earlier language, now abandoned.
@@ -361,3 +375,36 @@ the reuse is not incidental:
   Quench inherited, along with the 200,000-program bar it has to clear.
 
 Luarust is not maintained. Quench is where the work continued.
+
+### Cranelift
+
+The Dev JIT is [**Cranelift**](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift),
+from the Bytecode Alliance. It is the only third-party dependency Quench has, and
+it was picked for the thing it is best at: compiling fast enough that you do not
+notice it happened. **1.6 ms** to get a small program from QIR to machine code,
+and code within 1.4× of optimised LLVM on work that cannot be optimised — both of
+those are Cranelift's numbers, not Quench's. See
+[notes/what-the-dev-jit-costs.md](notes/what-the-dev-jit-costs.md).
+
+Its IR is also why QIR looks the way it does. Block parameters instead of phi
+nodes is Cranelift's answer to SSA, and Quench took it — which is why `if` and
+loops needed no new IR between them, and why the two engines can be held to the
+same construction rather than to two descriptions of it.
+
+Licensed Apache-2.0 WITH LLVM-exception.
+
+### LLVM
+
+The Hot JIT and AOT native paths will be [**LLVM**](https://llvm.org), and the
+reason is measured rather than assumed: Luarust's LLVM-compiled AOT output ran at
+**1.001× C** on the benchmark that started this project. That is not "close to
+C". That is C, with a different front end in front of it.
+
+None of that half exists yet — no C++ is written and LLVM is not a dependency
+today — so this credit is for a decision rather than for code. It is here because
+the decision was load-bearing: three engines that must agree is a design that only
+makes sense when the slowest one is worth waiting for, and LLVM is why it is. See
+[notes/passes-are-a-thing-you-have-to-ask-for.md](notes/passes-are-a-thing-you-have-to-ask-for.md)
+for what Quench has to be careful about when it gets there.
+
+Licensed Apache-2.0 WITH LLVM-exception — the licence Cranelift's is named after.
