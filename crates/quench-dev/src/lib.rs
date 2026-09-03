@@ -555,6 +555,24 @@ extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn array_copy(_rt: *mut Runtime, handle: i64) -> i64 {
+    HEAP.with(|heap| {
+        let mut heap = heap.borrow_mut();
+        let of = heap[handle as usize].clone();
+        heap.push(of);
+        heap.len() as i64 - 1
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn array_equal(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    HEAP.with(|heap| {
+        let heap = heap.borrow();
+        i64::from(heap[a as usize] == heap[b as usize])
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn print_array(_rt: *mut Runtime, stream: i64, handle: i64) -> i64 {
     let shown = HEAP.with(|heap| qir::show_array(&heap.borrow()[handle as usize]));
     write_out(stream, shown.as_bytes());
@@ -663,6 +681,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_array_get", array_get as *const u8);
     builder.symbol("quench_array_len", array_len as *const u8);
     builder.symbol("quench_print_array", print_array as *const u8);
+    builder.symbol("quench_array_copy", array_copy as *const u8);
+    builder.symbol("quench_array_equal", array_equal as *const u8);
     builder.symbol("quench_exact_read", exact_read as *const u8);
     builder.symbol("quench_exact_add", exact_add as *const u8);
     builder.symbol("quench_exact_sub", exact_sub as *const u8);
@@ -714,6 +734,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ArrayGet, "quench_array_get"),
         (qir::Host::ArrayLen, "quench_array_len"),
         (qir::Host::PrintArray, "quench_print_array"),
+        (qir::Host::ArrayCopy, "quench_array_copy"),
+        (qir::Host::ArrayEqual, "quench_array_equal"),
         (qir::Host::ExactRead, "quench_exact_read"),
         (qir::Host::ExactAdd, "quench_exact_add"),
         (qir::Host::ExactSub, "quench_exact_sub"),
@@ -829,7 +851,12 @@ fn lower(
                         });
                     }
                     let call = b.ins().call(which, &given);
-                    let answer = b.inst_results(call)[0];
+                    let mut answer = b.inst_results(call)[0];
+                    // And narrowed on the way back, for the same reason: the runtime
+                    // answers in an i64 and a bool lives in an i8 here.
+                    if host.result() == qir::Ty::Bool {
+                        answer = b.ins().ireduce(types::I8, answer);
+                    }
                     if host.can_stop() {
                         // A load and a branch, which is what a baked-in runtime address
                         // buys: asking whether to stop costs no call.

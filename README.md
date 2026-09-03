@@ -139,10 +139,15 @@ Both print the same thing, which is not a coincidence — it is
   `i64` wears none either. Counted from one, because an inclusive loop with an
   unsigned counter walks `[1, count]` exactly while `[0, count - 1]` wraps on an
   empty one. `print.stdout['xs']` shows everything it holds, flat however many
-  dimensions it has, because flat is how the elements were written. **Assignment
-  shares an array rather than copying it** — `['b'] = ['a']` makes two names for one
-  array — which is why `==` on two of them is refused: *the same array* and *the same
-  contents* are two questions and Quench will not pick one for you.
+  dimensions it has, because flat is how the elements were written.
+- **An array is the only thing two names can reach**, so it is the only thing that has
+  to say which was meant: `['b'] = [share 'a']` makes a second name for one array,
+  `[copy 'a']` makes a second array, and a bare `['a']` is refused. Both answers hide
+  something and they hide opposite things — sharing hides a `set` here changing a thing
+  there, copying hides a megabyte allocated on a line that looks free. Which is why
+  `==` on two arrays can then mean the obvious thing, **their contents**: once *the
+  same array* has a way to be said, the other question is free. See
+  [notes/an-array-is-the-only-thing-two-names-can-reach.md](notes/an-array-is-the-only-thing-two-names-can-reach.md).
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

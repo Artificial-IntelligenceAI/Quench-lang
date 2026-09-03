@@ -728,6 +728,12 @@ impl<'a> Parser<'a> {
             let of = self.term()?;
             return Some(ast::Term::Not { word, of: Box::new(of) });
         }
+        if token.kind == Kind::Word && matches!(self.text(token.span), "share" | "copy") {
+            let copies = self.text(token.span) == "copy";
+            let word = self.bump().span;
+            let of = self.term()?;
+            return Some(ast::Term::Handed { word, copies, of: Box::new(of) });
+        }
         self.piece(false).map(ast::Term::Piece)
     }
 

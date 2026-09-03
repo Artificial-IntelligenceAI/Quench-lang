@@ -303,6 +303,18 @@ fn evaluate(
                 qir::Host::ArrayLen => {
                     return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
                 }
+                qir::Host::ArrayCopy => {
+                    let of = heap[slots[args[0].0 as usize] as usize].clone();
+                    heap.push(of);
+                    return Ok(heap.len() as i64 - 1);
+                }
+                qir::Host::ArrayEqual => {
+                    let (a, b) = (
+                        &heap[slots[args[0].0 as usize] as usize],
+                        &heap[slots[args[1].0 as usize] as usize],
+                    );
+                    return Ok(i64::from(a == b));
+                }
                 qir::Host::PrintArray => {
                     let shown =
                         qir::show_array(&heap[slots[args[1].0 as usize] as usize]);

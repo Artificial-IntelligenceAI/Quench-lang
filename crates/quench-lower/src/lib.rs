@@ -612,6 +612,13 @@ fn emit(
             let value = emit(b, module, of, held, w);
             b.not(value)
         }
+        // `share` needs nothing here: naming the variable already gave the handle, and
+        // sharing is what a handle does. `copy` is what costs something, which is why
+        // it is the one that had to be written down.
+        Value::Copied(of) => {
+            let handle = emit(b, module, of, held, w);
+            b.call_host(qir::Host::ArrayCopy, &[handle])
+        }
         // Stopping early is control flow, because that is what stopping early *is*: the
         // right side has to sit in a block that only one of the two paths reaches.
         Value::Binary { op: op @ (OpKind::And | OpKind::Or), lhs, rhs }
@@ -644,6 +651,17 @@ fn emit(
             // a register and the two engines must not each have their own idea of it.
             if b.ty_of(l) == qir::Ty::Exact {
                 return exactly(b, *op, l, r);
+            }
+            // Two arrays hold the same things or they do not, which is a walk of both
+            // and so a call. Not whether they are the same array — `share` is what makes
+            // two names for one, and this is the other question.
+            if b.ty_of(l) == qir::Ty::Handle {
+                let same = b.call_host(qir::Host::ArrayEqual, &[l, r]);
+                return match op {
+                    OpKind::Eq => same,
+                    OpKind::Ne => b.not(same),
+                    _ => unreachable!("refused by the checker: arrays have no order"),
+                };
             }
             // Text is compared by what it holds rather than by which piece it is, which
             // is also a call: an index is not the thing it points at.

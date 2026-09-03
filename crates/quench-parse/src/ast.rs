@@ -270,6 +270,10 @@ pub enum Term {
     Group { open: Span, value: Box<Value>, close: Span },
     /// `not x`
     Not { word: Span, of: Box<Term> },
+    /// `share 'xs'` or `copy 'xs'` — which of the two things binding an array to a
+    /// second name could mean. Required, because they cost different things and
+    /// neither cost should be paid by an omission.
+    Handed { word: Span, copies: bool, of: Box<Term> },
 }
 
 impl Term {
@@ -282,6 +286,7 @@ impl Term {
             Term::Call(c) => c.name.to(c.close),
             Term::Group { open, close, .. } => open.to(*close),
             Term::Not { word, of } => word.to(of.span()),
+            Term::Handed { word, of, .. } => word.to(of.span()),
         }
     }
 }

@@ -289,6 +289,13 @@ pub enum Host {
     ArrayGet,
     /// How many elements it has.
     ArrayLen,
+    /// `(handle)` — a new array holding the same things. What `copy` costs, said out
+    /// loud at the place that pays it.
+    ArrayCopy,
+    /// `(a, b)` — whether two arrays hold the same things, element by element. Not
+    /// whether they are the same array: two names for one array is what `share` makes,
+    /// and this question is the other one.
+    ArrayEqual,
     /// `(stream, handle)` — every element it holds, in the order they are laid out,
     /// between brackets and separated by spaces.
     ///
@@ -337,6 +344,8 @@ impl Host {
             Host::ArraySet => "array-set",
             Host::ArrayGet => "array-get",
             Host::ArrayLen => "array-len",
+            Host::ArrayCopy => "array-copy",
+            Host::ArrayEqual => "array-equal",
             Host::PrintArray => "print-array",
             Host::ExactRead => "exact-read",
             Host::ExactAdd => "exact-add",
@@ -362,6 +371,8 @@ impl Host {
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
+            Host::ArrayCopy => &[Ty::Handle],
+            Host::ArrayEqual => &[Ty::Handle, Ty::Handle],
             Host::PrintArray => &[Ty::I64, Ty::Handle],
             Host::ExactRead => &[Ty::Text],
             Host::ExactAdd | Host::ExactSub | Host::ExactMul | Host::ExactDiv => {
@@ -394,7 +405,8 @@ impl Host {
     /// What it gives back. Most give an `i64` nothing is expected to use.
     pub fn result(self) -> Ty {
         match self {
-            Host::ArrayNew => Ty::Handle,
+            Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
+            Host::ArrayEqual => Ty::Bool,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub

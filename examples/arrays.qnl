@@ -13,4 +13,18 @@ START {
     # A whole array prints everything it holds, flat however many dimensions it
     # has -- because flat is how the elements were written.
     print.stdout[str:*xs = * 'xs' str:*, m = * 'm' \n];
+
+    # An array is the only thing two names can reach, so binding one says which of
+    # the two it meant. `share` costs nothing and lets a change here be seen there;
+    # `copy` makes a second array and pays for it.
+    var.mut.arr.i64 (3) ['counts'] = [[*1* *2* *3*]];
+    var.mut.arr.i64 (3) ['same']   = [share 'counts'];
+    var.mut.arr.i64 (3) ['mine']   = [copy 'counts'];
+    set ['counts'[*1*]] = [*99*];
+    print.stdout[str:*counts = * 'counts' str:*, same = * 'same' str:*, mine = * 'mine' \n];
+
+    # And `==` asks about contents, which it could not until `share` existed to ask
+    # the other question with.
+    var.immut.bool ['alike'] = ['counts' == 'same'];
+    print.stdout[str:*counts == same: * 'alike' \n];
 }

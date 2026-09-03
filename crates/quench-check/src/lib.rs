@@ -186,6 +186,9 @@ pub enum Value {
     At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
     /// `not 'ready'` — the opposite of a `bool`.
     Not(Box<Value>),
+    /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
+    /// its own: it is the handle, which is what naming a variable already gives.
+    Copied(Box<Value>),
     /// A top-level constant, written in where it was named.
     Const(u32),
     /// `add[*1*, *2*]` — the answer a function gave back.
@@ -1027,7 +1030,8 @@ impl<'a> Checker<'a> {
         // and reading either as one would ask the wrong question about it.
         if let [term @ (ast::Term::Call(_)
         | ast::Term::Piece(ast::Piece::Call(_))
-        | ast::Term::Not { .. })] = value.terms.as_slice()
+        | ast::Term::Not { .. }
+        | ast::Term::Handed { .. })] = value.terms.as_slice()
         {
             let built = self.term(term)?;
             let found = self.type_of(&built, value.span)?;
@@ -1090,6 +1094,23 @@ impl<'a> Checker<'a> {
         // A value that is one name is that variable's value, whatever the type.
         if let [ast::Term::Piece(ast::Piece::Name(span))] = value.terms.as_slice() {
             let (built, held) = self.named_value(*span)?;
+
+            // An array is the only thing a second name can reach, so it is the only
+            // thing that has to say which of the two was meant. Sharing costs nothing
+            // and lets a change here be seen there; copying costs an allocation and the
+            // whole of the array. Neither should be paid by an omission.
+            if matches!(held, Ty::Arr { .. }) {
+                let name = self.named(*span);
+                self.errors.push(
+                    Diagnostic::new("E0478", format!("this does not say whether it shares `'{name}'` or copies it."))
+                        .primary(*span, "here")
+                        .rule("naming an array in a value says `share` or `copy`, and silence is not one of them")
+                        .tip("`share` makes a second name for one array, so a change through either is seen through both. `copy` makes a second array, and pays for it.")
+                        .fix(format!("`[share '{name}']`, or `[copy '{name}']`")),
+                );
+                return None;
+            }
+
             if &held != ty {
                 self.errors.push(
                     Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", held.article(), held.name(), ty.article(), ty.name()))
@@ -1477,6 +1498,22 @@ impl<'a> Checker<'a> {
                 None
             }
             ast::Term::Group { value, .. } => self.tree_or_leaf(value),
+            ast::Term::Handed { word, copies, of } => {
+                let built = self.term(of)?;
+                let found = self.type_of(&built, of.span())?;
+                if !matches!(found, Ty::Arr { .. }) {
+                    self.errors.push(
+                        Diagnostic::new("E0479", format!("`{}` is for arrays, and this is {} `{}`.", self.text(*word), found.article(), found.name()))
+                            .primary(of.span(), format!("{} `{}`", found.article(), found.name()))
+                            .secondary(*word, "asked here")
+                            .rule("an array is the only thing in Quench a second name can reach, so it is the only thing that has to say which was meant")
+                            .tip("everything else is a value: naming it again is naming the value, and there is nothing to share.")
+                            .fix("remove it"),
+                    );
+                    return None;
+                }
+                Some(if *copies { Value::Copied(Box::new(built)) } else { built })
+            }
             ast::Term::Not { word, of } => {
                 let built = self.term(of)?;
                 let found = self.type_of(&built, of.span())?;
@@ -1611,6 +1648,7 @@ impl<'a> Checker<'a> {
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
             Value::Not(_) => Some(Ty::Bool),
+            Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
             Value::At { shape, array, .. } => {
@@ -1641,20 +1679,6 @@ impl<'a> Checker<'a> {
                 // Two things are the same or they are not, whatever they are. Which of
                 // two is *larger* only means something for numbers.
                 let same_or_not = matches!(op, OpKind::Eq | OpKind::Ne);
-
-                // Two arrays are two allocations, so there are two questions here and
-                // Quench will not pick one for you: are these the same array, or do
-                // they hold the same things? Neither is built.
-                if same_or_not && l == r && matches!(l, Ty::Arr { .. }) {
-                    self.errors.push(
-                        Diagnostic::new("E0477", format!("`{}` asks one question, and two arrays are two questions.", op.written()))
-                            .primary(span, format!("two `{}`", l.name()))
-                            .rule("comparing arrays could mean *the same array* or *the same contents*, and those are different questions with different answers")
-                            .tip("assignment shares an array rather than copying it, so `['b'] = ['a']` makes two names for one array and the two questions come apart at once.")
-                            .fix("compare their elements, or ask for whichever of the two was meant"),
-                    );
-                    return None;
-                }
 
                 if same_or_not && l == r {
                     return Some(Ty::Bool);

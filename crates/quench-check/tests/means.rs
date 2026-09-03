@@ -719,17 +719,44 @@ fn the_logical_operators_have_no_agreed_order() {
 }
 
 #[test]
-fn two_arrays_are_two_questions() {
-    // Comparing them could mean *the same array* or *the same contents*, and those
-    // come apart the moment you assign one to another -- which shares rather than copies.
-    let source = "START {
+fn comparing_two_arrays_asks_about_their_contents() {
+    // Not whether they are the same array. `share` is what makes two names for one, and
+    // this is the other question -- which is why both had to be sayable before this was.
+    assert!(check("START {
     var.immut.arr.i64 (2) ['a'] = [[*1* *2*]];
     var.immut.arr.i64 (2) ['b'] = [[*1* *2*]];
     var.immut.bool ['s'] = ['a' == 'b'];
+}").ok());
+}
+
+#[test]
+fn binding_an_array_says_share_or_copy() {
+    let source = "START {
+    var.mut.arr.i64 (2) ['a'] = [[*1* *2*]];
+    var.mut.arr.i64 (2) ['b'] = ['a'];
 }";
     let rendered = errors(source);
-    assert!(rendered.contains("`==` asks one question, and two arrays are two questions."), "{rendered}");
-    assert!(rendered.contains("Error code: E0477"), "{rendered}");
+    assert!(rendered.contains("this does not say whether it shares `\'a\'` or copies it."), "{rendered}");
+    assert!(rendered.contains("Error code: E0478"), "{rendered}");
+
+    for said in ["share", "copy"] {
+        let source = format!("START {{
+    var.mut.arr.i64 (2) ['a'] = [[*1* *2*]];
+    var.mut.arr.i64 (2) ['b'] = [{said} 'a'];
+}}");
+        assert!(check(&source).ok(), "{}", errors(&source));
+    }
+
+    // Everything else is a value, so naming it again is naming the value and there is
+    // nothing to share.
+    assert_eq!(
+        codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['m'] = [share 'n']; }"),
+        ["E0479"]
+    );
+
+    // Printing an array is not binding it, and indexing one is not either.
+    assert!(check("START { var.immut.arr.i64 (2) ['a'] = [[*1* *2*]]; print.stdout['a' \n]; }").ok());
+    assert!(check("START { var.immut.arr.i64 (2) ['a'] = [[*1* *2*]]; var.immut.i64 ['n'] = ['a'[*1*]]; }").ok());
 }
 
 #[test]

@@ -1005,3 +1005,38 @@ START {
         "and a half written two ways is one number",
     );
 }
+
+#[test]
+fn share_makes_a_second_name_and_copy_makes_a_second_array() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.i64 (2) ['a'] = [[*1* *2*]];
+    var.mut.arr.i64 (2) ['shared'] = [share 'a'];
+    var.mut.arr.i64 (2) ['mine'] = [copy 'a'];
+    set ['a'[*1*]] = [*99*];
+    print.stdout['a' str:* * 'shared' str:* * 'mine'];
+}
+"),
+        "[99 2] [99 2] [1 2]",
+    );
+}
+
+#[test]
+fn two_arrays_are_equal_when_they_hold_the_same_things() {
+    // Not when they are the same array. `share` is what makes two names for one, and
+    // this is the other question.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.i64 (2) ['a'] = [[*1* *2*]];
+    var.immut.arr.i64 (2) ['twin'] = [[*1* *2*]];
+    var.immut.arr.i64 (2) ['other'] = [[*1* *3*]];
+    var.immut.bool ['same'] = ['a' == 'twin'];
+    var.immut.bool ['not'] = ['a' != 'other'];
+    print.stdout['same' str:* * 'not'];
+}
+"),
+        "true true",
+    );
+}
