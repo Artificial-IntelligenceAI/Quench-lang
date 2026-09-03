@@ -340,12 +340,12 @@ fn grouping_has_its_own_marks() {
 }
 
 #[test]
-fn multiplication_can_be_written_either_way() {
+fn multiplication_is_a_word_because_no_symbol_is_free() {
     use Kind::*;
-    // `*` is the mark a written value wears, so it cannot also be multiplication. The
-    // sign gets a token; the word `x` is a word, and the parser knows what it means
-    // where it stands -- which costs nothing, because Quench reserves no words.
-    assert_eq!(kinds("[*2* \u{d7} *3*]"), [OpenList, Written, Times, Written, CloseList, End]);
+    // `*` is the mark a written value wears, so it cannot also be multiplication, and
+    // nothing else on a keyboard means multiply. So `x` -- a word, which the parser
+    // knows the meaning of where it stands, and which costs nothing because Quench
+    // reserves no words and a name could never be a bare `x` anyway.
     assert_eq!(kinds("[*2* x *3*]"), [OpenList, Written, Word, Written, CloseList, End]);
 }
 
@@ -359,15 +359,16 @@ fn a_hyphen_is_still_part_of_a_word_when_it_is_inside_one() {
 #[test]
 fn the_operators_that_need_tokens_have_them() {
     use Kind::*;
-    let cases: [(&str, Kind); 11] = [
+    // `x` is not here: multiplication is a word, because `*` is taken and nothing else
+    // on a keyboard means multiply.
+    let cases: [(&str, Kind); 10] = [
         ("+", Plus),
         ("-", Minus),
-        ("\u{d7}", Times),
-        ("\u{f7}", Slash),
+        ("/", Slash),
         ("<", Less),
         (">", Greater),
-        ("</==", LessEqual),
-        (">/==", GreaterEqual),
+        ("<=", LessEqual),
+        (">=", GreaterEqual),
         ("!=", NotEqual),
         ("^", Power),
         ("==", EqualTo),
@@ -378,7 +379,7 @@ fn the_operators_that_need_tokens_have_them() {
         assert_eq!(out.tokens[0].kind, want, "{text:?}");
         assert_eq!(out.tokens.len(), 2, "{text:?} should be one token and the end");
     }
-    assert_eq!(kinds("\u{2260}"), [NotEqual, End]);
+    assert_eq!(kinds("!="), [NotEqual, End]);
 }
 
 #[test]
@@ -387,16 +388,19 @@ fn the_operators_that_are_words_need_no_tokens() {
     // Quench reserves no words, so an operator spelled with letters costs nothing: the
     // parser knows what it means where it stands, and `x` is still a name for a variable
     // anywhere a name is wanted, because names are quoted.
-    for word in ["x", "xx", "mod", "not", "and", "or", "eq-to"] {
+    for word in ["x", "mod", "not", "and", "or"] {
         assert_eq!(kinds(word), [Word, End], "{word}");
     }
 }
 
 #[test]
-fn the_slash_in_a_comparison_is_not_a_division() {
+fn a_comparison_that_wears_an_equals_is_one_token() {
     use Kind::*;
+    // `<=` is how a keyboard writes the symbol mathematics uses. It is one token, not
+    // `<` applied to an assignment -- the `=` in it is no more an assignment than the
+    // one in `!=`, which nobody has ever read that way.
     assert_eq!(
-        kinds("[*a* </== *b*]"),
+        kinds("[*a* <= *b*]"),
         [OpenList, Written, LessEqual, Written, CloseList, End]
     );
     assert_eq!(
@@ -404,31 +408,23 @@ fn the_slash_in_a_comparison_is_not_a_division() {
         [OpenList, Written, Less, Written, CloseList, End],
         "and a lone `<` is still a lone `<`"
     );
-    // Division is a word now, which is what let `/` mean `or` in the line above.
-    assert_eq!(
-        kinds("[*a* div *b*]"),
-        [OpenList, Written, Word, Written, CloseList, End],
-        "and division is a word"
-    );
 }
 
 #[test]
-fn a_slash_on_its_own_is_nothing() {
-    // It was division until `</==` wanted it for `or`, and two meanings for one
-    // character in one expression is exactly the thing this language does not do.
-    let out = lex("[*a* / *b*]");
-    assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
-    assert_eq!(out.errors[0].code, "E0006");
-    assert!(out.errors[0].message.contains("`/` on its own is not an operator"), "{:#?}", out.errors);
-}
-
-#[test]
-fn an_exponent_is_written_xx_because_the_obvious_spelling_is_impossible() {
+fn a_slash_is_division_and_only_that() {
     use Kind::*;
-    // `*a* ** *b*` lexes that `**` as an empty written value, since the first `*` opens
-    // one and the second closes it. There is no way to have `**` mean an exponent while
-    // `*` marks a value, so the exponent is a word.
-    assert_eq!(kinds("[*2* xx *8*]"), [OpenList, Written, Word, Written, CloseList, End]);
+    // It was briefly the `or` of `</==`, which meant division had to be a word. Both
+    // went when the rule became "whatever is on the keyboard": `<=` is one token, not
+    // three pieces, so nothing else wanted the slash.
+    assert_eq!(kinds("[*a* / *b*]"), [OpenList, Written, Slash, Written, CloseList, End]);
+}
+
+#[test]
+fn an_exponent_is_a_caret_because_a_caret_is_on_the_keyboard() {
+    use Kind::*;
+    // `**` would have been the obvious spelling and cannot be one: the first `*` opens
+    // a written value and the second closes it. `^` is on the keyboard and means this
+    // everywhere, so it is the spelling and there is no second one.
     assert_eq!(
         kinds("[*2* ^ *8*]"),
         [OpenList, Written, Power, Written, CloseList, End],

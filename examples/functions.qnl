@@ -23,10 +23,10 @@ fn.program.bool ['past'] [immut.i64 'n'] {
 # A function may call itself, and two may call each other: every signature is read
 # before any body is.
 fn.file.i64 ['factorial'] [immut.i64 'n'] {
-    if 'n' </== *1* {
+    if 'n' <= *1* {
         give [*1*];
     } else {
-        give ['n' × factorial['n' - *1*]];
+        give ['n' x factorial['n' - *1*]];
     }
 }
 

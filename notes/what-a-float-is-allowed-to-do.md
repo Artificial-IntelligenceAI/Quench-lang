@@ -3,14 +3,14 @@
 "Floats are non-deterministic" is the received wisdom and it is mostly wrong, which
 matters here more than in most projects: three engines have to agree bit for bit.
 
-**IEEE 754 fully specifies `+ − × ÷ √` and the comparisons** under round-to-nearest-
+**IEEE 754 fully specifies `+ − x / √` and the comparisons** under round-to-nearest-
 even. Every conforming implementation gives the same bits. There is nothing there to
 disagree about. What diverges is a short, nameable list — and almost every item on it
 is something a compiler does **only when asked**.
 
 | | Where it comes from | What Quench does |
 | --- | --- | --- |
-| fusing `a×b + c` into one rounding | LLVM, given `contract` or fast-math. Cranelift does not | never sets a fast-math flag |
+| fusing `axb + c` into one rounding | LLVM, given `contract` or fast-math. Cranelift does not | never sets a fast-math flag |
 | 80-bit intermediates | 32-bit x86 using the x87 stack | x86-64 uses SSE2, ARM64 has no such thing |
 | denormals flushed to nought | `MXCSR` FTZ/DAZ, set by fast-math | never sets it |
 | which not-a-number you get | the bit pattern is not fully specified | a program cannot see it: no bit-casting, and printing gives a word |
@@ -45,7 +45,7 @@ no-number = "stops"        # stop, in the same place in every engine
 ```
 
 **Semantic**, so it multiplies the oracle like `division`, `overflow` and `logic`.
-`*1.0* div *0.0*` is `infinity` under one and a stop under the other.
+`*1.0* / *0.0*` is `infinity` under one and a stop under the other.
 
 `carries-on` is the default, and the argument is different from the one for
 `overflow = wrap`. It is not that it is free (though it is): **`b64` *is* IEEE 754

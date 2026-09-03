@@ -48,7 +48,7 @@ semantic knob multiplies, and a bug that only appears under `wrap` is found only
 something generated a `wrap` configuration to look under.
 
 So a handful of semantic settings, each chosen because it earns its place, stays a
-proof. A dozen of them is 3 × 2¹² and the oracle quietly stops being a proof and
+proof. A dozen of them is 3 x 2¹² and the oracle quietly stops being a proof and
 becomes a lottery — while still passing, which is the dangerous part.
 
 None of that argues for fewer settings. It argues for knowing which pile a setting
@@ -100,7 +100,7 @@ The reason to default to `stops-early` is not speed, and it is worth being preci
 about. Quench stops rather than having undefined behaviour, so under `asks-both`:
 
 ```quench
-[('n' != *0*) and ((*100* div 'n') > *5*)]
+[('n' != *0*) and ((*100* / 'n') > *5*)]
 ```
 
 does not merely waste a division when `'n'` is nought — it **stops the program**.

@@ -61,17 +61,13 @@ impl<'a> Lexer<'a> {
                 ')' => self.single(Kind::CloseGroup),
                 '+' => self.single(Kind::Plus),
                 '-' => self.single(Kind::Minus),
-                '\u{d7}' => self.wide(Kind::Times, '\u{d7}'),
-                // `/` on its own is nothing. It is the `or` inside `</==` and `>/==`,
-                // and division is a word, which is what freed it to be that.
-                '/' => self.stray_slash(),
+                '/' => self.single(Kind::Slash),
                 '^' => self.single(Kind::Power),
-                '\u{f7}' => self.wide(Kind::Slash, '\u{f7}'),
-                '\u{2260}' => self.wide(Kind::NotEqual, '\u{2260}'),
-                // `</==` reads as its three pieces: less than, *or*, equal to. Three
-                // characters of look-ahead settles it, and nothing else begins this way.
-                '<' => self.maybe_or_equal(Kind::LessEqual, Kind::Less),
-                '>' => self.maybe_or_equal(Kind::GreaterEqual, Kind::Greater),
+                // `<=` is the keyboard's way of writing `\u{2264}`, one token rather than
+                // two pieces — the `=` in it is no more an assignment than the one in
+                // `!=` is. One look ahead settles it.
+                '<' => self.maybe_equal(Kind::LessEqual, Kind::Less),
+                '>' => self.maybe_equal(Kind::GreaterEqual, Kind::Greater),
                 '!' => self.bang(),
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
@@ -106,38 +102,16 @@ impl<'a> Lexer<'a> {
         self.source[self.at..].chars().next()
     }
 
-    /// A one-character token whose character is more than one byte.
-    fn wide(&mut self, kind: Kind, c: char) {
-        let start = self.at;
-        self.at += c.len_utf8();
-        self.tokens.push(Token { kind, span: Span::new(start, self.at) });
-    }
 
-    /// `<` and `>` on their own, or `</==` and `>/==` when the rest follows.
-    fn maybe_or_equal(&mut self, both: Kind, alone: Kind) {
+    /// `<` and `>` on their own, or `<=` and `>=` when the rest follows.
+    fn maybe_equal(&mut self, both: Kind, alone: Kind) {
         let start = self.at;
-        if self.source[self.at + 1..].starts_with("/==") {
-            self.at += 4;
+        if self.source[self.at + 1..].starts_with('=') {
+            self.at += 2;
             self.tokens.push(Token { kind: both, span: Span::new(start, self.at) });
         } else {
             self.single(alone);
         }
-    }
-
-    /// A `/` that is not the `or` of a comparison.
-    ///
-    /// It used to be division, which is a word now — and that is what made it free to
-    /// mean `or` in `</==`, where reading it as a division would have been nonsense.
-    fn stray_slash(&mut self) {
-        let start = self.at;
-        self.at += 1;
-        self.errors.push(
-            Diagnostic::new("E0006", "`/` on its own is not an operator.")
-                .primary(Span::new(start, self.at), "here")
-                .rule("`/` is the `or` inside `</==` and `>/==`, and nothing else")
-                .tip("division is a word, which is what let `/` mean `or` at all.")
-                .fix("`div` for division, or `\u{f7}`"),
-        );
     }
 
     /// `!=`. A `!` on its own is not anything.
@@ -152,7 +126,7 @@ impl<'a> Lexer<'a> {
         self.errors.push(
             Diagnostic::new("E0005", "`!` on its own is not something Quench reads.")
                 .primary(Span::new(start, self.at), "here")
-                .rule("the ways to say not-equal are `!=`, `\u{2260}` and `not=`")
+                .rule("not-equal is `!=`, and that is the only way to write it")
                 .tip("`!` never means `not` by itself here — the word `not` does that.")
                 .fix("`!=` if a comparison was meant"),
         );

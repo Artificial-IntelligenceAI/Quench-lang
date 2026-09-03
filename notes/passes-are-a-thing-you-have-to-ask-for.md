@@ -7,8 +7,8 @@ LLVM will happily produce machine code without ever optimising it, and will not
 mention that it did. Luarust's JIT shipped like that: a module built at
 `OptimizationLevel::Aggressive` was full of allocas and branches against a literal
 divisor, because **that flag is the codegen level and runs no IR passes**. Nothing
-had ever asked LLVM to optimise anything. Turning it on took the language from 1.85×
-C to 1.05× — the largest single win it ever had, from one function call.
+had ever asked LLVM to optimise anything. Turning it on took the language from 1.85x
+C to 1.05x — the largest single win it ever had, from one function call.
 
 In C++ the same trap is waiting, wearing the same clothes. `CodeGenOptLevel` on a
 `TargetMachine` is not the IR pipeline. The pipeline is built and run explicitly:

@@ -207,7 +207,7 @@ had:
 var.mut.arr.i64 (3 grow) ['xs'];    # refused
 ```
 
-Finding an element is `(i - 1) × stride + j`, and a stride is the sizes *under* a
+Finding an element is `(i - 1) x stride + j`, and a stride is the sizes *under* a
 dimension. The outermost has nothing above it to be a stride for, so it is the one
 dimension whose size the arithmetic never asks for — and therefore the only one that
 can be left unsaid. A growing inner dimension is what `arr.arr.i64 (2 grow)` says,

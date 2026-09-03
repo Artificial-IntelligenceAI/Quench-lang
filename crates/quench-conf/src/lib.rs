@@ -30,7 +30,7 @@ use quench_diag::{Diagnostic, Span};
 /// How a division rounds, and which way its remainder leans.
 ///
 /// **Semantic.** One setting for both, because they are one division: every convention
-/// answers `a = q × b + r`, and choosing `q` decides `r`. Settling them separately is
+/// answers `a = q x b + r`, and choosing `q` decides `r`. Settling them separately is
 /// how a language ends up with a remainder that does not match its quotient.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Division {
@@ -103,7 +103,7 @@ pub enum Overflow {
 /// right side can print, and now the same source is two programs.
 ///
 /// The reason to stop early is not speed. Quench stops rather than having undefined
-/// behaviour, so `['n' != *0* and *100* div 'n' > *5*]` under [`Logic::AsksBoth`] does not
+/// behaviour, so `['n' != *0* and *100* / 'n' > *5*]` under [`Logic::AsksBoth`] does not
 /// merely waste a division — it **stops the program** whenever `'n'` is nought. Guarding
 /// a thing with the test that makes it safe is the idiom, and one of these two answers
 /// does not have it.
@@ -120,7 +120,7 @@ pub enum Logic {
 
 /// What a float does when there is no number to give back.
 ///
-/// **Semantic**, and the same shape as `overflow`: `*1.0* div *0.0*` is `infinity` under
+/// **Semantic**, and the same shape as `overflow`: `*1.0* / *0.0*` is `infinity` under
 /// one and a stop under the other, so the same program answers differently and every
 /// engine must agree under each.
 ///

@@ -100,7 +100,7 @@ to stand — whether the list is being printed or stored.
 
 ## Open
 
-`*` is spoken for, so **multiplication is `x` and `×`**, never `*`. The alternative
+`*` is spoken for, so **multiplication is `x` and `x`**, never `*`. The alternative
 was making the lexer stateful — `*` meaning multiply inside a `math` block and text
 outside — which costs an unbalanced brace turning the rest of a file into nonsense
 tokens. That is the wrong thing for this language to trade for one character.

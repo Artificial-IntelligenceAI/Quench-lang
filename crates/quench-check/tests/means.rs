@@ -192,7 +192,7 @@ fn the_precedence_mathematics_settled_is_kept() {
         "START { var.immut.i64 ['n'] = [*1* + *2* x *3*]; }",
         "START { var.immut.i64 ['n'] = [*1* x *2* + *3*]; }",
         "START { var.immut.bool ['b'] = [*1* + *2* < *4*]; }",
-        "START { var.immut.i64 ['n'] = [*10* div *2* - *1*]; }",
+        "START { var.immut.i64 ['n'] = [*10* / *2* - *1*]; }",
     ] {
         assert!(check(source).ok(), "{source}\n{}", errors(source));
     }
@@ -254,8 +254,9 @@ fn a_comparison_is_a_bool_and_a_sum_is_not() {
 
 #[test]
 fn a_power_is_built_now() {
+    // One spelling, because `^` is on the keyboard. `xx` existed for the days when it
+    // was not settled that `**` could never be the one.
     assert!(check("START { var.immut.i64 ['n'] = [*2* ^ *8*]; }").ok());
-    assert!(check("START { var.immut.i64 ['n'] = [*2* xx *8*]; }").ok(), "the other spelling");
     assert!(check("START { var.immut.e ['n'] = [*2* ^ *-1*]; }").ok(), "an `e` takes a negative one");
 }
 
@@ -263,13 +264,13 @@ fn a_power_is_built_now() {
 fn every_operator_the_language_has_is_built() {
     // This used to be the list of ones that were not. It is empty now.
     for source in [
-        "START { var.immut.i64 ['n'] = [*7* + *1* - *2* \u{d7} *3* div *4*]; }",
+        "START { var.immut.i64 ['n'] = [*7* + *1* - *2* x *3* / *4*]; }",
         "START { var.immut.i64 ['n'] = [*7* mod *3*]; }",
         "START { var.immut.i64 ['n'] = [*2* ^ *8*]; }",
         "START { var.immut.bool ['b'] = [*true* and *false*]; }",
         "START { var.immut.bool ['b'] = [*true* or *false*]; }",
         "START { var.immut.bool ['b'] = [not *true*]; }",
-        "START { var.immut.bool ['b'] = [*1* </== *2*]; }",
+        "START { var.immut.bool ['b'] = [*1* <= *2*]; }",
     ] {
         assert!(check(source).ok(), "{source}\n{}", errors(source));
     }

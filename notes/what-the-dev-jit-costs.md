@@ -12,7 +12,7 @@ before it, so nothing can be vectorised or run out of order.
 
 ## Two numbers, and only one of them is a ratio
 
-With the modulus, unoptimised Cranelift lands within **1.4×** of optimised LLVM. That
+With the modulus, unoptimised Cranelift lands within **1.4x** of optimised LLVM. That
 is much closer than "no optimisation at all" suggests, and the reason is that there is
 nothing to optimise: a dependent chain through a 64-bit remainder is irreducible, the
 division is slow enough to hide whatever was done around it, and both engines end up
@@ -65,8 +65,8 @@ straight at about two.
 
 ## The finding is about benchmarking, not about Quench
 
-The same four compilers, on the same machine, in the same afternoon, are 1.4× apart on
-one loop and 300× apart on another.
+The same four compilers, on the same machine, in the same afternoon, are 1.4x apart on
+one loop and 300x apart on another.
 
 So **any single number comparing these engines is choosing its answer by choosing its
 benchmark**. That is worth having measured before Quench publishes a performance claim
@@ -75,7 +75,7 @@ number would be true and useless.
 
 ## What this says about the Dev JIT
 
-It is doing its job. 1.6 ms to compile, and code within 1.4× of optimised LLVM on work
+It is doing its job. 1.6 ms to compile, and code within 1.4x of optimised LLVM on work
 that cannot be optimised. Being fast to compile is the point, and being slow on
 optimisable code is the price, and both showed up exactly where they should.
 

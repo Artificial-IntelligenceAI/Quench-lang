@@ -30,6 +30,6 @@ START {
     # undefined behaviour, so under `asks-both` this divides by zero and the program
     # ends here rather than answering `false`.
     var.immut.i64 ['zero'] = [*0*];
-    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* div 'zero') > *5*)];
+    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* / 'zero') > *5*)];
     print.stdout[str:*guarded: * 'safe' \n];
 }

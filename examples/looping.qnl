@@ -18,7 +18,7 @@ START {
     # `perm` keeps the counter afterwards, holding the last value it took. Which is
     # what you want after a `break`, and the only reason to keep it at all.
     loop.perm.range.i64 ['i'] = [*1*, *100*] {
-        if 'i' × 'i' > *10* { break; }
+        if 'i' x 'i' > *10* { break; }
     }
     print.stdout[str:*stopped at * 'i' \n];
 

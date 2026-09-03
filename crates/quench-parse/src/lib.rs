@@ -716,13 +716,14 @@ impl<'a> Parser<'a> {
             // `str:*x*` starts a term, `x` between two of them multiplies.
             Kind::Word if self.tokens.get(self.at + 1).map(|t| t.kind) != Some(Kind::Colon) => {
                 match self.text(token.span) {
+                    // The four that stay words. Multiplication because `*` is the
+                    // written-value mark and no other symbol is free; the rest because
+                    // nothing ever settled where they bind, which is the whole of
+                    // `notes/precedence-stops-where-maths-stopped.md`.
                     "x" => Mul,
-                    "xx" => Pow,
-                    "div" => Div,
                     "mod" => Mod,
                     "and" => And,
                     "or" => Or,
-                    "eq-to" => Eq,
                     _ => return None,
                 }
             }

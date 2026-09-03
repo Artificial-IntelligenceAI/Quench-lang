@@ -11,8 +11,8 @@ none of the others does, and **all four must agree**:
 
 | Way | Backend | Its job |
 | --- | --- | --- |
-| **Interpreter** | none | **Being believed.** It generates no code, allocates no registers and lowers nothing, so when the engines disagree it is the one that is right. It is also the quickest way to run a small program, because it skips the part that costs: compiling is roughly 352× running. |
-| **Dev JIT** | Cranelift | **The edit loop.** 1.6 ms to compile, and within 1.4× of optimised LLVM on work that cannot be optimised. Deliberately at `opt_level = none`, which is what keeps it fast and what keeps it honest. |
+| **Interpreter** | none | **Being believed.** It generates no code, allocates no registers and lowers nothing, so when the engines disagree it is the one that is right. It is also the quickest way to run a small program, because it skips the part that costs: compiling is roughly 352x running. |
+| **Dev JIT** | Cranelift | **The edit loop.** 1.6 ms to compile, and within 1.4x of optimised LLVM on work that cannot be optimised. Deliberately at `opt_level = none`, which is what keeps it fast and what keeps it honest. |
 | **Hot JIT** | LLVM | **Running a travelling artefact fast.** This is the one that exists *because* of compile-once-run-anywhere: take portability away and ahead-of-time output would do its job, so the artefact is what justifies it. |
 | **AOT native** | LLVM | **Shipping.** Optimises fully and takes as long as it likes — nobody is waiting at a keyboard, and its compile time is spent once while its run time is spent by everyone. Also where the *anywhere* is spent rather than lost: the artefact is target-independent, so this turns it into a binary **for** any machine, at the last possible moment. |
 
@@ -181,7 +181,7 @@ Both print the same thing, which is not a coincidence — it is
   twice. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
   or stops. See
   [notes/what-a-float-is-allowed-to-do.md](notes/what-a-float-is-allowed-to-do.md).
-- **`e` never rounds.** `var.immut.e ['third'] = [*1* div *3*];` is a third, and times
+- **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit
   number squares to a 64-digit one with nothing lost. An `i64` and an `e` do not mix,
@@ -197,23 +197,24 @@ Both print the same thing, which is not a coincidence — it is
   `[('n' > *0*) and ('n' < *9*)]`. Whether the right side is asked once the left has
   settled it is `[defaults] logic`, and it defaults to `stops-early` — not for speed.
   Quench stops rather than having undefined behaviour, so under `asks-both`
-  `[('n' != *0*) and ((*100* div 'n') > *5*)]` does not waste a division, it **stops the
+  `[('n' != *0*) and ((*100* / 'n') > *5*)]` does not waste a division, it **stops the
   program**. That setting was in the free pile until functions arrived and gave the
   right side something it could do.
 - **`^` answers by squaring**, in the runtime rather than as an instruction — a power
   needs a loop, and two engines each writing their own would be two chances to write it
   differently. `[*2* + *3* ^ *2*]` is 11. An `e` takes a negative exponent and gives a
   ratio; an `i64` stops, because the answer to that is a fraction and this is not one.
-- **The operators**: `+` `-`, `x`/`×` for multiply, `div`/`÷`, `mod`, `^`/`xx` for an
-  exponent, and `<` `>` `</==` `>/==` `==` `!=`. Three characters were not available
-  rather than not chosen: `*` is the written-value mark, `**` lexes as an *empty*
-  written value, and a lone `=` would have meant a declaration outside the brackets and
-  a comparison inside them.
-- **`</==` reads as its three pieces** — `<` less than, `/` or, `==` equal to — and
-  that is what division had to become a word for. `/` cannot mean both *or* and
-  *divide* in one expression, and one of the two had a spare word available. It was
-  `</=` for a while, inherited from Luarust, which composed as *less than or assign*
-  and meant nothing at all.
+- **One spelling per operator, and it is the one on your keyboard**: `+` `-` `/` `^`
+  `<` `>` `<=` `>=` `==` `!=`, plus **`x`** for multiply because `*` is the
+  written-value mark and nothing else on a keyboard means multiply. There are no
+  alternates: the wide symbols, the doubled letters and the spelled-out names all
+  went. Two spellings for one thing
+  is a decision a reader has to make for no reason.
+- **Words are for what programming invented**, and only that: `mod`, `and`, `or`, `not`
+  have no symbol because nothing ever settled where they bind, which is the whole of
+  [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
+  Things get a symbol by being settled long enough for one to stick, so the two rules
+  turn out to be one rule.
 - **A declaration says whether it can change**: `var.immut.i64` or `var.mut.i64`,
   and silence is neither. The same rule as visibility, applied where it had not
   been — it was the one place left where not writing something still meant
@@ -378,14 +379,14 @@ So the methods are not trusted, they are tested against each other:
   number. About one generated program in sixteen stops, and which stop it was is
   compared as strictly as any number;
 - the generator is built to **saturate the machine it runs on** rather than testing
-  one program at a time. Batching first — compiling a program costs about 352× what
+  one program at a time. Batching first — compiling a program costs about 352x what
   running it costs, so many programs go in one module and one compilation covers all
   of them — and then batches are *claimed* from a shared counter rather than dealt
   out, because this machine has fast cores and slow ones and a fixed share leaves the
   fast ones waiting.
 
 Where it stands: **200,000 programs across two engines in 5.5 seconds**, 36,000 a
-second, on ten cores. One worker manages 8,000, so the cores are worth 4.6×.
+second, on ten cores. One worker manages 8,000, so the cores are worth 4.6x.
 
 Any disagreement is a bug in at least one engine, and the seed that produced it is
 kept so it can be replayed.
@@ -479,7 +480,7 @@ The Dev JIT is [**Cranelift**](https://github.com/bytecodealliance/wasmtime/tree
 from the Bytecode Alliance. It is the only third-party dependency Quench has, and
 it was picked for the thing it is best at: compiling fast enough that you do not
 notice it happened. **1.6 ms** to get a small program from QIR to machine code,
-and code within 1.4× of optimised LLVM on work that cannot be optimised — both of
+and code within 1.4x of optimised LLVM on work that cannot be optimised — both of
 those are Cranelift's numbers, not Quench's. See
 [notes/what-the-dev-jit-costs.md](notes/what-the-dev-jit-costs.md).
 
@@ -494,7 +495,7 @@ Licensed Apache-2.0 WITH LLVM-exception.
 
 The Hot JIT and AOT native paths will be [**LLVM**](https://llvm.org), and the
 reason is measured rather than assumed: Luarust's LLVM-compiled AOT output ran at
-**1.001× C** on the benchmark that started this project. That is not "close to
+**1.001x C** on the benchmark that started this project. That is not "close to
 C". That is C, with a different front end in front of it.
 
 None of that half exists yet — no C++ is written and LLVM is not a dependency

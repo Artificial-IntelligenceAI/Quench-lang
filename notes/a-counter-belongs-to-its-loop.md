@@ -60,7 +60,7 @@ It exists for one thing: after a `break`, the counter is the answer.
 
 ```quench
 loop.perm.range.i64 ['i'] = [*1*, *100*] {
-    if 'i' × 'i' > *10* { break; }
+    if 'i' x 'i' > *10* { break; }
 }
 print.stdout[str:*stopped at * 'i' \n];        # 4
 ```

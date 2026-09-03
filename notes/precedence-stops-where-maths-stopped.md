@@ -89,22 +89,22 @@ Suggested fix(s):
 | | written |
 | --- | --- |
 | add, subtract | `+` `-` |
-| multiply | `x` or `×` — **never `*`**, which is the mark a written value wears |
-| divide | `/` or `÷` |
+| multiply | `x` — **never `*`**, which is the mark a written value wears |
+| divide | `/` |
 | remainder | `mod` |
-| exponent | `^` or `xx` — multiplying twice |
-| compare | `<` `>` `</==` `>/==` `==` `!=` `≠` |
+| exponent | `^` |
+| compare | `<` `>` `<=` `>=` `==` `!=` |
 
-`x`, `xx`, `mod` and `eq-to` need no tokens at all: Quench reserves no words, so an
-operator spelled with letters costs nothing, and `x` is still available as a variable's
-name anywhere a name is wanted, because names are quoted.
+`x`, `mod`, `and`, `or` and `not` need no tokens at all: Quench reserves no words, so
+an operator spelled with letters costs nothing, and `x` is still available as a
+variable's name anywhere a name is wanted, because names are quoted.
 
 ## Two spellings that were not available
 
 **`**` for an exponent is impossible**, not merely ugly. `*a* ** *b*` lexes that `**`
 as an *empty written value* — the first `*` opens one, the second closes it. There is no
 arrangement where `**` is an exponent while `*` marks a value. Hence `^`, which is how
-mathematics writes it anyway, and `xx`.
+mathematics writes it anyway.
 
 Taking `^` costs an exclusive-or, since most languages spend `^` on that. Quench cannot
 follow them and also keep the rule at the top of this note.
@@ -121,14 +121,13 @@ have meant a declaration outside the brackets and a comparison inside them, deci
 where it sat — which is precisely what the marks exist to prevent, and would have made
 `=` the only symbol in the language that was not itself wherever you met it.
 
-So equality is `==`, or the word `eq-to`. Removing a block cost an operator, which is
-the sort of thing that is only visible once both decisions are on the table.
+So equality is `==`. Removing a block cost an operator, which is the sort of thing
+that is only visible once both decisions are on the table.
 
 ## `^` is built now, and takes its exponent from the type
 
 The exponent binds tightest, which mathematics settled: `[*2* + *3* ^ *2*]` is 11.
-Two spellings, `^` and `xx`, because `**` lexes as an empty written value and could
-never have been available.
+One spelling, `^`, because it is on the keyboard and `**` could never have been.
 
 It answers **by squaring**, in the runtime rather than as an instruction. A power
 needs a loop, and two engines each writing their own loop would be two chances to
@@ -150,36 +149,48 @@ the types being different, said out loud at the point it matters.
 A *fractional* exponent stops for an `e` too. The square root of two is the oldest
 number known not to be a ratio, and `e` holds ratios.
 
-## `</==`, and why division is a word
+## One spelling, and it is the one on your keyboard
 
 ```quench
-['a' </== 'b']     # `<` less than, `/` or, `==` equal to
-['a' div 'b']      # and division, which used to be `/`
++   -   x   /   ^        <   >   <=   >=   ==   !=
+mod   and   or   not
 ```
 
-It was `</=` for a long time, carried over from Luarust with the error format, and
-nobody looked at it. Read as its pieces it says *less than, or divide, or assign* —
-because in Quench `/` divided and `=` assigned. Every piece of it was wrong.
+That is the whole list, and each thing appears once. There is no `×`, no `÷`, no `≠`,
+no `xx`, no `eq-to`. Two spellings for one operator is a decision a reader has to make
+for no reason, and the reason they had accumulated was that each seemed harmless on
+its own.
 
-`</==` fixes that by making each piece mean what it says, which needs `/` to mean
-**or** — and `/` cannot mean *or* and *divide* in the same expression. So one of the
-two had to move, and division was the one with a word available: `div`, beside `mod`,
-where it reads like what it is.
+**The rule is: whatever is on the keyboard.** Where mathematics has a symbol and a
+keyboard has it, that is the spelling. Where a keyboard does not — `×`, `÷`, `≤`, `≥`,
+`≠` — the keyboard's own way of writing it is the spelling, and there is no second one
+kept around for people with a compose key.
 
-Two things fall out that are worth having.
+Multiplication is the one exception and it proves the rule: `*` is the written-value
+mark, so no symbol is free, so it is the word **`x`**. That works here and would not
+work anywhere else — a bare `x` cannot be a name in Quench, because names wear quotes.
 
-**A lone `/` is now nothing**, and says so rather than being read as something:
+### Which is the same rule as the one above
 
-```text
-`/` on its own is not an operator.
-Rule(s) broken: `/` is the `or` inside `</==` and `>/==`, and nothing else
-Tip(s): division is a word, which is what let `/` mean `or` at all.
-Suggested fix(s): `div` for division, or `÷`
-```
+`mod`, `and`, `or` and `not` stay words, and the reason is the whole of this note:
+nothing ever settled where they bind. What is worth noticing is that this is not a
+second rule bolted on. **Things get a symbol by being settled long enough for one to
+stick.** The operators with universal symbols are exactly the operators mathematics
+agreed about, which is why "use the keyboard symbol" and "keep the invented ones as
+words" turn out to be one rule seen twice.
 
-**And `div` beside `mod` makes an asymmetry visible that was always there.** They
-look alike and they do not bind alike: `[*a* div *b* + *c*]` is `(a div b) + c`,
-because mathematics settled where division sits, and `[*a* mod *b* + *c*]` is an
-error, because nothing ever settled where `mod` does. That was true when division was
-`/` and nobody could see it. Now the two are the same shape on the page and the
-difference is the language's, not the punctuation's.
+### What was tried first
+
+`</=` came from Luarust with the error format and nobody looked at it: read as its
+pieces it said *less than, or divide, or assign*, because `/` divided and `=`
+assigned.
+
+The first fix was `</==` — `<` less than, `/` or, `==` equal to — which composes
+properly and cost division its symbol, since `/` cannot mean *or* and *divide* in one
+expression. Division became `div` for about an hour.
+
+Both were answering a question that turned out to be the wrong one. **`<=` is not a
+composition.** It is how a keyboard writes `≤`, one token, and the `=` in it is no more
+an assignment than the one in `!=` — which nobody has ever read as *not assign*. Once
+that is the rule, `</==` and `div` both go, and so do five alternate spellings that
+had nothing to do with the original problem.

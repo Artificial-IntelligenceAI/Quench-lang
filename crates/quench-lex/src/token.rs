@@ -67,7 +67,7 @@ pub enum Kind {
     /// `-`, when it stands alone. Inside a word it is part of the word, so
     /// `no-visibility-stated` is one thing rather than three and two subtractions.
     Minus,
-    /// `×`, the multiplication sign.
+    /// `x`, the multiplication sign.
     ///
     /// `*` cannot be multiplication here — it is the mark a written value wears — so the
     /// word `x` does the job as well, and arrives as a [`Kind::Word`] for the parser to
@@ -78,7 +78,7 @@ pub enum Kind {
     /// `**` as an *empty written value*, because the first `*` opens one and the second
     /// closes it.
     Times,
-    /// `/` or `÷`.
+    /// `/` or `/`.
     Slash,
     /// `^` — an exponent, as mathematics writes one. The word `xx` says the same thing.
     ///
@@ -92,11 +92,11 @@ pub enum Kind {
     Less,
     /// `>`
     Greater,
-    /// `</==` — less than, or equal. The `/` is part of the operator, not a division.
+    /// `<=` — less than, or equal. The `/` is part of the operator, not a division.
     LessEqual,
-    /// `>/==`
+    /// `>=`
     GreaterEqual,
-    /// `!=` or `≠`. Also spelled `not=`, which arrives as the word `not` and an `=`.
+    /// `!=` or `!=`. Also spelled `not=`, which arrives as the word `not` and an `=`.
     NotEqual,
 
     /// A bare word: a chain part, a type, or the name of a block. Never a variable's name.
@@ -155,13 +155,13 @@ impl Kind {
             Kind::EqualTo => "`==`",
             Kind::Plus => "`+`",
             Kind::Minus => "`-`",
-            Kind::Times => "`\u{d7}`",
+            Kind::Times => "`x`",
             Kind::Slash => "`/`",
             Kind::Power => "`^`",
             Kind::Less => "`<`",
             Kind::Greater => "`>`",
-            Kind::LessEqual => "`</==`",
-            Kind::GreaterEqual => "`>/==`",
+            Kind::LessEqual => "`<=`",
+            Kind::GreaterEqual => "`>=`",
             Kind::NotEqual => "`!=`",
             Kind::Word => "a word",
             Kind::Number => "a bare number",

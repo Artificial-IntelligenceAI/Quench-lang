@@ -9,7 +9,7 @@
 //! It is also, for the programs an oracle actually runs, the **fastest** engine —
 //! which is not obvious and was measured rather than assumed. Compiling a small program
 //! with Cranelift costs about 103µs and running the result about 292ns, so compilation
-//! is roughly 352× the execution. An interpreter skips the 103µs entirely. Even at a
+//! is roughly 352x the execution. An interpreter skips the 103µs entirely. Even at a
 //! hundred times native speed it finishes in a third of the time the Dev JIT spends
 //! before it has run anything at all. See `crates/quench-dev/examples/cost.rs`.
 //!
