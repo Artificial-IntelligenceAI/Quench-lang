@@ -326,11 +326,11 @@ fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
     }
 }
 
-/// The name of that number type, for saying which one it was.
-fn made_number(ty: &Ty) -> String {
+/// The number type at the bottom of this, for saying which one it was.
+fn made_number(ty: &Ty) -> &Ty {
     match ty {
         Ty::Arr { of, .. } => made_number(of),
-        other => other.name(),
+        other => other,
     }
 }
 
@@ -698,11 +698,18 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if holds_a_made_number(&ty) {
+                let made = made_number(&ty);
+                let (article, name) = (made.article(), made.name());
+                let said = if matches!(ty, Ty::Arr { .. }) {
+                    format!("a constant array of `{name}` is not built yet.")
+                } else {
+                    format!("a constant `{name}` is not built yet.")
+                };
                 self.errors.push(
-                    Diagnostic::new("E0485", format!("a constant array of `{}` is not built yet.", made_number(&ty)))
+                    Diagnostic::new("E0485", said)
                         .primary(at, "here")
-                        .rule("a table holds what each slot holds, and this kind of slot holds a handle the runtime makes rather than a number the module can carry")
-                        .tip("every other element type is a number, a nought-or-one, or which piece of text — all of them known before anything runs.")
+                        .rule(format!("a constant is written into the module before anything runs, and {article} `{name}` is a handle the runtime makes rather than a number the module can carry"))
+                        .tip("every other number type fits in the module as itself — a whole number, or the bits of a binary float — all of them known before anything runs.")
                         .fix("declare it inside a function with `var` for now"),
                 );
                 continue;
@@ -1959,10 +1966,22 @@ impl<'a> Checker<'a> {
             return None;
         }
 
+        // An index is counted, so it is read as a whole number wherever it is written.
+        // Without this it is read as whatever the chain around it said, and
+        // `['xs'[*1*] + 'xs'[*2*]]` under a `b64` chain refuses its own `*1*`.
+        let outer =
+            std::mem::replace(&mut self.reading, Ty::Int { bits: 64, signed: true });
         let mut built = Vec::with_capacity(indices.len());
         for index in indices {
-            let value = self.term(index)?;
-            let found = self.type_of(&value, index.span())?;
+            let value = self.term(index);
+            let Some(value) = value else {
+                self.reading = outer;
+                return None;
+            };
+            let Some(found) = self.type_of(&value, index.span()) else {
+                self.reading = outer;
+                return None;
+            };
             if !matches!(found, Ty::Int { .. }) {
                 self.errors.push(
                     Diagnostic::new("E0435", format!("an index is a number, and this is {} `{}`.", found.article(), found.name()))
@@ -1970,10 +1989,12 @@ impl<'a> Checker<'a> {
                         .rule("an element is found by counting, and counting is done with numbers")
                         .fix("use a whole number"),
                 );
+                self.reading = outer;
                 return None;
             }
             built.push(value);
         }
+        self.reading = outer;
 
         // One `At` per allocation walked through, which is one `array-get` each. The
         // lowering needs nothing new: it already follows a handle and indexes it.

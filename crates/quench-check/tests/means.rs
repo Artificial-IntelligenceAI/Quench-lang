@@ -994,3 +994,36 @@ START {
 ";
     assert!(codes(source).is_empty(), "{}", errors(source));
 }
+
+#[test]
+fn an_index_is_read_as_a_number_whatever_is_around_it() {
+    // A value with an operator in it is read under the chain's type, which is how
+    // `*200*` is a `u8` in one line and a mistake in the next. An index is not part of
+    // that: it is counted, so it is a whole number wherever it is written, and this
+    // used to refuse its own `*1*` under any chain that was not a whole number itself.
+    for chain in ["b64", "b32", "b16", "d64", "e"] {
+        let source = format!(
+            "START {{ var.immut.arr.{chain} (2) ['xs'] = [*1* *2*]; \
+             var.immut.{chain} ['sum'] = ['xs'[*1*] + 'xs'[*2*]]; print.stdout['sum']; }}"
+        );
+        assert!(codes(&source).is_empty(), "{}", errors(&source));
+    }
+
+    // And a real mistake in an index still says so.
+    let wrong = errors("START { var.immut.arr.i64 (2) ['xs'] = [*1* *2*]; var.immut.i64 ['n'] = ['xs'[*a*] + *1*]; }");
+    assert!(wrong.contains("Error code: E0407"), "{wrong}");
+}
+
+#[test]
+fn a_constant_that_is_not_an_array_is_not_called_one() {
+    // The rule is about what a constant can hold, and it caught scalars too -- while
+    // telling them they were arrays.
+    let scalar = errors("const.file.d64 ['RATE'] = [*0.0825*]; START { }");
+    assert!(scalar.contains("a constant `d64` is not built yet"), "{scalar}");
+    assert!(scalar.contains("a `d64` is a handle"), "{scalar}");
+    assert!(!scalar.contains("array"), "{scalar}");
+
+    let array = errors("const.file.arr.e (2) ['R'] = [*1/2* *1/3*]; START { }");
+    assert!(array.contains("a constant array of `e` is not built yet"), "{array}");
+    assert!(array.contains("an `e` is a handle"), "{array}");
+}
