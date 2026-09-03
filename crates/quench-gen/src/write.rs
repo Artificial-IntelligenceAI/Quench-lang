@@ -144,6 +144,13 @@ pub fn program_under(
         let held = b.const_i64(keep);
         b.call_host(Host::DecimalRead, &[piece, held])
     };
+    // The same for an `e`, which is read from text for the same reason: what it reads
+    // to is a ratio of unbounded integers and does not fit in anything the IR carries.
+    let exactly = |b: &mut Builder, module: &mut Module, text: &str| {
+        let at = module.intern(text);
+        let piece = b.const_text(at);
+        b.call_host(Host::ExactRead, &[piece])
+    };
     // Written values rather than made ones, because reading is what a source does and
     // the cohort a literal arrives with is part of what the arithmetic has to keep.
     let mut decimals: Vec<Value> = vec![
@@ -154,9 +161,38 @@ pub fn program_under(
         written(&mut b, module, &format!("{}", rng.upto(1000) as i64 - 500)),
     ];
 
+    // Exact numbers, read from text the way a program's would be. A ratio, a decimal
+    // point that is exact here, a whole number and a negative one.
+    let mut exacts: Vec<Value> = vec![
+        exactly(&mut b, module, "1/3"),
+        exactly(&mut b, module, "0.1"),
+        exactly(&mut b, module, &format!("{}", rng.upto(1000) as i64 - 500)),
+        exactly(&mut b, module, "-1"),
+    ];
+
+    // Pieces of text, including two that differ only past the end of the shorter, since
+    // that is the comparison a length check would get wrong.
+    let mut texts: Vec<Value> = ["", "a", "ab", "b"]
+        .iter()
+        .map(|t| {
+            let at = module.intern(t);
+            b.const_text(at)
+        })
+        .collect();
+
+    // One array to start with, for the same reason there are numbers and floats to
+    // start with: a program whose first array step has to allocate before it can index
+    // spends most of its array steps allocating and never reaches the rest.
+    let mut handles: Vec<Value> = {
+        let long = b.const_i64(rng.upto(6) as i64 + 1);
+        let kind = b.const_i64(0); // `Elements::I64`
+        let deep = b.const_i64(0);
+        vec![b.call_host(Host::ArrayNew, &[long, kind, deep])]
+    };
+
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(13) {
+        match rng.upto(18) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -237,6 +273,177 @@ pub fn program_under(
                     b.bin(op, lhs, rhs)
                 };
                 numbers.push(value);
+            }
+            13 => {
+                // `e` and text, the last two things that allocate and the last two the
+                // oracle had never seen. Both engines call the same code to work an `e`
+                // out, as they do for a decimal -- so what this checks is the plumbing
+                // around it: a handle surviving a call, and a comparison becoming a flag.
+                if rng.upto(2) == 0 {
+                    let (l, r) = (rng.pick(&exacts), rng.pick(&exacts));
+                    let made = match rng.upto(6) {
+                        0 => b.call_host(Host::ExactAdd, &[l, r]),
+                        1 => b.call_host(Host::ExactSub, &[l, r]),
+                        2 => b.call_host(Host::ExactMul, &[l, r]),
+                        // Dividing by nought stops here, unlike a decimal: a ratio has
+                        // no infinity to hand back. Kept rare for the usual reason.
+                        3 => {
+                            let divisor =
+                                if rng.upto(8) == 0 { r } else { exactly(&mut b, module, "3") };
+                            b.call_host(Host::ExactDiv, &[l, divisor])
+                        }
+                        // A whole exponent, and sometimes a negative one, which is
+                        // where an `e` parts company with an `i64`.
+                        4 => {
+                            let exponent = exactly(
+                                &mut b,
+                                module,
+                                &format!("{}", rng.upto(6) as i64 - 2),
+                            );
+                            b.call_host(Host::ExactPow, &[l, exponent])
+                        }
+                        _ => {
+                            let sign = b.call_host(Host::ExactCompare, &[l, r]);
+                            let zero = b.const_i64(0);
+                            let how = match rng.upto(3) {
+                                0 => CmpOp::Lt,
+                                1 => CmpOp::Eq,
+                                _ => CmpOp::Gt,
+                            };
+                            flags.push(b.cmp(how, sign, zero));
+                            continue;
+                        }
+                    };
+                    exacts.push(made);
+                    continue;
+                }
+
+                // Text, whose one arithmetic is joining and whose one question is which
+                // of two comes first. Joined pieces go past the end of the module's
+                // table into one the runtime keeps, which is the part worth checking.
+                let (l, r) = (rng.pick(&texts), rng.pick(&texts));
+                if rng.upto(2) == 0 {
+                    let joined = b.call_host(Host::TextJoin, &[l, r]);
+                    texts.push(joined);
+                    continue;
+                }
+                let order = b.call_host(Host::TextCompare, &[l, r]);
+                let zero = b.const_i64(0);
+                let how = match rng.upto(3) {
+                    0 => CmpOp::Lt,
+                    1 => CmpOp::Eq,
+                    _ => CmpOp::Gt,
+                };
+                flags.push(b.cmp(how, order, zero));
+            }
+            12 => {
+                // Arrays, which nothing generated had ever asked for -- and with them
+                // the collector, and the Dev JIT's shadow root slots, which are its own
+                // machinery and have no counterpart in the interpreter. Allocation is
+                // the one thing here that happens *between* the two engines rather than
+                // inside each, so it is the last place they could quietly differ.
+                let kind = b.const_i64(0); // `Elements::I64`
+                let deep = b.const_i64(0);
+
+                if rng.upto(5) == 0 {
+                    let long = b.const_i64(rng.upto(6) as i64 + 1);
+                    let made = b.call_host(Host::ArrayNew, &[long, kind, deep]);
+                    handles.push(made);
+                    continue;
+                }
+
+                let handle = rng.pick(&handles);
+                match rng.upto(6) {
+                    // Mostly in range, because a program that stops on its first index
+                    // exercises one call and then nothing. One in eight is whatever
+                    // turned up, which is how the bounds trap gets written at all.
+                    0 => {
+                        let at = if rng.upto(8) == 0 {
+                            rng.pick(&numbers)
+                        } else {
+                            b.const_i64(1)
+                        };
+                        let got = b.call_host(Host::ArrayGet, &[handle, at]);
+                        numbers.push(got);
+                    }
+                    1 => {
+                        let at = if rng.upto(8) == 0 {
+                            rng.pick(&numbers)
+                        } else {
+                            b.const_i64(1)
+                        };
+                        let value = rng.pick(&numbers);
+                        b.call_host(Host::ArraySet, &[handle, at, value]);
+                    }
+                    2 => {
+                        let long = b.call_host(Host::ArrayLen, &[handle]);
+                        numbers.push(long);
+                    }
+                    // Growing, which is where an array is reallocated underneath every
+                    // name that reaches it.
+                    3 => {
+                        let value = rng.pick(&numbers);
+                        b.call_host(Host::ArrayPush, &[handle, value]);
+                    }
+                    // A second array holding the same things, which is the one way to
+                    // find out whether a collection freed a row that was still live.
+                    4 => {
+                        let copied = b.call_host(Host::ArrayCopy, &[handle]);
+                        let same =
+                            b.call_host(Host::ArrayEqual, &[handle, copied, kind, deep]);
+                        handles.push(copied);
+                        flags.push(same);
+                    }
+                    _ => {
+                        let other = rng.pick(&handles);
+                        let same =
+                            b.call_host(Host::ArrayEqual, &[handle, other, kind, deep]);
+                        flags.push(same);
+                    }
+                }
+            }
+            11 => {
+                // The unsigned side of whole numbers, which nothing generated reached.
+                // A `u64` is the one width whose comparison, division and overflow have
+                // to read the same bits as unsigned rather than being put back inside a
+                // narrower type afterwards -- so it is the one width where the
+                // *operation* differs, and the only one an engine could get wrong on
+                // its own.
+                let lhs = rng.pick(&numbers);
+                let (add, sub, mul) = match settings.overflow {
+                    Overflow::Wrap => (BinOp::Add, BinOp::Sub, BinOp::Mul),
+                    Overflow::Trap => {
+                        (BinOp::AddTrappingU, BinOp::SubTrappingU, BinOp::MulTrappingU)
+                    }
+                };
+                let value = match rng.upto(5) {
+                    0 => b.bin(add, lhs, rng.pick(&numbers)),
+                    1 => b.bin(sub, lhs, rng.pick(&numbers)),
+                    2 => b.bin(mul, lhs, rng.pick(&numbers)),
+                    // A divisor of nought stops here as it does anywhere, and one in
+                    // eight is whatever turned up so that it can.
+                    op => {
+                        let divisor = if rng.upto(8) == 0 {
+                            rng.pick(&numbers)
+                        } else {
+                            b.const_i64(rng.upto(9_999) as i64 + 2)
+                        };
+                        b.bin(if op == 3 { BinOp::DivU } else { BinOp::RemU }, lhs, divisor)
+                    }
+                };
+                numbers.push(value);
+                // And the unsigned comparison, which reads the same bits differently:
+                // `-1` is the largest number there is when it is read as a `u64`.
+                if rng.upto(3) == 0 {
+                    let (l, r) = (rng.pick(&numbers), rng.pick(&numbers));
+                    let how = match rng.upto(4) {
+                        0 => CmpOp::Lt,
+                        1 => CmpOp::Le,
+                        2 => CmpOp::Gt,
+                        _ => CmpOp::Ge,
+                    };
+                    flags.push(b.cmp_unsigned(how, l, r));
+                }
             }
             5 | 6 => {
                 let (lhs, rhs) = (rng.pick(&numbers), rng.pick(&numbers));
