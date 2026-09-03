@@ -31,6 +31,29 @@ pub enum Stmt {
     Print(Print),
     Var(Var),
     Set(Set),
+    If(If),
+}
+
+/// `if … { } else-if … { } else { }`
+///
+/// The condition wears no brackets, because `[ ]` holds a *list* everywhere else and a
+/// condition is never a list. It runs until the `{`, which is unambiguous: `{` only ever
+/// opens a block, so nothing inside an expression can be mistaken for the end of one.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct If {
+    /// `if` and every `else-if`, asked in order.
+    pub arms: Vec<Arm>,
+    /// The `else`, if there is one. There is only ever one, and it comes last.
+    pub otherwise: Option<Vec<Stmt>>,
+    pub span: Span,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Arm {
+    /// `if` or `else-if`, for pointing at.
+    pub word: Span,
+    pub condition: Value,
+    pub body: Vec<Stmt>,
 }
 
 /// `set ['x'] = [*5*];` — changing something that already exists.
@@ -75,6 +98,7 @@ impl Stmt {
             Stmt::Print(p) => p.span,
             Stmt::Var(v) => v.span,
             Stmt::Set(s) => s.span,
+            Stmt::If(i) => i.span,
         }
     }
 }

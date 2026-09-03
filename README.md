@@ -94,6 +94,12 @@ Both print the same thing, which is not a coincidence — it is
   both produced famous traps: the lesson is not that C chose wrong but that there was
   nothing to choose. See
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
+- **Deciding.** `if 'n' > *10* { … } else-if … { … } else { … }`. The condition
+  wears no brackets, because `[ ]` holds a *list* everywhere else and a condition is
+  never one; it runs until the `{`, which is unambiguous. **`else-if` is one word**,
+  so chaining and nesting are different syntax rather than the same syntax read two
+  ways — the dangling-else problem does not arise. Nothing is truthy: a condition is
+  a `bool` and there is no second way to be one.
 - **`set` changes things**, and `mut` finally means something: `set ['total'] =
   ['total' + *55*];`, `set ['xs'[*2*]] = [*99*];`. Changing something not declared
   `mut` is refused, with the line that would have worked.

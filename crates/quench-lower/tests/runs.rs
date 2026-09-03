@@ -385,3 +385,70 @@ fn the_overflow_setting_reaches_the_answer() {
         Outcome::Trapped(Trap::Overflowed)
     );
 }
+
+#[test]
+fn exactly_one_arm_runs() {
+    let source = "START {
+        var.i64 ['n'] = [*12*];
+        if 'n' > *100* { print[str:*huge*]; }
+        else-if 'n' > *10* { print[str:*big*]; }
+        else-if 'n' > *1*  { print[str:*small*]; }
+        else { print[str:*tiny*]; }
+    }";
+    assert_eq!(said(source), "big", "the first that held, and no other");
+}
+
+#[test]
+fn an_if_with_no_else_may_do_nothing_at_all() {
+    assert_eq!(said("START { if *1* > *2* { print[str:*no*]; } print[str:*after*]; }"), "after");
+    assert_eq!(said("START { if *2* > *1* { print[str:*yes*]; } print[str:*after*]; }"), "yesafter");
+}
+
+#[test]
+fn a_variable_changed_in_one_arm_is_changed_after_it() {
+    // Which is the whole of the block-parameter work: `label` is a different value
+    // depending on which arm ran, and afterwards it is whichever one that was.
+    let source = "START {
+        var.i64 ['n'] = [*12*];
+        var.mut.i64 ['label'] = [*0*];
+        if 'n' > *100* { set ['label'] = [*3*]; }
+        else-if 'n' > *10* { set ['label'] = [*2*]; }
+        else { set ['label'] = [*1*]; }
+        print['label'];
+    }";
+    assert_eq!(said(source), "2");
+}
+
+#[test]
+fn a_variable_left_alone_in_an_arm_keeps_what_it_had() {
+    let source = "START {
+        var.mut.i64 ['n'] = [*7*];
+        if *1* > *2* { set ['n'] = [*99*]; }
+        print['n'];
+    }";
+    assert_eq!(said(source), "7");
+}
+
+#[test]
+fn conditionals_nest() {
+    let source = "START {
+        var.i64 ['a'] = [*2*];
+        var.mut.str ['out'] = [*none*];
+        if 'a' > *1* {
+            if 'a' > *5* { set ['out'] = [*both*]; }
+            else { set ['out'] = [*outer only*]; }
+        }
+        print['out'];
+    }";
+    assert_eq!(said(source), "outer only");
+}
+
+#[test]
+fn an_arm_can_change_an_array_element() {
+    let source = "START {
+        var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]];
+        if *2* > *1* { set ['xs'[*2*]] = [*99*]; }
+        print['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
+    }";
+    assert_eq!(said(source), "1,99,3");
+}

@@ -1,0 +1,22 @@
+START {
+    var.i64 ['n'] = [*12*];
+
+    if 'n' > *10* {
+        print[str:*big* \n];
+    } else-if 'n' == *10* {
+        print[str:*exactly ten* \n];
+    } else {
+        print[str:*small* \n];
+    }
+
+    # A variable changed inside an arm is whichever value the arm that ran left.
+    var.mut.str ['size'] = [*none*];
+    if 'n' > *100* {
+        set ['size'] = [*huge*];
+    } else-if 'n' > *10* {
+        set ['size'] = [*big*];
+    } else {
+        set ['size'] = [*small*];
+    }
+    print[str:*size is * 'size' \n];
+}

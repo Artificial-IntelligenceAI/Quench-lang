@@ -44,6 +44,17 @@ impl Ty {
         }
     }
 
+    /// `a` or `an`, for the name of this type.
+    ///
+    /// Small, and worth having: a language whose selling point is its errors cannot
+    /// write "a i64" in them.
+    pub fn article(&self) -> &'static str {
+        match self {
+            Ty::I64 | Ty::Arr { .. } => "an",
+            Ty::Str | Ty::Bool => "a",
+        }
+    }
+
     /// How many elements one of these holds, all told.
     pub fn count(&self) -> usize {
         match self {
@@ -142,9 +153,25 @@ pub enum Printed {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Stmt {
     Declare { local: LocalId, value: Value },
+    /// Arms asked in order; exactly one body runs, or none if nothing held and there is
+    /// no `else`.
+    If {
+        arms: Vec<Arm>,
+        otherwise: Option<Vec<Stmt>>,
+        /// How many locals existed before this. Anything declared inside an arm is gone
+        /// at the closing brace, so only these have to be carried across the join.
+        live: u32,
+    },
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
     Print(Vec<Printed>),
+}
+
+/// One `if` or `else-if`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Arm {
+    pub condition: Value,
+    pub body: Vec<Stmt>,
 }
 
 /// Somewhere a value can be put.
@@ -173,7 +200,7 @@ impl Checked {
 pub fn check(source: &str) -> Checked {
     let Parsed { program, errors } = quench_parse::parse(source);
     let mut checker =
-        Checker { source, locals: Vec::new(), scope: HashMap::new(), body: Vec::new(), errors };
+        Checker { source, locals: Vec::new(), scope: vec![HashMap::new()], body: Vec::new(), errors };
 
     let has_start = program.start.is_some();
     if let Some(start) = &program.start {
@@ -193,8 +220,12 @@ pub fn check(source: &str) -> Checked {
 struct Checker<'a> {
     source: &'a str,
     locals: Vec<Local>,
-    /// Name to declaration. One scope for now, because there is only one block.
-    scope: HashMap<String, LocalId>,
+    /// Name to declaration, innermost last.
+    ///
+    /// A block is a scope: a variable declared inside an arm is gone at the closing
+    /// brace, because an `if` introduces nothing of its own and so has nothing to say
+    /// about how long what is inside it lives.
+    scope: Vec<HashMap<String, LocalId>>,
     body: Vec<Stmt>,
     errors: Vec<Diagnostic>,
 }
@@ -215,6 +246,7 @@ impl<'a> Checker<'a> {
             ast::Stmt::Var(var) => self.declare(var),
             ast::Stmt::Print(print) => self.print(print),
             ast::Stmt::Set(set) => self.set(set),
+            ast::Stmt::If(conditional) => self.conditional(conditional),
         }
     }
 
@@ -229,7 +261,7 @@ impl<'a> Checker<'a> {
             // Checked before the type is, so that declaring `'x'` twice is reported as
             // declaring it twice even when the second one also names a type that is not
             // built. The name is what collided.
-            if let Some(before) = self.scope.get(&name) {
+            if let Some(before) = self.seen(&name) {
                 let first = &self.locals[before.0 as usize];
                 self.errors.push(
                     Diagnostic::new("E0201", format!("`'{name}'` is declared twice."))
@@ -261,7 +293,7 @@ impl<'a> Checker<'a> {
                 at: *name_span,
                 chain: chain_span,
             });
-            self.scope.insert(name, local);
+            self.scope.last_mut().expect("a scope is always open").insert(name, local);
             self.body.push(Stmt::Declare { local, value });
         }
     }
@@ -440,7 +472,7 @@ impl<'a> Checker<'a> {
         let found = self.type_of(&built, value.span)?;
         if &found != ty {
             self.errors.push(
-                Diagnostic::new("E0406", format!("this works out to `{}`, and it is being given to a `{}`.", found.name(), ty.name()))
+                Diagnostic::new("E0406", format!("this works out to {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
                     .primary(value.span, format!("a `{}`", found.name()))
                     .secondary(ty_span, format!("declared `{}` here", ty.name()))
                     .rule("nothing converts on its own — two types meet only where something says they should")
@@ -459,7 +491,7 @@ impl<'a> Checker<'a> {
             let held = self.locals[local.0 as usize].ty.clone();
             if &held != ty {
                 self.errors.push(
-                    Diagnostic::new("E0406", format!("this is `{}`, and it is being given to a `{}`.", held.name(), ty.name()))
+                    Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", held.article(), held.name(), ty.article(), ty.name()))
                         .primary(*span, format!("a `{}`", held.name()))
                         .secondary(ty_span, format!("declared `{}` here", ty.name()))
                         .rule("nothing converts on its own — two types meet only where something says they should")
@@ -549,7 +581,7 @@ impl<'a> Checker<'a> {
                     let found = self.type_of(&built, one.span())?;
                     if found != Ty::I64 {
                         self.errors.push(
-                            Diagnostic::new("E0406", format!("this is `{}`, and it is being given to a `i64`.", found.name()))
+                            Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to an `i64`.", found.article(), found.name()))
                                 .primary(one.span(), format!("a `{}`", found.name()))
                                 .secondary(ty_span, "declared `i64` here")
                                 .rule("nothing converts on its own — two types meet only where something says they should")
@@ -619,7 +651,7 @@ impl<'a> Checker<'a> {
             let found = self.type_of(&built, term.span())?;
             if &found != of {
                 self.errors.push(
-                    Diagnostic::new("E0432", format!("this is `{}`, and the array holds `{}`.", found.name(), of.name()))
+                    Diagnostic::new("E0432", format!("this is {} `{}`, and the array holds {} `{}`.", found.article(), found.name(), of.article(), of.name()))
                         .primary(term.span(), format!("a `{}`", found.name()))
                         .secondary(ty_span, format!("declared `arr.{}` here", of.name()))
                         .rule("every element of an array is the type the array said, and nothing converts on its own")
@@ -668,7 +700,7 @@ impl<'a> Checker<'a> {
             let found = self.type_of(&value, index.span())?;
             if found != Ty::I64 {
                 self.errors.push(
-                    Diagnostic::new("E0435", format!("an index is a number, and this is `{}`.", found.name()))
+                    Diagnostic::new("E0435", format!("an index is a number, and this is {} `{}`.", found.article(), found.name()))
                         .primary(index.span(), "here")
                         .rule("an element is found by counting, and counting is done with numbers")
                         .fix("use a whole number"),
@@ -854,11 +886,28 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let (l, r) = (self.type_of(lhs, span)?, self.type_of(rhs, span)?);
+
+                // Two things are the same or they are not, whatever they are. Which of
+                // two is *larger* only means something for numbers.
+                let same_or_not = matches!(op, OpKind::Eq | OpKind::Ne);
+                if same_or_not && l == r {
+                    return Some(Ty::Bool);
+                }
+                if same_or_not {
+                    self.errors.push(
+                        Diagnostic::new("E0441", format!("`{}` compares two of the same thing.", op.written()))
+                            .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
+                            .rule("nothing converts on its own, so two types are never equal — the question does not arise")
+                            .fix("compare two things of the same type"),
+                    );
+                    return None;
+                }
+
                 if l != Ty::I64 || r != Ty::I64 {
                     self.errors.push(
                         Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
-                            .primary(span, format!("a `{}` and a `{}`", l.name(), r.name()))
-                            .rule("arithmetic and comparison are for numbers, and nothing converts on its own")
+                            .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
+                            .rule("arithmetic and ordering are for numbers, and nothing converts on its own")
                             .fix("use numbers on both sides"),
                     );
                     return None;
@@ -934,6 +983,75 @@ impl<'a> Checker<'a> {
                 None
             }
         }
+    }
+
+    // --- deciding ---------------------------------------------------------------------
+
+    fn conditional(&mut self, conditional: &ast::If) {
+        let live = self.locals.len() as u32;
+        let mut arms = Vec::new();
+
+        for arm in &conditional.arms {
+            let Some(condition) = self.condition(&arm.condition, arm.word) else {
+                // The body is still checked, because a wrong condition is no reason to
+                // hide every mistake inside the arm as well.
+                let _ = self.scoped(&arm.body);
+                continue;
+            };
+            arms.push(Arm { condition, body: self.scoped(&arm.body) });
+        }
+
+        let otherwise = conditional.otherwise.as_ref().map(|body| self.scoped(body));
+        self.body.push(Stmt::If { arms, otherwise, live });
+    }
+
+    /// What an arm asks. It is a `bool`, and nothing else is.
+    fn condition(&mut self, value: &ast::Value, word: Span) -> Option<Value> {
+        let built = if value.has_operators() {
+            self.tree(value)?
+        } else if let [one] = value.terms.as_slice() {
+            self.term(one)?
+        } else {
+            self.errors.push(
+                Diagnostic::new("E0439", "this is more than one thing, and a question is one.")
+                    .primary(value.span, "here")
+                    .rule("what follows `if` is a single thing that is true or false")
+                    .fix("compare two things, or name one `bool`"),
+            );
+            return None;
+        };
+
+        let found = self.type_of(&built, value.span)?;
+        if found != Ty::Bool {
+            self.errors.push(
+                Diagnostic::new(
+                    "E0440",
+                    format!("`{}` asks something true or false, and this is {} `{}`.",
+                        self.text(word), found.article(), found.name()),
+                )
+                .primary(value.span, format!("{} `{}`", found.article(), found.name()))
+                .rule("nothing is truthy — a condition is a `bool` and there is no second way to be one")
+                .tip("a comparison makes one, and so does a `bool` variable.")
+                .fix(match found {
+                    Ty::I64 => "compare it against something, such as `> *0*`",
+                    _ => "compare it against something",
+                }),
+            );
+            return None;
+        }
+        Some(built)
+    }
+
+    /// Check a block with a scope of its own, and hand back what it means.
+    fn scoped(&mut self, body: &[ast::Stmt]) -> Vec<Stmt> {
+        self.scope.push(HashMap::new());
+        let outer = std::mem::take(&mut self.body);
+        for stmt in body {
+            self.statement(stmt);
+        }
+        let inner = std::mem::replace(&mut self.body, outer);
+        self.scope.pop();
+        inner
     }
 
     // --- changing ---------------------------------------------------------------------
@@ -1068,10 +1186,15 @@ impl<'a> Checker<'a> {
         self.body.push(Stmt::Print(pieces));
     }
 
+    /// Whether this name is already taken, anywhere still in scope.
+    fn seen(&self, name: &str) -> Option<LocalId> {
+        self.scope.iter().rev().find_map(|scope| scope.get(name)).copied()
+    }
+
     fn lookup(&mut self, span: Span) -> Option<LocalId> {
         let name = self.named(span);
-        match self.scope.get(&name) {
-            Some(local) => Some(*local),
+        match self.seen(&name) {
+            Some(local) => Some(local),
             None => {
                 let near = self.nearest(&name);
                 let mut diag =
@@ -1094,7 +1217,9 @@ impl<'a> Checker<'a> {
     /// the answer is worse than no suggestion: it costs the reader a second look.
     fn nearest(&self, name: &str) -> Option<String> {
         self.scope
-            .keys()
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.keys())
             .find(|known| within_one_edit(known, name))
             .cloned()
     }

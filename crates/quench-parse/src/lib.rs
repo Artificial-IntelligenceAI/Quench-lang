@@ -14,7 +14,7 @@
 
 pub mod ast;
 
-pub use ast::{OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
+pub use ast::{Arm, If, OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
 
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
@@ -111,7 +111,7 @@ impl<'a> Parser<'a> {
             let token = self.peek();
             if token.kind == Kind::Word && self.text(token.span) == quench_qir_entry() {
                 let word = self.bump().span;
-                match self.body() {
+                match self.block() {
                     Some(body) => program.start = Some(Start { word, body }),
                     None => self.recover(),
                 }
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
     ///
     /// The closing brace is what says where it ends, which is also what lets a file hold
     /// something after it.
-    fn body(&mut self) -> Option<Vec<Stmt>> {
+    fn block(&mut self) -> Option<Vec<Stmt>> {
         let open = self.expect(Kind::OpenBlock, "a block")?;
         let mut body = Vec::new();
 
@@ -194,13 +194,14 @@ impl<'a> Parser<'a> {
             "print" => self.print().map(Stmt::Print),
             "var" => self.var().map(Stmt::Var),
             "set" => self.set().map(Stmt::Set),
+            "if" => self.conditional().map(Stmt::If),
             other => {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var`, `set` or `print`")
+                        .rule("a statement begins with `var`, `set`, `print` or `if`")
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var`, `set` or `print`?"),
+                        .fix("did you mean `var`, `set`, `print` or `if`?"),
                 );
                 None
             }
@@ -229,6 +230,51 @@ impl<'a> Parser<'a> {
         self.expect(Kind::CloseList, "`print`")?;
         let end = self.expect(Kind::Semicolon, "a statement")?;
         Some(Print { word, pieces, span: word.to(end) })
+    }
+
+    /// `if … { } else-if … { } else { }`
+    fn conditional(&mut self) -> Option<ast::If> {
+        let start = self.peek().span;
+        let mut arms = Vec::new();
+        let mut otherwise = None;
+        let mut end;
+
+        loop {
+            let word = self.bump().span; // `if` or `else-if`
+            let condition = self.value()?;
+            if condition.terms.is_empty() {
+                self.errors.push(
+                    Diagnostic::new("E0111", "this asks nothing.")
+                        .primary(word, "here")
+                        .rule("`if` is followed by something that is true or false, and then a block")
+                        .fix("put a condition between it and the `{`"),
+                );
+                return None;
+            }
+            let body = self.block()?;
+            end = body.last().map(ast::Stmt::span).unwrap_or(word);
+            arms.push(ast::Arm { word, condition, body });
+
+            // `else-if` is one word, so chaining and nesting are different syntax rather
+            // than the same syntax read two ways. That is the whole of the dangling-else
+            // problem, absent.
+            if self.peek().kind != Kind::Word {
+                break;
+            }
+            match self.text(self.peek().span) {
+                "else-if" => continue,
+                "else" => {
+                    let word = self.bump().span;
+                    let body = self.block()?;
+                    end = body.last().map(ast::Stmt::span).unwrap_or(word);
+                    otherwise = Some(body);
+                    break;
+                }
+                _ => break,
+            }
+        }
+
+        Some(ast::If { arms, otherwise, span: start.to(end) })
     }
 
     /// `set ['x', 'xs'[*1*]] = [*5*, *9*];`
@@ -379,8 +425,10 @@ impl<'a> Parser<'a> {
         let mut terms = Vec::new();
         let mut between = Vec::new();
 
-        while !matches!(self.peek().kind, Kind::Comma | Kind::CloseList | Kind::CloseGroup | Kind::End)
-        {
+        while !matches!(
+            self.peek().kind,
+            Kind::Comma | Kind::CloseList | Kind::CloseGroup | Kind::OpenBlock | Kind::End
+        ) {
             if !terms.is_empty() {
                 // Either an operator, or nothing at all — and nothing at all is
                 // juxtaposition, which is how a list of pieces builds text.

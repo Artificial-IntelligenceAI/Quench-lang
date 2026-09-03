@@ -103,7 +103,7 @@ fn a_type_that_is_meant_to_exist_and_a_type_that_is_not_are_different_errors() {
 fn nothing_converts_on_its_own() {
     let source = "START { var.i64 ['n'] = [*1*]; var.str ['s'] = ['n']; }";
     let rendered = errors(source);
-    assert!(rendered.contains("this is `i64`, and it is being given to a `str`"), "{rendered}");
+    assert!(rendered.contains("this is an `i64`, and it is being given to a `str`"), "{rendered}");
     assert!(rendered.contains("two types meet only where something says they should"), "{rendered}");
 }
 
@@ -229,8 +229,8 @@ fn a_comparison_is_a_bool_and_a_sum_is_not() {
     assert!(check("START { var.bool ['b'] = [*1* < *2*]; }").ok());
 
     let rendered = errors("START { var.i64 ['n'] = [*1* < *2*]; }");
-    assert!(rendered.contains("works out to `bool`"), "{rendered}");
-    assert!(rendered.contains("given to a `i64`"), "{rendered}");
+    assert!(rendered.contains("works out to a `bool`"), "{rendered}");
+    assert!(rendered.contains("given to an `i64`"), "{rendered}");
 }
 
 #[test]
@@ -364,4 +364,63 @@ fn only_an_array_has_an_element_to_change() {
 fn set_gives_one_value_for_each_thing_it_changes() {
     let rendered = errors("START { var.mut.i64 ['a', 'b'] = [*1*, *2*]; set ['a', 'b'] = [*9*]; }");
     assert!(rendered.contains("two things changed, and one value given"), "{rendered}");
+}
+
+// --- deciding -----------------------------------------------------------------------
+
+#[test]
+fn a_condition_is_a_bool_and_nothing_is_truthy() {
+    assert!(check("START { var.i64 ['n'] = [*1*]; if 'n' > *0* { print[str:*yes*]; } }").ok());
+    assert!(check("START { var.bool ['f'] = [*true*]; if 'f' { print[str:*yes*]; } }").ok());
+
+    let rendered = errors("START { var.i64 ['n'] = [*1*]; if 'n' { print[str:*yes*]; } }");
+    assert!(rendered.contains("`if` asks something true or false, and this is an `i64`"), "{rendered}");
+    assert!(rendered.contains("nothing is truthy"), "{rendered}");
+    assert!(rendered.contains("such as `> *0*`"), "{rendered}");
+}
+
+#[test]
+fn an_arm_is_a_scope_of_its_own() {
+    // An `if` introduces nothing, so what is declared inside one is gone at the brace.
+    let rendered = errors(
+        "START { if *true* == *true* { var.i64 ['inside'] = [*1*]; } print['inside']; }",
+    );
+    assert!(rendered.contains("`'inside'` is not declared"), "{rendered}");
+
+    // And the same name may be used again afterwards, since the first one is gone.
+    assert!(check(
+        "START { if *true* == *true* { var.i64 ['x'] = [*1*]; } var.i64 ['x'] = [*2*]; }"
+    )
+    .ok());
+}
+
+#[test]
+fn a_wrong_condition_does_not_hide_what_is_inside_the_arm() {
+    let out = check("START { var.i64 ['n'] = [*1*]; if 'n' { print['nope']; } }");
+    let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
+    assert!(codes.contains(&"E0440"), "{codes:?}");
+    assert!(codes.contains(&"E0413"), "the undeclared name inside is reported too: {codes:?}");
+}
+
+#[test]
+fn the_same_or_not_works_on_anything_but_larger_only_on_numbers() {
+    // Two things are the same or they are not, whatever they are. Which of two is
+    // *larger* only means something for numbers.
+    assert!(check("START { var.bool ['b'] = [*true* == *false*]; }").ok());
+    assert!(check("START { var.bool ['b'] = [*1* == *2*]; }").ok());
+
+    let rendered = errors("START { var.bool ['b'] = [*true* > *false*]; }");
+    assert!(rendered.contains("`>` works on numbers"), "{rendered}");
+
+    let mixed = errors("START { var.str ['s'] = [*a*]; var.bool ['b'] = ['s' == *1*]; }");
+    assert!(mixed.contains("compares two of the same thing"), "{mixed}");
+    assert!(mixed.contains("two types are never equal"), "{mixed}");
+}
+
+#[test]
+fn types_get_the_right_article() {
+    // A language selling its error messages cannot write "a i64" in one.
+    let rendered = errors("START { var.str ['s'] = [*a*]; var.i64 ['n'] = ['s']; }");
+    assert!(rendered.contains("this is a `str`"), "{rendered}");
+    assert!(rendered.contains("given to an `i64`"), "{rendered}");
 }

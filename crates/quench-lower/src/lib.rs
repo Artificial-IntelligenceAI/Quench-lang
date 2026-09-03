@@ -5,7 +5,7 @@
 //! what is left is a transliteration, and that is the point of doing the checking first.
 //! Anything in this file that started to look like a judgement would belong further up.
 
-use quench_check::{Checked, OpKind, Place, Printed, Stmt, Ty, Value};
+use quench_check::{Arm, Checked, OpKind, Place, Printed, Stmt, Ty, Value};
 use quench_conf::{Division, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
@@ -64,28 +64,61 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
     let mut module = qir::Module::new();
     let mut b = qir::Builder::new(qir::ENTRY, &[], qir::Ty::I64);
 
-    // Where each variable's value ended up. A declaration fills one in; a use reads it.
+    // Where each variable's value ended up. A declaration fills one in; a use reads it;
+    // a join replaces the ones that could have come from either side.
     let mut held: Vec<Option<qir::Value>> = vec![None; checked.locals.len()];
 
-    for stmt in &checked.body {
+    lower_body(&mut b, &mut module, &checked.body, &mut held, checked, settings);
+
+    // A program that says nothing about how it ended, ended fine.
+    let nothing = b.const_i64(0);
+    b.ret(nothing);
+
+    let id = module.add(b.finish());
+    module.set_entry(id);
+    module
+}
+
+/// What a QIR value of this type looks like.
+fn qir_ty(ty: &Ty) -> qir::Ty {
+    match ty {
+        Ty::I64 => qir::Ty::I64,
+        Ty::Bool => qir::Ty::Bool,
+        Ty::Str => qir::Ty::Text,
+        Ty::Arr { .. } => qir::Ty::Handle,
+    }
+}
+
+fn lower_body(
+    b: &mut qir::Builder,
+    module: &mut qir::Module,
+    body: &[Stmt],
+    held: &mut Vec<Option<qir::Value>>,
+    checked: &Checked,
+    settings: Settings,
+) {
+    for stmt in body {
         match stmt {
             Stmt::Declare { local, value } => {
-                let value = emit(&mut b, &mut module, value, &held, settings);
+                let value = emit(b, module, value, held, settings);
                 held[local.0 as usize] = Some(value);
             }
-            // Changing a variable is naming a new value for it. With no control flow
-            // yet there is nothing to merge, so this is a write to the table -- and when
-            // there is, block parameters are what carry a name across a join.
+            // Changing a variable is naming a new value for it. Inside an arm that is
+            // still just a write here -- what makes it correct is that the join below
+            // takes whichever value the branch that ran left behind.
             Stmt::Assign { to, value } => {
-                let value = emit(&mut b, &mut module, value, &held, settings);
+                let value = emit(b, module, value, held, settings);
                 match to {
                     Place::Local(local) => held[local.0 as usize] = Some(value),
                     Place::Element { local, indices, shape } => {
                         let handle = held[local.0 as usize].expect("declared before used");
-                        let at = flat_index(&mut b, &mut module, indices, shape, &held, settings);
+                        let at = flat_index(b, module, indices, shape, held, settings);
                         b.call_host(qir::Host::ArraySet, &[handle, at, value]);
                     }
                 }
+            }
+            Stmt::If { arms, otherwise, live } => {
+                lower_if(b, module, arms, otherwise.as_deref(), *live, held, checked, settings);
             }
             Stmt::Print(pieces) => {
                 for piece in pieces {
@@ -96,7 +129,7 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
                             b.call_host(qir::Host::PrintText, &[value]);
                         }
                         Printed::Value { value, ty } => {
-                            let value = emit(&mut b, &mut module, value, &held, settings);
+                            let value = emit(b, module, value, held, settings);
                             let host = match ty {
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::I64 => qir::Host::PrintI64,
@@ -112,14 +145,68 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
             }
         }
     }
+}
 
-    // A program that says nothing about how it ended, ended fine.
-    let nothing = b.const_i64(0);
-    b.ret(nothing);
+/// `if` — arms asked in order, and the values they leave behind carried to one place.
+///
+/// This is where the lowering stops being a transliteration. Up to here a variable was
+/// one QIR value and `set` overwrote which; a variable changed inside an arm is a
+/// *different* value depending on which arm ran, and that is exactly what a block
+/// parameter is for. So the join takes one parameter per variable that existed before
+/// the `if`, and every path hands it whatever it ended up with.
+///
+/// Anything declared *inside* an arm is not carried. It is gone at the closing brace,
+/// which the checker already enforced by scope and which `live` records.
+fn lower_if(
+    b: &mut qir::Builder,
+    module: &mut qir::Module,
+    arms: &[Arm],
+    otherwise: Option<&[Stmt]>,
+    live: u32,
+    held: &mut Vec<Option<qir::Value>>,
+    checked: &Checked,
+    settings: Settings,
+) {
+    let carried: Vec<usize> = (0..live as usize).filter(|i| held[*i].is_some()).collect();
+    let types: Vec<qir::Ty> =
+        carried.iter().map(|i| qir_ty(&checked.locals[*i].ty)).collect();
+    let join = b.block(&types);
 
-    let id = module.add(b.finish());
-    module.set_entry(id);
-    module
+    // What each path hands the join: everything it is holding by then.
+    let handed = |held: &[Option<qir::Value>]| -> Vec<qir::Value> {
+        carried.iter().map(|i| held[*i].expect("checked above")).collect()
+    };
+
+    let before = held.clone();
+    for arm in arms {
+        let condition = emit(b, module, &arm.condition, held, settings);
+        let taken = b.block(&[]);
+        let next = b.block(&[]);
+        b.br_if(condition, (taken, &[]), (next, &[]));
+
+        b.switch_to(taken);
+        // Each arm starts from what was true before the `if`, not from what the arm
+        // before it did -- only one of them ever runs.
+        *held = before.clone();
+        lower_body(b, module, &arm.body, held, checked, settings);
+        let leaving = handed(held);
+        b.jump(join, &leaving);
+
+        b.switch_to(next);
+    }
+
+    // Nothing held. Whatever the `else` says, or nothing at all.
+    *held = before.clone();
+    if let Some(body) = otherwise {
+        lower_body(b, module, body, held, checked, settings);
+    }
+    let leaving = handed(held);
+    b.jump(join, &leaving);
+
+    b.switch_to(join);
+    for (n, i) in carried.iter().enumerate() {
+        held[*i] = Some(b.block_param(join, n));
+    }
 }
 
 /// Where element (i, j, …) sits in a block laid out row by row.
