@@ -59,18 +59,33 @@ impl std::error::Error for Error {}
 /// oracle that dies on one seed loses the whole run, and cannot tell you which seed.
 pub const DEPTH: usize = 10_000;
 
-/// Run a module from its entry, writing anything it prints to standard output.
+/// Where a running program's output goes.
+///
+/// Two of them, because a program says which it means. See [`qir::Stream`].
+pub struct Writing<'a> {
+    pub out: &'a mut dyn Write,
+    pub err: &'a mut dyn Write,
+}
+
+impl Writing<'_> {
+    fn to(&mut self, stream: i64) -> &mut dyn Write {
+        if stream == qir::Stream::Err as i64 { self.err } else { self.out }
+    }
+}
+
+/// Run a module from its entry, printing where the program said to.
 pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
-    run_writing(module, &mut std::io::stdout())
+    let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+    run_writing(module, &mut Writing { out: &mut out, err: &mut err })
 }
 
 /// The same, sending whatever it prints somewhere of your choosing.
 ///
-/// Which is how a test reads what a program said, and how the oracle will compare what
-/// two engines said rather than only what they returned.
-pub fn run_writing(module: &qir::Module, out: &mut dyn Write) -> Result<Outcome, Error> {
+/// Which is how a test reads what a program said, and how the oracle compares what two
+/// engines said rather than only what they returned.
+pub fn run_writing(module: &qir::Module, writing: &mut Writing<'_>) -> Result<Outcome, Error> {
     let id = module.entry.ok_or(Error::NoEntry)?;
-    run_id(module, id, out)
+    run_id(module, id, writing)
 }
 
 /// Run one named function that takes nothing and returns an i64.
@@ -78,22 +93,23 @@ pub fn run_writing(module: &qir::Module, out: &mut dyn Write) -> Result<Outcome,
 /// The oracle's other door: a module holds many generated programs, and this runs one
 /// of them without the module having to name it as the entry.
 pub fn run_named(module: &qir::Module, name: &str) -> Result<Outcome, Error> {
-    run_named_writing(module, name, &mut std::io::sink())
+    let (mut out, mut err) = (std::io::sink(), std::io::sink());
+    run_named_writing(module, name, &mut Writing { out: &mut out, err: &mut err })
 }
 
 /// The same, keeping what it printed.
 pub fn run_named_writing(
     module: &qir::Module,
     name: &str,
-    out: &mut dyn Write,
+    writing: &mut Writing<'_>,
 ) -> Result<Outcome, Error> {
     let id = module
         .find(name)
         .ok_or_else(|| Error::Entry(format!("there is no function called `{name}`")))?;
-    run_id(module, id, out)
+    run_id(module, id, writing)
 }
 
-fn run_id(module: &qir::Module, id: qir::FuncId, out: &mut dyn Write) -> Result<Outcome, Error> {
+fn run_id(module: &qir::Module, id: qir::FuncId, writing: &mut Writing<'_>) -> Result<Outcome, Error> {
     qir::verify(module).map_err(Error::Invalid)?;
     let entry = module.func(id);
     if !entry.params.is_empty() {
@@ -111,7 +127,7 @@ fn run_id(module: &qir::Module, id: qir::FuncId, out: &mut dyn Write) -> Result<
         )));
     }
 
-    Ok(match walk(module, id, out) {
+    Ok(match walk(module, id, writing) {
         Ok(value) => Outcome::Returned(value),
         Err(trap) => Outcome::Trapped(trap),
     })
@@ -155,7 +171,7 @@ impl Frame {
 }
 
 /// Run, with the calls on a stack here rather than on Rust's.
-fn walk(module: &qir::Module, entry: qir::FuncId, out: &mut dyn Write) -> Result<i64, Trap> {
+fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> Result<i64, Trap> {
     let mut stack = vec![Frame::new(module, entry, &[])];
     // Allocated and never freed, which is the first stage of the collector and is all
     // an array needs in order to exist. A handle is an index into this.
@@ -179,7 +195,7 @@ fn walk(module: &qir::Module, entry: qir::FuncId, out: &mut dyn Write) -> Result
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots, module, out, &mut heap)?;
+            let value = evaluate(inst, &stack[top].slots, module, writing, &mut heap)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
@@ -227,7 +243,7 @@ fn evaluate(
     inst: &qir::Inst,
     slots: &[i64],
     module: &qir::Module,
-    out: &mut dyn Write,
+    writing: &mut Writing<'_>,
     heap: &mut Vec<Vec<i64>>,
 ) -> Result<i64, Trap> {
     Ok(match inst {
@@ -275,15 +291,18 @@ fn evaluate(
                     return Ok(heap[slots[args[0].0 as usize] as usize].len() as i64);
                 }
                 qir::Host::PrintBool => {
-                    let yes = slots[args[0].0 as usize] != 0;
-                    let _ = write!(out, "{}", if yes { "true" } else { "false" });
+                    let to = writing.to(slots[args[0].0 as usize]);
+                    let yes = slots[args[1].0 as usize] != 0;
+                    let _ = write!(to, "{}", if yes { "true" } else { "false" });
                 }
                 qir::Host::PrintI64 => {
-                    let _ = write!(out, "{}", slots[args[0].0 as usize]);
+                    let value = slots[args[1].0 as usize];
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
                 }
                 qir::Host::PrintText => {
-                    let at = slots[args[0].0 as usize] as usize;
+                    let at = slots[args[1].0 as usize] as usize;
                     let text = module.text.get(at).map_or("", |s| s.as_str());
+                    let out = writing.to(slots[args[0].0 as usize]);
                     // Nowhere to report a write that fails, and nothing sensible to do
                     // about one: a program that cannot print has not computed the wrong
                     // answer. The oracle compares what was written, so a lost write

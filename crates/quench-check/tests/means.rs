@@ -55,7 +55,7 @@ fn errors_come_out_in_the_order_they_appear_in_the_file() {
     let source = "\
 START {
     var.b17 ['a'] = [*1*];
-    print['nope'];
+    print.stdout['nope'];
     var.i64 ['b'] = [*hello*];
 }
 ";
@@ -69,7 +69,7 @@ START {
 
 #[test]
 fn a_name_that_is_nearly_right_gets_told_which_one() {
-    let source = "START { var.str ['greeting'] = [*Hello*]; print['greetng' \\n]; }";
+    let source = "START { var.str ['greeting'] = [*Hello*]; print.stdout['greetng' \\n]; }";
     let rendered = errors(source);
     assert!(rendered.contains("`'greetng'` is not declared."), "{rendered}");
     assert!(rendered.contains("did you mean `'greeting'`?"), "{rendered}");
@@ -79,7 +79,7 @@ fn a_name_that_is_nearly_right_gets_told_which_one() {
 fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
     // A suggestion that is not the answer costs the reader a second look, so nothing is
     // offered unless it is within one edit.
-    let source = "START { var.str ['greeting'] = [*Hello*]; print['wobble' \\n]; }";
+    let source = "START { var.str ['greeting'] = [*Hello*]; print.stdout['wobble' \\n]; }";
     let rendered = errors(source);
     assert!(rendered.contains("is not declared"), "{rendered}");
     assert!(!rendered.contains("did you mean"), "{rendered}");
@@ -158,7 +158,7 @@ fn everything_wrong_is_reported_and_not_the_first_thing() {
 START {
     var.b17 ['a'] = [*1*];
     var.i64 ['b'] = [*hello*];
-    print['nope'];
+    print.stdout['nope'];
 }
 ";
     assert_eq!(codes(source), ["E0402", "E0407", "E0413"], "{}", errors(source));
@@ -285,14 +285,14 @@ fn only_an_array_has_a_shape() {
 
 #[test]
 fn an_index_needs_one_number_per_dimension() {
-    let rendered = errors("START { var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print['m'[*1*]]; }");
+    let rendered = errors("START { var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print.stdout['m'[*1*]]; }");
     assert!(rendered.contains("has 2 dimension(s), and 1 index(es) were given"), "{rendered}");
     assert!(rendered.contains("declared (2 3)"), "{rendered}");
 }
 
 #[test]
 fn only_an_array_can_be_indexed() {
-    let rendered = errors("START { var.i64 ['n'] = [*1*]; print['n'[*1*]]; }");
+    let rendered = errors("START { var.i64 ['n'] = [*1*]; print.stdout['n'[*1*]]; }");
     assert!(rendered.contains("`i64` is not an array"), "{rendered}");
 }
 
@@ -370,10 +370,10 @@ fn set_gives_one_value_for_each_thing_it_changes() {
 
 #[test]
 fn a_condition_is_a_bool_and_nothing_is_truthy() {
-    assert!(check("START { var.i64 ['n'] = [*1*]; if 'n' > *0* { print[str:*yes*]; } }").ok());
-    assert!(check("START { var.bool ['f'] = [*true*]; if 'f' { print[str:*yes*]; } }").ok());
+    assert!(check("START { var.i64 ['n'] = [*1*]; if 'n' > *0* { print.stdout[str:*yes*]; } }").ok());
+    assert!(check("START { var.bool ['f'] = [*true*]; if 'f' { print.stdout[str:*yes*]; } }").ok());
 
-    let rendered = errors("START { var.i64 ['n'] = [*1*]; if 'n' { print[str:*yes*]; } }");
+    let rendered = errors("START { var.i64 ['n'] = [*1*]; if 'n' { print.stdout[str:*yes*]; } }");
     assert!(rendered.contains("`if` asks something true or false, and this is an `i64`"), "{rendered}");
     assert!(rendered.contains("nothing is truthy"), "{rendered}");
     assert!(rendered.contains("such as `> *0*`"), "{rendered}");
@@ -383,7 +383,7 @@ fn a_condition_is_a_bool_and_nothing_is_truthy() {
 fn an_arm_is_a_scope_of_its_own() {
     // An `if` introduces nothing, so what is declared inside one is gone at the brace.
     let rendered = errors(
-        "START { if *true* == *true* { var.i64 ['inside'] = [*1*]; } print['inside']; }",
+        "START { if *true* == *true* { var.i64 ['inside'] = [*1*]; } print.stdout['inside']; }",
     );
     assert!(rendered.contains("`'inside'` is not declared"), "{rendered}");
 
@@ -396,7 +396,7 @@ fn an_arm_is_a_scope_of_its_own() {
 
 #[test]
 fn a_wrong_condition_does_not_hide_what_is_inside_the_arm() {
-    let out = check("START { var.i64 ['n'] = [*1*]; if 'n' { print['nope']; } }");
+    let out = check("START { var.i64 ['n'] = [*1*]; if 'n' { print.stdout['nope']; } }");
     let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
     assert!(codes.contains(&"E0440"), "{codes:?}");
     assert!(codes.contains(&"E0413"), "the undeclared name inside is reported too: {codes:?}");
@@ -423,4 +423,15 @@ fn types_get_the_right_article() {
     let rendered = errors("START { var.str ['s'] = [*a*]; var.i64 ['n'] = ['s']; }");
     assert!(rendered.contains("this is a `str`"), "{rendered}");
     assert!(rendered.contains("given to an `i64`"), "{rendered}");
+}
+
+#[test]
+fn a_print_says_where_it_goes() {
+    assert!(check("START { print.stdout[str:*hi*]; }").ok());
+    assert!(check("START { print.stderr[str:*hi*]; }").ok());
+
+    let rendered = errors("START { print.somewhere[str:*hi*]; }");
+    assert!(rendered.contains("`somewhere` is not somewhere to print"), "{rendered}");
+    assert!(rendered.contains("a reader should not have to know a default"), "{rendered}");
+    assert!(rendered.contains("there is `stdout` and `stderr`"), "{rendered}");
 }

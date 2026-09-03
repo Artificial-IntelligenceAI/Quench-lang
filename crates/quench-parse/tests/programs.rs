@@ -10,7 +10,7 @@ fn report(source: &str) -> String {
 
 #[test]
 fn hello_world() {
-    let source = "START {\nprint[str:*Hello, World!*];\n}\n";
+    let source = "START {\nprint.stdout[str:*Hello, World!*];\n}\n";
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
 
@@ -30,7 +30,7 @@ fn a_declaration_and_a_print() {
     let source = "\
 START {
 var.str ['greeting'] = [*Hello*];
-print['greeting' \\n];
+print.stdout['greeting' \\n];
 }
 ";
     let out = parse(source);
@@ -81,7 +81,7 @@ fn counts_that_do_not_match_point_at_both_lists() {
 
 #[test]
 fn a_bare_written_value_in_a_print_is_told_what_is_missing() {
-    let source = "START {\nprint[*Hello*];\n}\n";
+    let source = "START {\nprint.stdout[*Hello*];\n}\n";
     let rendered = report(source);
     assert!(rendered.contains("does not say what it is"), "{rendered}");
     assert!(rendered.contains("`str:*Hello*` if it is text"), "{rendered}");
@@ -97,7 +97,7 @@ fn a_typed_value_in_a_declaration_is_saying_it_twice() {
 
 #[test]
 fn a_missing_semicolon_is_reported_where_it_should_have_been() {
-    let source = "START {\nprint[str:*a*]\n}\n";
+    let source = "START {\nprint.stdout[str:*a*]\n}\n";
     let rendered = report(source);
     assert!(rendered.contains("a statement wants `;` here"), "{rendered}");
 }
@@ -109,7 +109,7 @@ fn four_mistakes_report_as_four() {
     let source = "\
 START {
 var.str ['a', 'b'] = [*one*];
-print[*bare*];
+print.stdout[*bare*];
 wobble ['x'];
 var.str ['c'] = [str:*twice*];
 }
@@ -123,7 +123,7 @@ var.str ['c'] = [str:*twice*];
 fn one_mistake_does_not_become_three() {
     // Recovery that invents errors is worse than stopping, since a reader cannot tell
     // which of them was the real one.
-    let source = "START {\nprint[str:*a* ;\nprint[str:*b*];\n}\n";
+    let source = "START {\nprint.stdout[str:*a* ;\nprint.stdout[str:*b*];\n}\n";
     let out = parse(source);
     assert!(out.errors.len() <= 2, "{:#?}", out.errors);
 }
@@ -139,7 +139,7 @@ fn a_file_with_nothing_in_it_is_not_an_error_yet() {
 
 #[test]
 fn things_before_start_are_not_built_yet_and_say_so() {
-    let source = "var.str ['a'] = [*x*];\nSTART {\nprint[str:*a*];\n}\n";
+    let source = "var.str ['a'] = [*x*];\nSTART {\nprint.stdout[str:*a*];\n}\n";
     let rendered = report(source);
     assert!(rendered.contains("only `START` can be at the top of a file so far"), "{rendered}");
     assert!(rendered.contains("not built yet"), "{rendered}");
@@ -175,7 +175,7 @@ Suggested fix(s): add the missing value, or remove the name
 fn a_block_that_is_never_closed_points_at_the_brace() {
     // Not at the end of the file. That is where it was noticed, not where it went
     // wrong, and in a long file the difference is the whole message.
-    let source = "START {\nprint[str:*a*];\n";
+    let source = "START {\nprint.stdout[str:*a*];\n";
     let out = parse(source);
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert_eq!(out.errors[0].code, "E0109");
@@ -191,7 +191,7 @@ fn a_block_that_is_never_closed_points_at_the_brace() {
 fn a_block_ends_where_its_brace_does() {
     // The closing brace is what lets a file hold something after `START`, which is
     // the whole reason it is there.
-    let source = "START {\nprint[str:*a*];\n}\nwobble\n";
+    let source = "START {\nprint.stdout[str:*a*];\n}\nwobble\n";
     let out = parse(source);
     let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
     assert_eq!(codes, ["E0102"], "the block closed, and `wobble` is a separate complaint");

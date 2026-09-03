@@ -120,13 +120,13 @@ fn lower_body(
             Stmt::If { arms, otherwise, live } => {
                 lower_if(b, module, arms, otherwise.as_deref(), *live, held, checked, settings);
             }
-            Stmt::Print(pieces) => {
+            Stmt::Print { to, pieces } => {
                 for piece in pieces {
                     match piece {
                         Printed::Text(text) => {
                             let at = module.intern(text);
                             let value = b.const_text(at);
-                            b.call_host(qir::Host::PrintText, &[value]);
+                            b.print(qir::Host::PrintText, *to, value);
                         }
                         Printed::Value { value, ty } => {
                             let value = emit(b, module, value, held, settings);
@@ -138,7 +138,7 @@ fn lower_body(
                                     unreachable!("refused by the checker: an array is not printed")
                                 }
                             };
-                            b.call_host(host, &[value]);
+                            b.print(host, *to, value);
                         }
                     }
                 }

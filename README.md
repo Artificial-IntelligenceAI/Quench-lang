@@ -32,8 +32,8 @@ START {
     var.str ['greeting'] = [*Hello*];
     var.i64 ['answer']   = [*42*];
 
-    print['greeting' str:*, World!* \n];
-    print[str:*The answer is * 'answer' str:*.* \n];
+    print.stdout['greeting' str:*, World!* \n];
+    print.stdout[str:*The answer is * 'answer' str:*.* \n];
 }
 ```
 
@@ -84,7 +84,7 @@ Both print the same thing, which is not a coincidence — it is
   under `b16` and four characters under `str`. A written value is literal, and
   escapes stand outside it: `\n` is an item in the list, not a character hidden in
   the text. Items juxtapose to build a value, commas separate values. Where no
-  chain supplies a type, the value carries it — `print[str:*Hello* 'name' \n];` —
+  chain supplies a type, the value carries it — `print.stdout[str:*Hello* 'name' \n];` —
   and a bare written value there is not valid. See
   [notes/what-the-marks-are-for.md](notes/what-the-marks-are-for.md).
 - **Precedence stops where mathematics stopped.** `x` binds tighter than `+`, and
@@ -94,6 +94,10 @@ Both print the same thing, which is not a coincidence — it is
   both produced famous traps: the lesson is not that C chose wrong but that there was
   nothing to choose. See
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).
+- **A `print` says where it goes**: `print.stdout[…]`, `print.stderr[…]`, and there
+  is no default. Go's built-in `println` writes to standard error and nothing about
+  writing it says so — a surprise a language can simply not have. Naming the
+  destination only earns its place because there is more than one, so there are two.
 - **Deciding.** `if 'n' > *10* { … } else-if … { … } else { … }`. The condition
   wears no brackets, because `[ ]` holds a *list* everywhere else and a condition is
   never one; it runs until the `{`, which is unambiguous. **`else-if` is one word**,

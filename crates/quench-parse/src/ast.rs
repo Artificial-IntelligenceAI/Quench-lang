@@ -103,10 +103,12 @@ impl Stmt {
     }
 }
 
-/// `print[str:*Hello* 'name' \n];`
+/// `print.stdout[str:*Hello* 'name' \n];`
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Print {
     pub word: Span,
+    /// `stdout` or `stderr` — where it goes, said rather than assumed.
+    pub to: Span,
     pub pieces: Vec<Piece>,
     pub span: Span,
 }

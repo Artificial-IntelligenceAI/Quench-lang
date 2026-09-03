@@ -210,6 +210,9 @@ impl<'a> Parser<'a> {
 
     fn print(&mut self) -> Option<Print> {
         let word = self.bump().span;
+        // Where it goes is part of the statement, not a default somebody has to know.
+        self.expect(Kind::Dot, "`print`")?;
+        let to = self.expect(Kind::Word, "`print`")?;
         self.expect(Kind::OpenList, "`print`")?;
 
         let mut pieces = Vec::new();
@@ -229,7 +232,7 @@ impl<'a> Parser<'a> {
 
         self.expect(Kind::CloseList, "`print`")?;
         let end = self.expect(Kind::Semicolon, "a statement")?;
-        Some(Print { word, pieces, span: word.to(end) })
+        Some(Print { word, to, pieces, span: word.to(end) })
     }
 
     /// `if … { } else-if … { } else { }`

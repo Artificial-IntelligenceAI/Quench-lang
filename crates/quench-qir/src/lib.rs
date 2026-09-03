@@ -203,6 +203,38 @@ pub enum CmpOp {
     Ge,
 }
 
+/// Where written output goes.
+///
+/// Named in the source and carried here, because a program that prints should say where
+/// to — Go's built-in `println` writes to standard error and nothing about writing it
+/// says so, which is the sort of surprise a language can simply not have.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(i64)]
+pub enum Stream {
+    Out = 1,
+    Err = 2,
+}
+
+impl Stream {
+    pub fn name(self) -> &'static str {
+        match self {
+            Stream::Out => "stdout",
+            Stream::Err => "stderr",
+        }
+    }
+
+    pub fn from_name(word: &str) -> Option<Stream> {
+        match word {
+            "stdout" => Some(Stream::Out),
+            "stderr" => Some(Stream::Err),
+            _ => None,
+        }
+    }
+
+    /// Every one there is, for saying so when a name is not one of them.
+    pub const ALL: [Stream; 2] = [Stream::Out, Stream::Err];
+}
+
 /// Something outside the program that it can ask for.
 ///
 /// A fixed list rather than arbitrary symbol names, for the same reason QIR carries no
@@ -210,11 +242,16 @@ pub enum CmpOp {
 /// promise it cannot keep. Everything here is something every Quench runtime has.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Host {
-    /// Write a piece of text. Takes one [`Ty::Text`].
+    /// `(stream, text)` — write a piece of text.
+    ///
+    /// The stream is an argument rather than three hosts per destination, because the
+    /// list of destinations will grow and the list of things to write will not. It is
+    /// always a constant by the time it gets here, so a backend that wanted to
+    /// specialise on it could.
     PrintText,
-    /// Write a number. Takes one [`Ty::I64`].
+    /// `(stream, number)`
     PrintI64,
-    /// Write `true` or `false`. Takes one [`Ty::Bool`].
+    /// `(stream, bool)`
     PrintBool,
 
     /// Make an array of that many elements, all zero. Gives back a handle.
@@ -248,9 +285,9 @@ impl Host {
     /// What it takes, in order.
     pub fn params(self) -> &'static [Ty] {
         match self {
-            Host::PrintText => &[Ty::Text],
-            Host::PrintI64 => &[Ty::I64],
-            Host::PrintBool => &[Ty::Bool],
+            Host::PrintText => &[Ty::I64, Ty::Text],
+            Host::PrintI64 => &[Ty::I64, Ty::I64],
+            Host::PrintBool => &[Ty::I64, Ty::Bool],
             Host::ArrayNew => &[Ty::I64],
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
             Host::ArrayGet => &[Ty::Handle, Ty::I64],

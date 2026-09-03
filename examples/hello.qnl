@@ -2,6 +2,6 @@ START {
     var.str ['greeting'] = [*Hello*];
     var.i64 ['answer']   = [*42*];
 
-    print['greeting' str:*, World!* \n];
-    print[str:*The answer is * 'answer' str:*.* \n];
+    print.stdout['greeting' str:*, World!* \n];
+    print.stdout[str:*The answer is * 'answer' str:*.* \n];
 }

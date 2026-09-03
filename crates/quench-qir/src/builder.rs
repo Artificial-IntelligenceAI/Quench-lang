@@ -11,7 +11,7 @@
 //!
 //! [`Diagnostic`]: https://docs.rs/quench-diag
 
-use crate::{BinOp, Block, BlockId, CmpOp, FuncId, Function, Host, Inst, Target, Term, Ty, Value};
+use crate::{BinOp, Block, BlockId, CmpOp, FuncId, Function, Host, Inst, Stream, Target, Term, Ty, Value};
 
 /// A block under construction: its parameters, its instructions, and its terminator once
 /// it has one.
@@ -107,6 +107,12 @@ impl Builder {
     /// A piece of text, by the index [`crate::Module::intern`] gave it.
     pub fn const_text(&mut self, at: u32) -> Value {
         self.push(Inst::ConstText(at), Ty::Text)
+    }
+
+    /// Write something, somewhere.
+    pub fn print(&mut self, host: Host, to: Stream, what: Value) -> Value {
+        let stream = self.const_i64(to as i64);
+        self.call_host(host, &[stream, what])
     }
 
     /// Ask the runtime for something.

@@ -3,22 +3,31 @@
 use quench_diag::SourceFile;
 use quench_lower::lower;
 
-/// What the interpreter prints, and what the Dev JIT prints. They must match.
-fn both(source: &str) -> (String, String) {
+/// What both engines printed, on both streams, insisting they agree.
+fn printed(source: &str) -> quench_dev::Printed {
     let out = lower(source);
     assert!(out.ok(), "{}", report(source));
     let module = out.module.expect("a program");
 
-    let mut walked = Vec::new();
-    quench_interp::run_writing(&module, &mut walked).expect("it runs");
-    let (_, compiled) = quench_dev::compile(&module).expect("it compiles").run_capturing();
-    (String::from_utf8(walked).expect("text"), compiled)
-}
+    let (mut out_bytes, mut err_bytes) = (Vec::new(), Vec::new());
+    quench_interp::run_writing(
+        &module,
+        &mut quench_interp::Writing { out: &mut out_bytes, err: &mut err_bytes },
+    )
+    .expect("it runs");
+    let walked = quench_dev::Printed {
+        out: String::from_utf8(out_bytes).expect("text"),
+        err: String::from_utf8(err_bytes).expect("text"),
+    };
 
-fn said(source: &str) -> String {
-    let (walked, compiled) = both(source);
+    let (_, compiled) = quench_dev::compile(&module).expect("it compiles").run_capturing();
     assert_eq!(walked, compiled, "the engines printed different things");
     walked
+}
+
+/// What a program wrote to standard output.
+fn said(source: &str) -> String {
+    printed(source).out
 }
 
 fn report(source: &str) -> String {
@@ -28,47 +37,47 @@ fn report(source: &str) -> String {
 
 #[test]
 fn hello_world() {
-    assert_eq!(said("START {\n    print[str:*Hello, World!* \\n];\n}\n"), "Hello, World!\n");
+    assert_eq!(said("START {\n    print.stdout[str:*Hello, World!* \\n];\n}\n"), "Hello, World!\n");
 }
 
 #[test]
 fn the_pieces_are_printed_in_the_order_they_were_written() {
     // Nothing is joined first. The list is the list, and it goes out in order.
     assert_eq!(
-        said("START {\n print[str:*one* \\n str:*two* \\n];\n}\n"),
+        said("START {\n print.stdout[str:*one* \\n str:*two* \\n];\n}\n"),
         "one\ntwo\n"
     );
 }
 
 #[test]
 fn every_escape_means_what_it_says() {
-    assert_eq!(said("START { print[\\n]; }"), "\n");
-    assert_eq!(said("START { print[\\t]; }"), "\t");
-    assert_eq!(said("START { print[\\r]; }"), "\r");
-    assert_eq!(said("START { print[\\\\]; }"), "\\");
+    assert_eq!(said("START { print.stdout[\\n]; }"), "\n");
+    assert_eq!(said("START { print.stdout[\\t]; }"), "\t");
+    assert_eq!(said("START { print.stdout[\\r]; }"), "\r");
+    assert_eq!(said("START { print.stdout[\\\\]; }"), "\\");
 }
 
 #[test]
 fn a_written_value_is_literal_and_only_its_mark_escapes() {
     // Between the marks everything is the character it looks like. `\n` in there is a
     // backslash and an `n`, which is the whole reason escapes stand outside.
-    assert_eq!(said(r"START { print[str:*a\nb*]; }"), r"a\nb");
-    assert_eq!(said(r"START { print[str:*two \* three*]; }"), "two * three");
-    assert_eq!(said(r"START { print[str:*a \\ b*]; }"), r"a \ b");
+    assert_eq!(said(r"START { print.stdout[str:*a\nb*]; }"), r"a\nb");
+    assert_eq!(said(r"START { print.stdout[str:*two \* three*]; }"), "two * three");
+    assert_eq!(said(r"START { print.stdout[str:*a \\ b*]; }"), r"a \ b");
 }
 
 #[test]
 fn anything_you_can_type_survives_the_whole_way() {
-    let source = "START { print[str:*🧑\u{200d}🧑\u{200d}🧒\u{200d}🧒 hi! {};|'#$%^& 12345*]; }";
+    let source = "START { print.stdout[str:*🧑\u{200d}🧑\u{200d}🧒\u{200d}🧒 hi! {};|'#$%^& 12345*]; }";
     assert_eq!(said(source), "🧑\u{200d}🧑\u{200d}🧒\u{200d}🧒 hi! {};|'#$%^& 12345");
 }
 
 #[test]
 fn the_same_text_twice_is_stored_once() {
-    let out = lower("START { print[str:*hi* str:*hi* str:*ho*]; }");
+    let out = lower("START { print.stdout[str:*hi* str:*hi* str:*ho*]; }");
     let module = out.module.expect("a program");
     assert_eq!(module.text.len(), 2, "{:?}", module.text);
-    assert_eq!(said("START { print[str:*hi* str:*hi* str:*ho*]; }"), "hihiho");
+    assert_eq!(said("START { print.stdout[str:*hi* str:*hi* str:*ho*]; }"), "hihiho");
 }
 
 #[test]
@@ -87,7 +96,7 @@ fn a_file_with_no_start_is_not_a_program() {
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
         // A type Quench means to have and does not have yet.
-        ("START { print[b16:*1*]; }", "`b16` is not built yet"),
+        ("START { print.stdout[b16:*1*]; }", "`b16` is not built yet"),
         // Joining a name to something else builds a new value, which needs the collector.
         ("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a' *y*]; }", "needs the collector"),
     ];
@@ -97,7 +106,7 @@ fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     }
 
     // And declaring things, which this test used to assert was not built, now is.
-    assert!(lower("START { var.str ['a'] = [*x*]; print['a']; }").ok());
+    assert!(lower("START { var.str ['a'] = [*x*]; print.stdout['a']; }").ok());
 }
 
 #[test]
@@ -108,17 +117,17 @@ fn a_program_that_prints_nothing_is_still_a_program() {
 #[test]
 fn a_declaration_and_the_name_that_uses_it() {
     assert_eq!(
-        said("START {\n var.str ['greeting'] = [*Hello*];\n print['greeting' str:*, World!* \\n];\n}\n"),
+        said("START {\n var.str ['greeting'] = [*Hello*];\n print.stdout['greeting' str:*, World!* \\n];\n}\n"),
         "Hello, World!\n"
     );
 }
 
 #[test]
 fn a_number_prints_as_a_number() {
-    assert_eq!(said("START { var.i64 ['n'] = [*42*]; print['n']; }"), "42");
-    assert_eq!(said("START { var.i64 ['n'] = [*-7*]; print['n']; }"), "-7");
+    assert_eq!(said("START { var.i64 ['n'] = [*42*]; print.stdout['n']; }"), "42");
+    assert_eq!(said("START { var.i64 ['n'] = [*-7*]; print.stdout['n']; }"), "-7");
     assert_eq!(
-        said("START { var.i64 ['n'] = [*9223372036854775807*]; print['n']; }"),
+        said("START { var.i64 ['n'] = [*9223372036854775807*]; print.stdout['n']; }"),
         "9223372036854775807",
         "the whole range of an i64 survives the trip"
     );
@@ -127,8 +136,8 @@ fn a_number_prints_as_a_number() {
 #[test]
 fn the_same_characters_are_a_number_or_text_depending_on_the_type() {
     // Which is the rule the marks exist for, running for the first time.
-    assert_eq!(said("START { var.i64 ['a'] = [*1000*]; print['a']; }"), "1000");
-    assert_eq!(said("START { var.str ['a'] = [*1000*]; print['a']; }"), "1000");
+    assert_eq!(said("START { var.i64 ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
+    assert_eq!(said("START { var.str ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
     // The same output, arrived at two different ways -- one printed a number, the other
     // printed four characters.
 }
@@ -136,11 +145,11 @@ fn the_same_characters_are_a_number_or_text_depending_on_the_type() {
 #[test]
 fn copying_a_value_names_it_again_rather_than_building_anything() {
     assert_eq!(
-        said("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print['a' 'b']; }"),
+        said("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print.stdout['a' 'b']; }"),
         "xx"
     );
     // And the module holds that text once, because copying did not make a second one.
-    let out = lower("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print['a' 'b']; }");
+    let out = lower("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print.stdout['a' 'b']; }");
     assert_eq!(out.module.expect("a program").text.len(), 1);
 }
 
@@ -153,39 +162,39 @@ fn a_declaration_that_is_never_used_still_has_to_make_sense() {
 fn a_program_that_does_not_check_out_is_not_lowered() {
     // Building QIR from a program that failed checking would make nonsense out of it,
     // and the nonsense would be reported by an engine rather than by the compiler.
-    let out = lower("START { print['nope']; }");
+    let out = lower("START { print.stdout['nope']; }");
     assert!(out.module.is_none());
     assert!(!out.errors.is_empty());
 }
 
 #[test]
 fn arithmetic_comes_out_the_same_in_both_engines() {
-    assert_eq!(said("START { var.i64 ['n'] = [*7* + *3*]; print['n']; }"), "10");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* - *3*]; print['n']; }"), "4");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* x *3*]; print['n']; }"), "21");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* / *3*]; print['n']; }"), "2");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* mod *3*]; print['n']; }"), "1");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* + *3*]; print.stdout['n']; }"), "10");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* - *3*]; print.stdout['n']; }"), "4");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* x *3*]; print.stdout['n']; }"), "21");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* / *3*]; print.stdout['n']; }"), "2");
+    assert_eq!(said("START { var.i64 ['n'] = [*7* mod *3*]; print.stdout['n']; }"), "1");
 }
 
 #[test]
 fn precedence_shows_up_in_the_answer() {
-    assert_eq!(said("START { var.i64 ['n'] = [*1* + *2* x *3*]; print['n']; }"), "7");
-    assert_eq!(said("START { var.i64 ['n'] = [(*1* + *2*) x *3*]; print['n']; }"), "9");
+    assert_eq!(said("START { var.i64 ['n'] = [*1* + *2* x *3*]; print.stdout['n']; }"), "7");
+    assert_eq!(said("START { var.i64 ['n'] = [(*1* + *2*) x *3*]; print.stdout['n']; }"), "9");
     // Equal tiers go left to right, which is what everybody expects of subtraction.
-    assert_eq!(said("START { var.i64 ['n'] = [*10* - *3* - *2*]; print['n']; }"), "5");
+    assert_eq!(said("START { var.i64 ['n'] = [*10* - *3* - *2*]; print.stdout['n']; }"), "5");
 }
 
 #[test]
 fn a_comparison_prints_as_a_word() {
-    assert_eq!(said("START { var.bool ['b'] = [*7* > *3*]; print['b']; }"), "true");
-    assert_eq!(said("START { var.bool ['b'] = [*7* < *3*]; print['b']; }"), "false");
-    assert_eq!(said("START { var.bool ['b'] = [*7* == *7*]; print['b']; }"), "true");
+    assert_eq!(said("START { var.bool ['b'] = [*7* > *3*]; print.stdout['b']; }"), "true");
+    assert_eq!(said("START { var.bool ['b'] = [*7* < *3*]; print.stdout['b']; }"), "false");
+    assert_eq!(said("START { var.bool ['b'] = [*7* == *7*]; print.stdout['b']; }"), "true");
 }
 
 #[test]
 fn the_division_setting_reaches_the_answer() {
     use quench_conf::{Division, Settings};
-    let source = "START { var.i64 ['n'] = [*0* - *7*]; var.i64 ['q'] = ['n' / *2*]; print['q']; }";
+    let source = "START { var.i64 ['n'] = [*0* - *7*]; var.i64 ['q'] = ['n' / *2*]; print.stdout['q']; }";
 
     let truncated = quench_lower::lower_under(source, Settings::default());
     let floored = quench_lower::lower_under(
@@ -195,11 +204,8 @@ fn the_division_setting_reaches_the_answer() {
 
     let ran = |lowered: quench_lower::Lowered| {
         let module = lowered.module.expect("a program");
-        let (_, said) = quench_dev::compile(&module).expect("it compiles").run_capturing();
-        let mut walked = Vec::new();
-        quench_interp::run_writing(&module, &mut walked).expect("it runs");
-        assert_eq!(said, String::from_utf8(walked).expect("text"), "the engines disagree");
-        said
+        let (_, wrote) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+        wrote.out
     };
 
     // The same source, two different programs. Which is the whole reason a semantic
@@ -211,7 +217,7 @@ fn the_division_setting_reaches_the_answer() {
 #[test]
 fn an_array_holds_what_it_was_given() {
     assert_eq!(
-        said("START { var.arr.i64 (3) ['xs'] = [[*10* *20* *30*]]; print['xs'[*2*]]; }"),
+        said("START { var.arr.i64 (3) ['xs'] = [[*10* *20* *30*]]; print.stdout['xs'[*2*]]; }"),
         "20"
     );
 }
@@ -222,7 +228,7 @@ fn a_shaped_array_is_written_flat_and_indexed_by_dimension() {
     // is the last one, and finding it is arithmetic rather than following a handle.
     let source = "START {
         var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
-        print['m'[*1* *1*] str:*,* 'm'[*1* *3*] str:*,* 'm'[*2* *1*] str:*,* 'm'[*2* *3*]];
+        print.stdout['m'[*1* *1*] str:*,* 'm'[*1* *3*] str:*,* 'm'[*2* *1*] str:*,* 'm'[*2* *3*]];
     }";
     assert_eq!(said(source), "1,3,4,6");
 }
@@ -232,7 +238,7 @@ fn arrays_are_counted_from_one() {
     // Which is not a preference: a counting loop is inclusive and its counter unsigned,
     // so `[1, count]` walks an array exactly while `[0, count - 1]` wraps on an empty one.
     assert_eq!(
-        said("START { var.arr.i64 (2) ['xs'] = [[*7* *8*]]; print['xs'[*1*]]; }"),
+        said("START { var.arr.i64 (2) ['xs'] = [[*7* *8*]]; print.stdout['xs'[*1*]]; }"),
         "7",
         "the first element is 1"
     );
@@ -243,14 +249,14 @@ fn an_index_outside_the_array_stops_the_interpreter() {
     // The Dev JIT aborts instead, having nowhere to put a failure and no way to unwind.
     // That asymmetry is why the generator writes nothing that can stop, and it is the
     // thing to fix before it can.
-    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*3*]]; }");
+    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*3*]]; }");
     let module = out.module.expect("a program");
     assert_eq!(
         quench_interp::run(&module).expect("it runs"),
         quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray)
     );
 
-    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*0*]]; }");
+    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }");
     assert_eq!(
         quench_interp::run(&out.module.expect("a program")).expect("it runs"),
         quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray),
@@ -274,19 +280,19 @@ fn stopping_is_agreed_on_as_much_as_answering() {
     // Not merely *that* it stopped -- which stop it was. An engine that said "something
     // went wrong" could not be compared with one that said what.
     assert_eq!(
-        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* / 'z']; print['q']; }"),
+        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* / 'z']; print.stdout['q']; }"),
         Outcome::Trapped(Trap::DividedByZero)
     );
     assert_eq!(
-        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* mod 'z']; print['q']; }"),
+        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* mod 'z']; print.stdout['q']; }"),
         Outcome::Trapped(Trap::DividedByZero)
     );
     assert_eq!(
-        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*9*]]; }"),
+        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*9*]]; }"),
         Outcome::Trapped(Trap::OutsideTheArray)
     );
     assert_eq!(
-        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*0*]]; }"),
+        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }"),
         Outcome::Trapped(Trap::OutsideTheArray),
         "counted from one, so nought is no element"
     );
@@ -301,7 +307,7 @@ fn the_one_division_that_does_not_fit() {
         var.i64 ['least'] = [*-9223372036854775808*];
         var.i64 ['minus'] = [*0* - *1*];
         var.i64 ['q'] = ['least' / 'minus'];
-        print['q'];
+        print.stdout['q'];
     }";
     assert_eq!(ended(source), Outcome::Trapped(Trap::DivisionOverflowed));
 }
@@ -310,30 +316,25 @@ fn the_one_division_that_does_not_fit() {
 fn a_program_that_stops_stops_where_it_stopped() {
     // What ran before the stop happened; what came after did not.
     let source = "START {
-        print[str:*before* \\n];
+        print.stdout[str:*before* \\n];
         var.i64 ['z'] = [*0*];
         var.i64 ['q'] = [*1* / 'z'];
-        print[str:*after* \\n];
+        print.stdout[str:*after* \\n];
     }";
     let module = lower(source).module.expect("a program");
-    let (outcome, printed) =
-        quench_dev::compile(&module).expect("it compiles").run_capturing();
-    assert_eq!(printed, "before\n", "and nothing after it");
+    let (outcome, wrote) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+    assert_eq!(wrote.out, "before\n", "and nothing after it");
     assert!(matches!(outcome, quench_qir::Outcome::Trapped(_)));
-
-    let mut walked = Vec::new();
-    quench_interp::run_writing(&module, &mut walked).expect("it runs");
-    assert_eq!(String::from_utf8(walked).expect("text"), "before\n");
 }
 
 #[test]
 fn setting_a_variable_changes_what_it_holds() {
     assert_eq!(
-        said("START { var.mut.i64 ['n'] = [*1*]; set ['n'] = ['n' + *41*]; print['n']; }"),
+        said("START { var.mut.i64 ['n'] = [*1*]; set ['n'] = ['n' + *41*]; print.stdout['n']; }"),
         "42"
     );
     assert_eq!(
-        said("START { var.mut.str ['s'] = [*a*]; set ['s'] = [*b*]; print['s']; }"),
+        said("START { var.mut.str ['s'] = [*a*]; set ['s'] = [*b*]; print.stdout['s']; }"),
         "b"
     );
 }
@@ -343,7 +344,7 @@ fn setting_an_element_changes_only_that_one() {
     let source = "START {
         var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]];
         set ['xs'[*2*]] = [*99*];
-        print['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
+        print.stdout['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
     }";
     assert_eq!(said(source), "1,99,3");
 }
@@ -364,12 +365,12 @@ fn the_overflow_setting_reaches_the_answer() {
     let source = "START {
         var.i64 ['big'] = [*9223372036854775807*];
         var.i64 ['n'] = ['big' + *1*];
-        print['n'];
+        print.stdout['n'];
     }";
 
     let ran = |settings: Settings| {
         let module = quench_lower::lower_under(source, settings).module.expect("a program");
-        let walked = quench_interp::run(&module).expect("it runs");
+        let walked = quench_interp::run_named(&module, quench_qir::ENTRY).expect("it runs");
         let (compiled, _) = quench_dev::compile(&module).expect("it compiles").run_capturing();
         assert_eq!(walked, compiled, "the engines disagree");
         walked
@@ -390,18 +391,18 @@ fn the_overflow_setting_reaches_the_answer() {
 fn exactly_one_arm_runs() {
     let source = "START {
         var.i64 ['n'] = [*12*];
-        if 'n' > *100* { print[str:*huge*]; }
-        else-if 'n' > *10* { print[str:*big*]; }
-        else-if 'n' > *1*  { print[str:*small*]; }
-        else { print[str:*tiny*]; }
+        if 'n' > *100* { print.stdout[str:*huge*]; }
+        else-if 'n' > *10* { print.stdout[str:*big*]; }
+        else-if 'n' > *1*  { print.stdout[str:*small*]; }
+        else { print.stdout[str:*tiny*]; }
     }";
     assert_eq!(said(source), "big", "the first that held, and no other");
 }
 
 #[test]
 fn an_if_with_no_else_may_do_nothing_at_all() {
-    assert_eq!(said("START { if *1* > *2* { print[str:*no*]; } print[str:*after*]; }"), "after");
-    assert_eq!(said("START { if *2* > *1* { print[str:*yes*]; } print[str:*after*]; }"), "yesafter");
+    assert_eq!(said("START { if *1* > *2* { print.stdout[str:*no*]; } print.stdout[str:*after*]; }"), "after");
+    assert_eq!(said("START { if *2* > *1* { print.stdout[str:*yes*]; } print.stdout[str:*after*]; }"), "yesafter");
 }
 
 #[test]
@@ -414,7 +415,7 @@ fn a_variable_changed_in_one_arm_is_changed_after_it() {
         if 'n' > *100* { set ['label'] = [*3*]; }
         else-if 'n' > *10* { set ['label'] = [*2*]; }
         else { set ['label'] = [*1*]; }
-        print['label'];
+        print.stdout['label'];
     }";
     assert_eq!(said(source), "2");
 }
@@ -424,7 +425,7 @@ fn a_variable_left_alone_in_an_arm_keeps_what_it_had() {
     let source = "START {
         var.mut.i64 ['n'] = [*7*];
         if *1* > *2* { set ['n'] = [*99*]; }
-        print['n'];
+        print.stdout['n'];
     }";
     assert_eq!(said(source), "7");
 }
@@ -438,7 +439,7 @@ fn conditionals_nest() {
             if 'a' > *5* { set ['out'] = [*both*]; }
             else { set ['out'] = [*outer only*]; }
         }
-        print['out'];
+        print.stdout['out'];
     }";
     assert_eq!(said(source), "outer only");
 }
@@ -448,7 +449,24 @@ fn an_arm_can_change_an_array_element() {
     let source = "START {
         var.mut.arr.i64 (3) ['xs'] = [[*1* *2* *3*]];
         if *2* > *1* { set ['xs'[*2*]] = [*99*]; }
-        print['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
+        print.stdout['xs'[*1*] str:*,* 'xs'[*2*] str:*,* 'xs'[*3*]];
     }";
     assert_eq!(said(source), "1,99,3");
+}
+
+#[test]
+fn a_program_says_where_its_output_goes() {
+    // Which is the whole reason the destination is written down. Go's built-in
+    // `println` writes to standard error and nothing about writing it says so.
+    let wrote = printed(
+        "START { print.stdout[str:*answer*]; print.stderr[str:*complaint*]; }",
+    );
+    assert_eq!(wrote.out, "answer");
+    assert_eq!(wrote.err, "complaint");
+}
+
+#[test]
+fn the_two_streams_do_not_leak_into_each_other() {
+    assert_eq!(printed("START { print.stderr[str:*only here*]; }").out, "");
+    assert_eq!(printed("START { print.stdout[str:*only here*]; }").err, "");
 }

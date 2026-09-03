@@ -64,6 +64,13 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// What a program wrote, kept apart by where it said to write it.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Printed {
+    pub out: String,
+    pub err: String,
+}
+
 /// A module that has been compiled and is ready to run.
 ///
 /// The machine code lives as long as this does, which is why [`Compiled::run`] can hand
@@ -106,11 +113,17 @@ impl Compiled {
     }
 
     /// Run the entry, keeping whatever it printed rather than letting it out.
-    pub fn run_capturing(&self) -> (qir::Outcome, String) {
-        SINK.with(|sink| *sink.borrow_mut() = Some(Vec::new()));
+    pub fn run_capturing(&self) -> (qir::Outcome, Printed) {
+        SINK.with(|sink| *sink.borrow_mut() = Some((Vec::new(), Vec::new())));
         let outcome = self.outcome();
-        let written = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
-        (outcome, String::from_utf8_lossy(&written).into_owned())
+        let (out, err) = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
+        (
+            outcome,
+            Printed {
+                out: String::from_utf8_lossy(&out).into_owned(),
+                err: String::from_utf8_lossy(&err).into_owned(),
+            },
+        )
     }
 
     /// Run the entry, and say whether it finished or stopped.
@@ -333,10 +346,11 @@ thread_local! {
 
     /// Where a running program's output goes, when something is collecting it.
     ///
-    /// A thread-local rather than an argument because the generated code calls a plain
-    /// C function and there is nowhere to put a writer. Provisional, and the reason it
-    /// is tolerable is that a worker in the oracle owns its thread.
-    static SINK: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+    /// Two of them, because a program says which it means. A thread-local rather than an
+    /// argument because the generated code calls a plain C function and there is nowhere
+    /// to put a writer; tolerable because a worker in the oracle owns its thread.
+    static SINK: std::cell::RefCell<Option<(Vec<u8>, Vec<u8>)>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Write down why the program is stopping, for the generated code to notice.
@@ -392,33 +406,40 @@ extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_bool(_rt: *mut Runtime, value: i64) -> i64 {
-    write_out(if value != 0 { b"true" } else { b"false" });
+extern "C" fn print_bool(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
+    write_out(stream, if value != 0 { b"true" } else { b"false" });
     0
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_i64(_rt: *mut Runtime, value: i64) -> i64 {
-    write_out(value.to_string().as_bytes());
+extern "C" fn print_i64(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
+    write_out(stream, value.to_string().as_bytes());
     0
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_text(rt: *mut Runtime, index: i64) -> i64 {
+extern "C" fn print_text(rt: *mut Runtime, stream: i64, index: i64) -> i64 {
     // Safe because `compile` verified the index against the module's text before any of
     // this existed, and the table outlives the code that names it.
     let piece = unsafe { &*(*rt).pieces.add(index as usize) };
     let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
-    write_out(bytes);
+    write_out(stream, bytes);
     0
 }
 
-fn write_out(bytes: &[u8]) {
+fn write_out(stream: i64, bytes: &[u8]) {
+    let to_err = stream == qir::Stream::Err as i64;
     SINK.with(|sink| match &mut *sink.borrow_mut() {
-        Some(kept) => kept.extend_from_slice(bytes),
+        Some((out, err)) => {
+            if to_err { err } else { out }.extend_from_slice(bytes)
+        }
         None => {
             use std::io::Write as _;
-            let _ = std::io::stdout().write_all(bytes);
+            if to_err {
+                let _ = std::io::stderr().write_all(bytes);
+            } else {
+                let _ = std::io::stdout().write_all(bytes);
+            }
         }
     });
 }

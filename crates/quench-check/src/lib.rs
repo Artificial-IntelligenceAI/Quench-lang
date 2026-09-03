@@ -117,6 +117,7 @@ pub enum Value {
 }
 
 pub use quench_parse::OpKind;
+pub use quench_qir::Stream;
 
 /// How tightly an operator binds — but only where mathematics settled it.
 ///
@@ -164,7 +165,7 @@ pub enum Stmt {
     },
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
-    Print(Vec<Printed>),
+    Print { to: Stream, pieces: Vec<Printed> },
 }
 
 /// One `if` or `else-if`.
@@ -1115,6 +1116,19 @@ impl<'a> Checker<'a> {
     // --- printing ---------------------------------------------------------------------
 
     fn print(&mut self, print: &ast::Print) {
+        let named = self.text(print.to);
+        let Some(to) = Stream::from_name(named) else {
+            let all: Vec<String> =
+                Stream::ALL.iter().map(|s| format!("`{}`", s.name())).collect();
+            self.errors.push(
+                Diagnostic::new("E0442", format!("`{named}` is not somewhere to print."))
+                    .primary(print.to, "here")
+                    .rule("a `print` says where it goes, because a reader should not have to know a default")
+                    .tip(format!("there is {}.", all.join(" and ")))
+                    .fix(format!("{} for the ordinary one", all[0])),
+            );
+            return;
+        };
         let mut pieces = Vec::new();
         for piece in &print.pieces {
             match piece {
@@ -1183,7 +1197,7 @@ impl<'a> Checker<'a> {
                 },
             }
         }
-        self.body.push(Stmt::Print(pieces));
+        self.body.push(Stmt::Print { to, pieces });
     }
 
     /// Whether this name is already taken, anywhere still in scope.

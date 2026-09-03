@@ -316,6 +316,7 @@ version = "0.0.0"
 dependencies = [
  "quench-diag",
  "quench-parse",
+ "quench-qir",
 ]
 
 [[package]]
