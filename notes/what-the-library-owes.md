@@ -22,8 +22,42 @@ writes, no line they log, no file they produce.
 The formatting already exists. `PrintI64`, `PrintU64`, `PrintFloat`, `PrintExact` and
 `PrintDecimal` each turn a number into exactly the characters it should be; they write
 them to a stream rather than handing them back. What is missing is the same work
-returning a `Text` instead of a stream, and a name for it. Cheapest thing on this list
-by a wide margin, and the one most in the way.
+returning a `Text` instead of a stream. Cheapest thing on this list by a wide margin,
+and the one most in the way.
+
+### `stitch`
+
+It takes the list a `print` takes:
+
+```
+var.immut.str ['said'] = [stitch[str:*n is * 'n' *!*]];
+```
+
+Which is the whole of it: `print.stdout[…]` and `stitch[…]` read the same list of
+pieces, of any types, side by side. One writes them and the other builds them. Two
+destinations, one implementation, and the grammar is one somebody has already learnt.
+
+Doing it in one step rather than two is the point. A `convert` that turned one number
+into one piece of text would leave every message as a conversion and then a join and
+then another join, and the joins are the part Quench already does.
+
+`join` was not free: `Value::Join` and `Host::TextJoin` are what juxtaposition compiles
+to, text beside text. That is a genuinely different operation from building text out of
+anything, and one word for both would blur two rules that are deliberately apart.
+
+### What it does to "nothing converts on its own"
+
+It does not break it, and the reason is already written in the error it replaces.
+
+The rule is against **silent** conversion — a number wandering into a `str` because
+something guessed. A `print` is exempt today because showing is not joining. A `stitch`
+is exempt for a stronger reason: the word is in the source. It is a request, said out
+loud, the way `count['xs']` asks for a length rather than an array quietly becoming a
+number.
+
+So the rule reads: nothing converts on its own, and `stitch` is how a program says *do
+it anyway*. Written down here because the next person wanting an implicit conversion
+will point at this one, and the answer to them is that theirs has nowhere to say so.
 
 ## Three decisions the rest waits on
 
@@ -83,7 +117,7 @@ Each of these is waiting on something, and the something is named.
 
 | | waiting on |
 | --- | --- |
-| Number → text | nothing |
+| Number → text — `stitch` | nothing |
 | Text: length, slice, search, case, trim, split | bytes-or-characters |
 | The IEEE-required maths | nothing |
 | The IEEE-recommended maths | somebody writing it, once, for every engine |
