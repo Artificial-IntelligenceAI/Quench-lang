@@ -1,0 +1,31 @@
+# Both kinds of loop, and what `perm` is for.
+
+START {
+    # `range` counts, and both ends are included.
+    loop.temp.range.i64 ['i'] = [*1*, *5*] {
+        print.stdout['i' str:* *];
+    }
+    print.stdout[\n];
+
+    # What a loop changes, it carries out with it.
+    var.mut.i64 ['total'] = [*0*];
+    var.immut.arr.i64 (4) ['xs'] = [[*7* *8* *9* *10*]];
+    loop.temp.range.i64 ['n'] = [*1*, count['xs']] {
+        set ['total'] = ['total' + 'xs'['n']];
+    }
+    print.stdout[str:*total = * 'total' \n];
+
+    # `perm` keeps the counter afterwards, holding the last value it took. Which is
+    # what you want after a `break`, and the only reason to keep it at all.
+    loop.perm.range.i64 ['i'] = [*1*, *100*] {
+        if 'i' × 'i' > *10* { break; }
+    }
+    print.stdout[str:*stopped at * 'i' \n];
+
+    # `while` asks again before every pass, and has no counter to name.
+    var.mut.i64 ['left'] = [*3*];
+    loop.while 'left' > *0* {
+        print.stdout[str:*left = * 'left' \n];
+        set ['left'] = ['left' - *1*];
+    }
+}

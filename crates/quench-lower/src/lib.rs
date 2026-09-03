@@ -5,7 +5,7 @@
 //! what is left is a transliteration, and that is the point of doing the checking first.
 //! Anything in this file that started to look like a judgement would belong further up.
 
-use quench_check::{Arm, Checked, OpKind, Place, Printed, Stmt, Ty, Value};
+use quench_check::{Arm, Checked, Flow, OpKind, Place, Printed, Stmt, Ty, Value};
 use quench_conf::{Division, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
@@ -68,7 +68,8 @@ fn build(checked: &Checked, settings: Settings) -> qir::Module {
     // a join replaces the ones that could have come from either side.
     let mut held: Vec<Option<qir::Value>> = vec![None; checked.locals.len()];
 
-    lower_body(&mut b, &mut module, &checked.body, &mut held, checked, settings);
+    let mut loops = Vec::new();
+    lower_body(&mut b, &mut module, &checked.body, &mut held, checked, &mut loops, settings);
 
     // A program that says nothing about how it ended, ended fine.
     let nothing = b.const_i64(0);
@@ -89,14 +90,28 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
     }
 }
 
+/// A loop being lowered, so that a `break` somewhere inside it knows where to go and
+/// what to take with it.
+struct Frame {
+    done: qir::BlockId,
+    /// Which locals the loop carries across every edge.
+    carried: Vec<usize>,
+    /// A `perm` counter's local, which `done` wants after the carried values because it
+    /// is what the counter will hold afterwards.
+    keep: Option<usize>,
+}
+
+/// Lower a run of statements. True when the block was left before the end of it — which
+/// is to say a `break` ran, and whoever called must not put a terminator after one.
 fn lower_body(
     b: &mut qir::Builder,
     module: &mut qir::Module,
     body: &[Stmt],
     held: &mut Vec<Option<qir::Value>>,
     checked: &Checked,
+    loops: &mut Vec<Frame>,
     settings: Settings,
-) {
+) -> bool {
     for stmt in body {
         match stmt {
             Stmt::Declare { local, value } => {
@@ -118,7 +133,25 @@ fn lower_body(
                 }
             }
             Stmt::If { arms, otherwise, live } => {
-                lower_if(b, module, arms, otherwise.as_deref(), *live, held, checked, settings);
+                let left = lower_if(
+                    b, module, arms, otherwise.as_deref(), *live, held, checked, loops, settings,
+                );
+                if left {
+                    return true;
+                }
+            }
+            Stmt::Loop { flow, body, live } => {
+                lower_loop(b, module, flow, body, *live, held, checked, loops, settings);
+            }
+            Stmt::Break => {
+                let frame = loops.last().expect("refused by the checker: `break` outside a loop");
+                let mut leaving: Vec<qir::Value> =
+                    frame.carried.iter().map(|i| held[*i].expect("carried")).collect();
+                if let Some(i) = frame.keep {
+                    leaving.push(held[i].expect("the counter, which the loop set"));
+                }
+                b.jump(frame.done, &leaving);
+                return true;
             }
             Stmt::Print { to, pieces } => {
                 for piece in pieces {
@@ -145,6 +178,151 @@ fn lower_body(
             }
         }
     }
+    false
+}
+
+/// A loop — the same join a conditional makes, with an edge back into it.
+///
+/// The head holds one block parameter per variable the loop carries, exactly as a
+/// conditional's join does, and one more for the counter when there is one. What makes
+/// it a loop rather than a join is only that the body's last edge goes back to the head
+/// instead of onward, and that the head is where the question gets asked again.
+///
+/// A `perm` counter costs one further parameter, carrying the last value it actually
+/// took — because the counter itself is one past the end by the time the loop stops, and
+/// nobody means six when they wrote five. Only loops that asked for `perm` pay for it.
+fn lower_loop(
+    b: &mut qir::Builder,
+    module: &mut qir::Module,
+    flow: &Flow,
+    body: &[Stmt],
+    live: u32,
+    held: &mut Vec<Option<qir::Value>>,
+    checked: &Checked,
+    loops: &mut Vec<Frame>,
+    settings: Settings,
+) {
+    let live = live as usize;
+    let carried: Vec<usize> = (0..live).filter(|i| held[*i].is_some()).collect();
+    let carried_types: Vec<qir::Ty> =
+        carried.iter().map(|i| qir_ty(&checked.locals[*i].ty)).collect();
+
+    let (counting, keeps) = match flow {
+        Flow::Range { keeps, .. } => (true, *keeps),
+        Flow::While(_) => (false, false),
+    };
+
+    let mut inside = carried_types.clone();
+    if counting {
+        inside.push(qir::Ty::I64);
+    }
+    if keeps {
+        inside.push(qir::Ty::I64);
+    }
+    let mut outside = carried_types.clone();
+    if keeps {
+        outside.push(qir::Ty::I64);
+    }
+
+    let head = b.block(&inside);
+    let pass = b.block(&inside);
+    let done = b.block(&outside);
+
+    // Both bounds before the first pass. A loop whose end moved under it would be a loop
+    // nobody could read, so the checker made them values and this works them out once.
+    let bounds = match flow {
+        Flow::Range { from, to, .. } => {
+            let from = emit(b, module, from, held, settings);
+            let to = emit(b, module, to, held, settings);
+            Some((from, to))
+        }
+        Flow::While(_) => None,
+    };
+
+    let mut entering: Vec<qir::Value> =
+        carried.iter().map(|i| held[*i].expect("carried")).collect();
+    if let Some((from, _)) = bounds {
+        entering.push(from);
+        if keeps {
+            // Never run is not the same as run once, and this is what says so: the
+            // counter would have started here, and never got past the question.
+            entering.push(from);
+        }
+    }
+    b.jump(head, &entering);
+
+    // The head: where the question is asked, every pass including the first.
+    b.switch_to(head);
+    for (n, i) in carried.iter().enumerate() {
+        held[*i] = Some(b.block_param(head, n));
+    }
+    let counter = counting.then(|| b.block_param(head, carried.len()));
+    if let Some(value) = counter {
+        held[live] = Some(value);
+    }
+    let last = keeps.then(|| b.block_param(head, carried.len() + 1));
+
+    let more = match flow {
+        // Both ends included, which is why this is `<=` and not `<`.
+        Flow::Range { .. } => {
+            let (_, to) = bounds.expect("a range worked its bounds out above");
+            b.cmp(qir::CmpOp::Le, counter.expect("a range counts"), to)
+        }
+        Flow::While(condition) => emit(b, module, condition, held, settings),
+    };
+
+    let mut onward: Vec<qir::Value> = carried.iter().map(|i| held[*i].expect("carried")).collect();
+    let mut leaving = onward.clone();
+    if let Some(value) = counter {
+        onward.push(value);
+    }
+    if let Some(value) = last {
+        onward.push(value);
+        leaving.push(value);
+    }
+    b.br_if(more, (pass, &onward), (done, &leaving));
+
+    // One pass.
+    b.switch_to(pass);
+    for (n, i) in carried.iter().enumerate() {
+        held[*i] = Some(b.block_param(pass, n));
+    }
+    if counting {
+        held[live] = Some(b.block_param(pass, carried.len()));
+    }
+
+    loops.push(Frame { done, carried: carried.clone(), keep: keeps.then_some(live) });
+    let broke = lower_body(b, module, body, held, checked, loops, settings);
+    loops.pop();
+
+    if !broke {
+        let mut back: Vec<qir::Value> =
+            carried.iter().map(|i| held[*i].expect("carried")).collect();
+        if counting {
+            let counter = held[live].expect("the counter, which nothing may change");
+            let one = b.const_i64(1);
+            let next = b.add(counter, one);
+            back.push(next);
+            if keeps {
+                back.push(counter);
+            }
+        }
+        b.jump(head, &back);
+    }
+
+    // Afterwards.
+    b.switch_to(done);
+    for (n, i) in carried.iter().enumerate() {
+        held[*i] = Some(b.block_param(done, n));
+    }
+    // Whatever the body declared is gone at the closing brace, and holding on to its
+    // values would hand a later join something defined where it cannot reach.
+    for slot in held.iter_mut().skip(live) {
+        *slot = None;
+    }
+    if keeps {
+        held[live] = Some(b.block_param(done, carried.len()));
+    }
 }
 
 /// `if` — arms asked in order, and the values they leave behind carried to one place.
@@ -165,8 +343,9 @@ fn lower_if(
     live: u32,
     held: &mut Vec<Option<qir::Value>>,
     checked: &Checked,
+    loops: &mut Vec<Frame>,
     settings: Settings,
-) {
+) -> bool {
     let carried: Vec<usize> = (0..live as usize).filter(|i| held[*i].is_some()).collect();
     let types: Vec<qir::Ty> =
         carried.iter().map(|i| qir_ty(&checked.locals[*i].ty)).collect();
@@ -178,6 +357,7 @@ fn lower_if(
     };
 
     let before = held.clone();
+    let mut reached = false;
     for arm in arms {
         let condition = emit(b, module, &arm.condition, held, settings);
         let taken = b.block(&[]);
@@ -188,25 +368,48 @@ fn lower_if(
         // Each arm starts from what was true before the `if`, not from what the arm
         // before it did -- only one of them ever runs.
         *held = before.clone();
-        lower_body(b, module, &arm.body, held, checked, settings);
-        let leaving = handed(held);
-        b.jump(join, &leaving);
+        if !lower_body(b, module, &arm.body, held, checked, loops, settings) {
+            let leaving = handed(held);
+            b.jump(join, &leaving);
+            reached = true;
+        }
 
         b.switch_to(next);
     }
 
     // Nothing held. Whatever the `else` says, or nothing at all.
     *held = before.clone();
-    if let Some(body) = otherwise {
-        lower_body(b, module, body, held, checked, settings);
+    let left = match otherwise {
+        Some(body) => lower_body(b, module, body, held, checked, loops, settings),
+        None => false,
+    };
+    if !left {
+        let leaving = handed(held);
+        b.jump(join, &leaving);
+        reached = true;
     }
-    let leaving = handed(held);
-    b.jump(join, &leaving);
 
     b.switch_to(join);
     for (n, i) in carried.iter().enumerate() {
         held[*i] = Some(b.block_param(join, n));
     }
+    for slot in held.iter_mut().skip(live as usize) {
+        *slot = None;
+    }
+
+    if !reached {
+        // Every arm left the loop, so nothing arrives here. The block still needs an end
+        // on it, and it takes one that uses only its own parameters — which is what makes
+        // it well formed while still being unreachable, and so removable.
+        let frame = loops.last().expect("every path broke, so there is a loop to break out of");
+        let mut leaving: Vec<qir::Value> =
+            frame.carried.iter().map(|i| held[*i].expect("carried")).collect();
+        if let Some(i) = frame.keep {
+            leaving.push(held[i].expect("the counter"));
+        }
+        b.jump(frame.done, &leaving);
+    }
+    !reached
 }
 
 /// Where element (i, j, …) sits in a block laid out row by row.

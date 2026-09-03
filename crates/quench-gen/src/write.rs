@@ -211,6 +211,15 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                 };
                 let one = b.const_i64(1);
                 let next_i = b.add(i, one);
+                // Sometimes leave early. Without this the body has one way out and
+                // `done` has one way in, which is the one loop shape a `break` never
+                // makes -- and `break` is now a thing people write.
+                if rng.upto(3) == 0 {
+                    let enough = b.cmp(CmpOp::Ge, step, rng.pick(&numbers));
+                    let carry_on = b.block(&[]);
+                    b.br_if(enough, (done, &[step]), (carry_on, &[]));
+                    b.switch_to(carry_on);
+                }
                 b.jump(head, &[step, next_i]);
 
                 b.switch_to(done);

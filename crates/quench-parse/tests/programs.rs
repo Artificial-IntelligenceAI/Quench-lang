@@ -52,7 +52,7 @@ fn several_names_and_several_values() {
     assert_eq!(var.values[0].terms.len(), 3, "text, escape, text");
     assert_eq!(var.values[1].terms.len(), 3);
     assert!(!var.values[0].has_operators(), "nothing between them but juxtaposition");
-    assert_eq!(var.chain.len(), 2, "`var` and `str`");
+    assert_eq!(var.chain.len(), 3, "`var`, `immut` and `str`");
 }
 
 #[test]
@@ -153,13 +153,13 @@ fn the_worked_error_renders_whole() {
     let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qnl, line: 2, column: 23 (src/main.qnl:2:23)
+file: src/main.qnl, line: 2, column: 29 (src/main.qnl:2:29)
 
 two names declared, and one value given.
 
   2 | var.immut.str ['a', 'b'] = [*one*];
-    |          ~~~~~~~~ two names
-    |                       ^^^^^ one value
+    |                ~~~~~~~~ two names
+    |                             ^^^^^ one value
 
 Error code: E0105
 Rule(s) broken: a declaration gives one value for each name, in the same order
@@ -204,4 +204,43 @@ fn a_mistake_inside_a_block_does_not_eat_the_brace() {
     let out = parse(source);
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert_eq!(out.errors[0].code, "E0104", "just the one, and the block still closed");
+}
+
+#[test]
+fn a_counting_loop_keeps_its_chain_and_its_bounds() {
+    let source = "START {\nloop.temp.range.i64 ['i'] = [*1*, *5*] {\nprint.stdout['i' \\n];\n}\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let Stmt::Loop(repeat) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
+    let links: Vec<&str> = repeat.chain.iter().map(|s| &source[s.start..s.end]).collect();
+    assert_eq!(links, ["temp", "range", "i64"], "so a diagnostic can point at one of them");
+    let quench_parse::LoopKind::Range { name, from, to } = &repeat.kind else { panic!() };
+    assert_eq!(&source[name.start..name.end], "'i'");
+    assert_eq!(from.terms.len(), 1);
+    assert_eq!(to.terms.len(), 1);
+    assert_eq!(repeat.body.len(), 1);
+}
+
+#[test]
+fn a_while_loop_wears_no_brackets_around_its_question() {
+    // The same shape as `if`, for the same reason: `[ ]` holds a list everywhere else.
+    let source = "START {\nloop.while 'd' > *0* {\nbreak;\n}\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let Stmt::Loop(repeat) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
+    let quench_parse::LoopKind::While(condition) = &repeat.kind else { panic!() };
+    assert_eq!(condition.terms.len(), 2, "`'d'` and `*0*`");
+    assert!(matches!(repeat.body[0], Stmt::Break(_)));
+}
+
+#[test]
+fn a_bare_word_before_a_bracket_is_a_call() {
+    // And a quoted one before it is an index. Names being quoted is what settles this.
+    let source = "START {\nvar.immut.i64 ['n'] = [count['xs']];\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let Stmt::Var(var) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
+    let quench_parse::Term::Call { name, args, .. } = &var.values[0].terms[0] else { panic!() };
+    assert_eq!(&source[name.start..name.end], "count");
+    assert_eq!(args.len(), 1);
 }

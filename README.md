@@ -104,6 +104,16 @@ Both print the same thing, which is not a coincidence — it is
   so chaining and nesting are different syntax rather than the same syntax read two
   ways — the dangling-else problem does not arise. Nothing is truthy: a condition is
   a `bool` and there is no second way to be one.
+- **Looping.** `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` counts, both ends
+  included; `loop.while 'delta' > *0* { … }` asks again before every pass. The rule
+  between them is flat — **`range` always has a counter, `while` never has one** — and
+  a counted `while` was dropped to keep it that way. A counter says how long it lives
+  (`temp` or `perm`, required) and never whether it changes, because neither answer
+  would be true: the loop moves it every pass, and nothing you write may. `set ['i']`
+  is refused by name. `perm` keeps the counter afterwards holding the last value it
+  took, which is the one thing in Quench that outlives its block and is the reason
+  `break` is worth having. See
+  [notes/a-counter-belongs-to-its-loop.md](notes/a-counter-belongs-to-its-loop.md).
 - **`set` changes things**, and `mut` finally means something: `set ['total'] =
   ['total' + *55*];`, `set ['xs'[*2*]] = [*99*];`. Changing something not declared
   `mut` is refused, with the line that would have worked.

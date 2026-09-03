@@ -32,6 +32,32 @@ pub enum Stmt {
     Var(Var),
     Set(Set),
     If(If),
+    Loop(Loop),
+    /// `break;` — leave the innermost loop.
+    Break(Span),
+}
+
+/// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.
+///
+/// The chain reads like a declaration's, because a counting loop *is* one: how long the
+/// counter lives, what kind of loop, what type the counter is.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Loop {
+    /// `loop`, for pointing at.
+    pub word: Span,
+    /// Everything dotted after `loop`.
+    pub chain: Vec<Span>,
+    pub kind: LoopKind,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LoopKind {
+    /// `['i'] = [*1*, *5*]` — a counter and two inclusive bounds.
+    Range { name: Span, from: Value, to: Value },
+    /// A condition, asked again before every pass.
+    While(Value),
 }
 
 /// `if … { } else-if … { } else { }`
@@ -99,6 +125,8 @@ impl Stmt {
             Stmt::Var(v) => v.span,
             Stmt::Set(s) => s.span,
             Stmt::If(i) => i.span,
+            Stmt::Loop(l) => l.span,
+            Stmt::Break(s) => *s,
         }
     }
 }
@@ -164,6 +192,9 @@ pub enum Term {
     At { name: Span, indices: Vec<Term>, close: Span },
     /// A bare number, which is only ever part of a shape.
     Number(Span),
+    /// `count['xs']` — a bare word before a bracket is a call, where a quoted name
+    /// before one is an index. That distinction was already in the language.
+    Call { name: Span, args: Vec<Term>, close: Span },
     /// `( … )` — which is how anything mathematics did not settle gets said.
     Group { open: Span, value: Box<Value>, close: Span },
     /// `not x`
@@ -177,6 +208,7 @@ impl Term {
             Term::Elements { open, close, .. } => open.to(*close),
             Term::At { name, close, .. } => name.to(*close),
             Term::Number(span) => *span,
+            Term::Call { name, close, .. } => name.to(*close),
             Term::Group { open, close, .. } => open.to(*close),
             Term::Not { word, of } => word.to(of.span()),
         }
@@ -244,6 +276,8 @@ pub enum Piece {
     Escape(Span),
     /// `'xs'[…]` — one element of an array.
     At { name: Span, indices: Vec<Term>, close: Span },
+    /// `count['xs']` — the same call a value can hold, in a list.
+    Call { name: Span, args: Vec<Term>, close: Span },
 }
 
 impl Piece {
@@ -253,6 +287,7 @@ impl Piece {
             Piece::Written { ty: None, mark } => *mark,
             Piece::Name(s) | Piece::Escape(s) => *s,
             Piece::At { name, close, .. } => name.to(*close),
+            Piece::Call { name, close, .. } => name.to(*close),
         }
     }
 }

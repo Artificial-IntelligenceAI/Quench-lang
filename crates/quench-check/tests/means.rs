@@ -454,3 +454,82 @@ fn a_print_says_where_it_goes() {
     assert!(rendered.contains("a reader should not have to know a default"), "{rendered}");
     assert!(rendered.contains("there is `stdout` and `stderr`"), "{rendered}");
 }
+
+#[test]
+fn a_counter_belongs_to_its_loop() {
+    // Not the `immut` error, and deliberately so: the counter does change, every pass.
+    // What is wrong is who changes it, and that is a different sentence.
+    let source = "\
+START {
+    loop.temp.range.i64 ['i'] = [*1*, *5*] {
+        set ['i'] = [*9*];
+    }
+}
+";
+    let rendered = errors(source);
+    assert!(rendered.contains("`'i'` is a loop's counter, and the loop is what moves it."), "{rendered}");
+    assert!(rendered.contains("Error code: E0454"), "{rendered}");
+    assert!(rendered.contains("the loop counts this"), "{rendered}");
+    assert!(rendered.contains("and this would move it too"), "{rendered}");
+}
+
+#[test]
+fn a_counting_loop_says_how_long_its_counter_lives() {
+    // The rule is flat: `range` always has a counter, `while` never does. So `temp` and
+    // `perm` are required on one and refused on the other, and neither has a default.
+    assert_eq!(codes("START { loop.range.i64 ['i'] = [*1*, *5*] { } }"), ["E0451"]);
+    assert_eq!(codes("START { loop.temp.range ['i'] = [*1*, *5*] { } }"), ["E0452"]);
+    assert_eq!(
+        codes("START { var.mut.i64 ['d'] = [*1*]; loop.perm.while 'd' > *0* { } }"),
+        ["E0449"]
+    );
+}
+
+#[test]
+fn break_looks_past_every_if_to_the_nearest_loop() {
+    assert_eq!(codes("START { break; }"), ["E0446"]);
+    assert_eq!(codes("START { if *1* == *1* { break; } }"), ["E0446"]);
+    assert!(check("START { loop.temp.range.i64 ['i'] = [*1*, *5*] { if 'i' == *3* { break; } } }").ok());
+}
+
+#[test]
+fn nothing_under_a_break_can_run() {
+    let source = "\
+START {
+    loop.temp.range.i64 ['i'] = [*1*, *5*] {
+        break;
+        print.stdout[\\n];
+    }
+}
+";
+    let rendered = errors(source);
+    assert!(rendered.contains("nothing here can run."), "{rendered}");
+    assert!(rendered.contains("Error code: E0445"), "{rendered}");
+    assert!(rendered.contains("the loop is left here"), "{rendered}");
+}
+
+#[test]
+fn a_temp_counter_is_gone_afterwards_and_a_perm_one_is_not() {
+    assert_eq!(
+        codes("START { loop.temp.range.i64 ['i'] = [*1*, *5*] { } print.stdout['i' \\n]; }"),
+        ["E0413"],
+        "`temp` means what it says"
+    );
+    assert!(
+        check("START { loop.perm.range.i64 ['i'] = [*1*, *5*] { } print.stdout['i' \\n]; }").ok(),
+        "`perm` is the one thing in Quench that outlives its block"
+    );
+}
+
+#[test]
+fn count_is_answered_where_the_shape_was_written() {
+    // A shape never changes, so this is a number long before anything runs -- which is
+    // why a loop bounded by `count` costs nothing at all.
+    let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
+    assert!(out.ok());
+    let quench_check::Stmt::Declare { value, .. } = &out.body[1] else { panic!() };
+    assert_eq!(*value, quench_check::Value::Number(6), "every element, however many dimensions");
+
+    assert_eq!(codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [count['n']]; }"), ["E0457"]);
+    assert_eq!(codes("START { var.immut.i64 ['c'] = [size['n']]; }"), ["E0455"]);
+}

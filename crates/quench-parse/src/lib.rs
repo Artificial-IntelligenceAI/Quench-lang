@@ -14,7 +14,7 @@
 
 pub mod ast;
 
-pub use ast::{Arm, If, OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
+pub use ast::{Arm, If, Loop, LoopKind, OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
 
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
@@ -195,13 +195,19 @@ impl<'a> Parser<'a> {
             "var" => self.var().map(Stmt::Var),
             "set" => self.set().map(Stmt::Set),
             "if" => self.conditional().map(Stmt::If),
+            "loop" => self.repeat().map(Stmt::Loop),
+            "break" => {
+                let word = self.bump().span;
+                let end = self.expect(Kind::Semicolon, "a statement")?;
+                Some(Stmt::Break(word.to(end)))
+            }
             other => {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var`, `set`, `print` or `if`")
+                        .rule("a statement begins with `var`, `set`, `print`, `if`, `loop` or `break`")
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var`, `set`, `print` or `if`?"),
+                        .fix("did you mean `var`, `set`, `print`, `if`, `loop` or `break`?"),
                 );
                 None
             }
@@ -227,12 +233,62 @@ impl<'a> Parser<'a> {
                 pieces.push(ast::Piece::At { name, indices, close });
                 continue;
             }
+            // And a bare word before one is a call, for the same reason it is elsewhere.
+            if self.peek().kind == Kind::Word
+                && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+            {
+                let ast::Term::Call { name, args, close } = self.term()? else {
+                    unreachable!("just matched a call")
+                };
+                pieces.push(ast::Piece::Call { name, args, close });
+                continue;
+            }
             pieces.push(self.piece(true)?);
         }
 
         self.expect(Kind::CloseList, "`print`")?;
         let end = self.expect(Kind::Semicolon, "a statement")?;
         Some(Print { word, to, pieces, span: word.to(end) })
+    }
+
+    /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.
+    fn repeat(&mut self) -> Option<ast::Loop> {
+        let word = self.bump().span;
+        let mut chain = Vec::new();
+        while self.eat(Kind::Dot).is_some() {
+            chain.push(self.expect(Kind::Word, "a chain")?);
+        }
+
+        // Which kind it is decides what follows, and the chain has already said.
+        let counted = chain.iter().any(|link| self.text(*link) == "range");
+        let kind = if counted {
+            self.expect(Kind::OpenList, "a loop")?;
+            let name = self.expect(Kind::Name, "a loop")?;
+            self.expect(Kind::CloseList, "a loop")?;
+            self.expect(Kind::Equals, "a loop")?;
+            self.expect(Kind::OpenList, "a loop")?;
+            let from = self.value()?;
+            self.expect(Kind::Comma, "a range")?;
+            let to = self.value()?;
+            self.expect(Kind::CloseList, "a loop")?;
+            ast::LoopKind::Range { name, from, to }
+        } else {
+            let condition = self.value()?;
+            if condition.terms.is_empty() {
+                self.errors.push(
+                    Diagnostic::new("E0112", "this loop asks nothing and counts nothing.")
+                        .primary(word, "here")
+                        .rule("a loop is `range` with bounds, or `while` with a condition")
+                        .fix("`loop.temp.range.<type> ['i'] = [*1*, *5*]`, or `loop.while <condition>`"),
+                );
+                return None;
+            }
+            ast::LoopKind::While(condition)
+        };
+
+        let body = self.block()?;
+        let end = body.last().map(ast::Stmt::span).unwrap_or(word);
+        Some(ast::Loop { word, chain, kind, body, span: word.to(end) })
     }
 
     /// `if … { } else-if … { } else { }`
@@ -497,8 +553,21 @@ impl<'a> Parser<'a> {
             let close = self.expect(Kind::CloseList, "an array")?;
             return Some(ast::Term::Elements { open, of, close });
         }
-        // A quoted name followed by a bracket is an index. A bare word followed by one
-        // would be a call, which is why names being quoted settles this for free.
+        // A bare word followed by a bracket is a call. A quoted name followed by one is
+        // an index. Names being quoted is what settles this, and always was.
+        if token.kind == Kind::Word
+            && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+        {
+            let name = self.bump().span;
+            self.bump();
+            let mut args = Vec::new();
+            while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+                args.push(self.term()?);
+            }
+            let close = self.expect(Kind::CloseList, "a call")?;
+            return Some(ast::Term::Call { name, args, close });
+        }
+        // A quoted name followed by a bracket is an index.
         if token.kind == Kind::Name && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
         {
             let name = self.bump().span;

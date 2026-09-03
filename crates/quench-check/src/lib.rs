@@ -93,6 +93,9 @@ pub struct Local {
     /// The whole chain that declared it, so an error about `mut` can point at where
     /// `mut` was not, and offer the line with it put in.
     pub chain: Span,
+    /// True for a loop's counter, which no `set` may touch. It is not `immut` — the
+    /// loop changes it every pass — so the two need telling apart to say why.
+    pub counter: bool,
 }
 
 /// Which variable. An index into [`Checked::locals`].
@@ -163,9 +166,37 @@ pub enum Stmt {
         /// at the closing brace, so only these have to be carried across the join.
         live: u32,
     },
+    /// A loop. Its body runs until something stops it, and what stops it is the whole
+    /// difference between the two kinds.
+    Loop {
+        flow: Flow,
+        body: Vec<Stmt>,
+        /// How many locals existed before the loop. A counting loop's counter is this
+        /// index, declared just above the body and living exactly as long as the chain
+        /// said. Anything the body declares is gone at the closing brace.
+        live: u32,
+    },
+    /// `break;` — leave the innermost loop now.
+    Break,
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
     Print { to: Stream, pieces: Vec<Printed> },
+}
+
+/// What drives a loop.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Flow {
+    /// `range` — a counter walking from one bound to the other, both ends included.
+    /// Both bounds are worked out once, before the first pass.
+    Range {
+        from: Value,
+        to: Value,
+        /// `perm`. The counter outlives the loop, holding the last value it took —
+        /// which is the only thing in Quench that escapes the block it was declared in.
+        keeps: bool,
+    },
+    /// `while` — a question asked again before every pass, and no counter at all.
+    While(Value),
 }
 
 /// One `if` or `else-if`.
@@ -201,7 +232,14 @@ impl Checked {
 pub fn check(source: &str) -> Checked {
     let Parsed { program, errors } = quench_parse::parse(source);
     let mut checker =
-        Checker { source, locals: Vec::new(), scope: vec![HashMap::new()], body: Vec::new(), errors };
+        Checker {
+            source,
+            locals: Vec::new(),
+            scope: vec![HashMap::new()],
+            depth: 0,
+            body: Vec::new(),
+            errors,
+        };
 
     let has_start = program.start.is_some();
     if let Some(start) = &program.start {
@@ -227,6 +265,9 @@ struct Checker<'a> {
     /// brace, because an `if` introduces nothing of its own and so has nothing to say
     /// about how long what is inside it lives.
     scope: Vec<HashMap<String, LocalId>>,
+    /// How many loops enclose what is being checked. Nothing but `break` cares, and
+    /// what it cares about is whether the number is zero.
+    depth: u32,
     body: Vec<Stmt>,
     errors: Vec<Diagnostic>,
 }
@@ -248,6 +289,8 @@ impl<'a> Checker<'a> {
             ast::Stmt::Print(print) => self.print(print),
             ast::Stmt::Set(set) => self.set(set),
             ast::Stmt::If(conditional) => self.conditional(conditional),
+            ast::Stmt::Loop(repeat) => self.repeat(repeat),
+            ast::Stmt::Break(span) => self.leave(*span),
         }
     }
 
@@ -288,6 +331,7 @@ impl<'a> Checker<'a> {
             let local = LocalId(self.locals.len() as u32);
             let chain_span = var.chain[0].to(*var.chain.last().expect("a chain has links"));
             self.locals.push(Local {
+                counter: false,
                 name: name.clone(),
                 ty,
                 mutable: chain.mutable,
@@ -789,6 +833,51 @@ impl<'a> Checker<'a> {
         Some(Value::Binary { op: op.kind, lhs: Box::new(lhs), rhs: Box::new(rhs) })
     }
 
+    /// `count['xs']` — how many elements an array holds, all told.
+    ///
+    /// The answer is known here, because a shape is written down in the declaration and
+    /// never changes. So this is a number by the time anything runs, and a loop bounded
+    /// by it costs nothing at all.
+    fn call(&mut self, name: Span, args: &[ast::Term], close: Span) -> Option<Value> {
+        let word = self.text(name);
+        if word != "count" {
+            self.errors.push(
+                Diagnostic::new("E0455", format!("there is nothing called `{word}`."))
+                    .primary(name, "here")
+                    .rule("a bare word before a bracket is a call, and `count` is the only one so far")
+                    .tip("functions of your own are not built yet.")
+                    .fix("did you mean `count`?"),
+            );
+            return None;
+        }
+
+        let [ast::Term::Piece(ast::Piece::Name(of))] = args else {
+            self.errors.push(
+                Diagnostic::new("E0456", "`count` counts one array.")
+                    .primary(name.to(close), "here")
+                    .rule("`count` takes the name of an array, and nothing else")
+                    .fix("`count['xs']`"),
+            );
+            return None;
+        };
+
+        let local = self.lookup(*of)?;
+        match &self.locals[local.0 as usize].ty {
+            Ty::Arr { shape, .. } => Some(Value::Number(shape.iter().product::<usize>() as i64)),
+            other => {
+                let other = other.clone();
+                self.errors.push(
+                    Diagnostic::new("E0457", format!("`count` was given {} `{}`.", other.article(), other.name()))
+                        .primary(*of, format!("{} `{}`", other.article(), other.name()))
+                        .rule("only an array holds a number of things")
+                        .tip("counting the characters of a `str` is a different question, and is not built yet.")
+                        .fix("name an array"),
+                );
+                None
+            }
+        }
+    }
+
     fn term(&mut self, term: &ast::Term) -> Option<Value> {
         match term {
             ast::Term::Number(span) => {
@@ -801,6 +890,10 @@ impl<'a> Checker<'a> {
                 None
             }
             ast::Term::At { name, indices, close } => self.at(*name, indices, *close),
+            ast::Term::Call { name, args, close }
+            | ast::Term::Piece(ast::Piece::Call { name, args, close }) => {
+                self.call(*name, args, *close)
+            }
             ast::Term::Elements { open, close, .. } => {
                 self.errors.push(
                     Diagnostic::new("E0437", "this is a list of elements, and nothing here wants one.")
@@ -988,7 +1081,7 @@ impl<'a> Checker<'a> {
                 );
                 None
             }),
-            ast::Piece::At { name, close, .. } => {
+            ast::Piece::Call { name, close, .. } | ast::Piece::At { name, close, .. } => {
                 self.errors.push(
                     Diagnostic::new("E0411", "an element cannot be one piece of a longer value yet.")
                         .primary(name.to(*close), "here")
@@ -1070,13 +1163,211 @@ impl<'a> Checker<'a> {
     /// Check a block with a scope of its own, and hand back what it means.
     fn scoped(&mut self, body: &[ast::Stmt]) -> Vec<Stmt> {
         self.scope.push(HashMap::new());
-        let outer = std::mem::take(&mut self.body);
-        for stmt in body {
-            self.statement(stmt);
-        }
-        let inner = std::mem::replace(&mut self.body, outer);
+        let inner = self.statements(body);
         self.scope.pop();
         inner
+    }
+
+    /// Check a run of statements into a body of their own, in whatever scope is open.
+    fn statements(&mut self, body: &[ast::Stmt]) -> Vec<Stmt> {
+        let outer = std::mem::take(&mut self.body);
+        for (n, stmt) in body.iter().enumerate() {
+            // `break` ends the block it is in, so anything under it never runs. Quench
+            // says so rather than quietly dropping it.
+            if let Some(ast::Stmt::Break(word)) = body.get(n.wrapping_sub(1)) {
+                self.errors.push(
+                    Diagnostic::new("E0445", "nothing here can run.")
+                        .secondary(*word, "the loop is left here")
+                        .primary(stmt.span(), "and this is under it")
+                        .rule("`break` ends the block it is written in")
+                        .fix("move it above the `break`, or into the `if` that guards it"),
+                );
+                break;
+            }
+            self.statement(stmt);
+        }
+        std::mem::replace(&mut self.body, outer)
+    }
+
+    // --- looping ----------------------------------------------------------------------
+
+    fn leave(&mut self, word: Span) {
+        if self.depth == 0 {
+            self.errors.push(
+                Diagnostic::new("E0446", "`break` is written outside a loop.")
+                    .primary(word, "here")
+                    .rule("`break` leaves the loop it is written in, and there is none")
+                    .tip("an `if` is not a loop. `break` looks past every one of them to the nearest `loop`.")
+                    .fix("put it inside a `loop`"),
+            );
+            return;
+        }
+        self.body.push(Stmt::Break);
+    }
+
+    /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }`, or `loop.while … { … }`.
+    ///
+    /// The chain is read the same way a declaration's is, because for a counting loop it
+    /// is one: `temp`/`perm` is how long the counter lives, and the last link is what it
+    /// is. A `while` has no counter and so says neither.
+    fn repeat(&mut self, repeat: &ast::Loop) {
+        let live = self.locals.len() as u32;
+        let counting = matches!(repeat.kind, ast::LoopKind::Range { .. });
+
+        let mut lives: Option<(bool, Span)> = None;
+        let mut ty_span: Option<Span> = None;
+        for link in &repeat.chain {
+            match self.text(*link) {
+                word @ ("temp" | "perm") => match lives {
+                    None => lives = Some((word == "perm", *link)),
+                    Some((_, first)) => self.errors.push(
+                        Diagnostic::new("E0447", "this says twice how long the counter lives.")
+                            .secondary(first, format!("`{}` here", self.text(first)))
+                            .primary(*link, format!("and `{word}` here"))
+                            .rule("a counting loop says `temp` or `perm`, once")
+                            .fix("keep the one that was meant"),
+                    ),
+                },
+                "range" | "while" => {}
+                word if counting && ty_span.is_none() => {
+                    if !INTENDED.contains(&word) {
+                        self.errors.push(
+                            Diagnostic::new("E0402", format!("`{word}` is not a type."))
+                                .primary(*link, "here")
+                                .rule("a counting loop's chain ends with the type of its counter")
+                                .fix("check the spelling"),
+                        );
+                        return;
+                    }
+                    ty_span = Some(*link);
+                }
+                word => self.errors.push(
+                    Diagnostic::new("E0448", format!("`{word}` has no place in a loop's chain."))
+                        .primary(*link, "here")
+                        .rule("a loop reads `loop.temp|perm.range.<type>`, or `loop.while`")
+                        .fix("remove it"),
+                ),
+            }
+        }
+
+        match &repeat.kind {
+            ast::LoopKind::While(condition) => self.asking(repeat, condition, lives, ty_span),
+            ast::LoopKind::Range { name, from, to } => {
+                self.counting(repeat, *name, from, to, live, lives, ty_span)
+            }
+        }
+    }
+
+    /// `loop.while <condition> { … }` — no counter, and so nothing to say about one.
+    fn asking(
+        &mut self,
+        repeat: &ast::Loop,
+        condition: &ast::Value,
+        lives: Option<(bool, Span)>,
+        ty_span: Option<Span>,
+    ) {
+        if let Some((_, at)) = lives {
+            let word = self.text(at);
+            self.errors.push(
+                Diagnostic::new("E0449", format!("a `while` loop has no counter, so `{word}` has nothing to describe."))
+                    .primary(at, "here")
+                    .rule("`temp` and `perm` say how long a counter lives, and only `range` has one")
+                    .tip("a `while` that wants a counter wants a `var` above it and a `set` inside it — which is what it would have been either way.")
+                    .fix("`loop.while`"),
+            );
+        }
+        if let Some(at) = ty_span {
+            self.errors.push(
+                Diagnostic::new("E0450", "a `while` loop declares nothing, so it has no type.")
+                    .primary(at, "here")
+                    .rule("the type at the end of a loop's chain is its counter's, and a `while` has no counter")
+                    .fix("`loop.while`"),
+            );
+        }
+
+        let live = self.locals.len() as u32;
+        let Some(built) = self.condition(condition, repeat.word) else {
+            let _ = self.scoped(&repeat.body);
+            return;
+        };
+        self.depth += 1;
+        let body = self.scoped(&repeat.body);
+        self.depth -= 1;
+        self.body.push(Stmt::Loop { flow: Flow::While(built), body, live });
+    }
+
+    /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` — both ends included.
+    fn counting(
+        &mut self,
+        repeat: &ast::Loop,
+        name: Span,
+        from: &ast::Value,
+        to: &ast::Value,
+        live: u32,
+        lives: Option<(bool, Span)>,
+        ty_span: Option<Span>,
+    ) {
+        let Some((keeps, _)) = lives else {
+            self.errors.push(
+                Diagnostic::new("E0451", "this loop does not say how long its counter lives.")
+                    .primary(repeat.word, "here")
+                    .rule("a counting loop says `temp` or `perm`, and silence is not one of them")
+                    .tip("`temp` is the usual one. `perm` keeps the counter afterwards, holding the last value it took, which is what you want after a `break`.")
+                    .fix("`loop.temp.range.<type>`, or `loop.perm.range.<type>`"),
+            );
+            return;
+        };
+        let Some(ty_span) = ty_span else {
+            self.errors.push(
+                Diagnostic::new("E0452", "this loop does not say what its counter is.")
+                    .primary(repeat.word, "the chain ends here")
+                    .rule("a counting loop declares a variable, and a declaration always says its type")
+                    .fix("`loop.temp.range.i64 [...]`"),
+            );
+            return;
+        };
+        let word = self.text(ty_span);
+        if word != "i64" {
+            self.errors.push(
+                Diagnostic::new("E0453", format!("counting by `{word}` is not built yet."))
+                    .primary(ty_span, "here")
+                    .rule("Quench means to count by every number type, and counts by `i64` today")
+                    .fix("`i64` for now"),
+            );
+            return;
+        }
+
+        // Both bounds before the first pass, and neither asked again. A loop whose end
+        // moved under it would be a loop nobody could read.
+        let Some(from) = self.value(from, &Ty::I64, name) else { return };
+        let Some(to) = self.value(to, &Ty::I64, name) else { return };
+
+        let counter = LocalId(self.locals.len() as u32);
+        debug_assert_eq!(counter.0, live);
+        let text = self.named(name);
+        self.locals.push(Local {
+            counter: true,
+            name: text.clone(),
+            ty: Ty::I64,
+            mutable: false,
+            at: name,
+            chain: repeat.word.to(*repeat.chain.last().unwrap_or(&repeat.word)),
+        });
+
+        self.scope.push(HashMap::new());
+        self.scope.last_mut().expect("just pushed").insert(text.clone(), counter);
+        self.depth += 1;
+        let body = self.statements(&repeat.body);
+        self.depth -= 1;
+        self.scope.pop();
+
+        // `perm` is the one thing in Quench that outlives the block it was written in,
+        // and it is deliberate: after an early `break` the counter is the answer.
+        if keeps {
+            self.scope.last_mut().expect("a scope is always open").insert(text, counter);
+        }
+
+        self.body.push(Stmt::Loop { flow: Flow::Range { from, to, keeps }, body, live });
     }
 
     // --- changing ---------------------------------------------------------------------
@@ -1085,6 +1376,24 @@ impl<'a> Checker<'a> {
         for (n, target) in set.targets.iter().enumerate() {
             let Some(local) = self.lookup(target.name()) else { continue };
             let held = self.locals[local.0 as usize].ty.clone();
+
+            // Not the `immut` error, because it is not the same mistake: the counter
+            // does change, every pass, and what is wrong is who changes it.
+            if self.locals[local.0 as usize].counter {
+                let declared = self.locals[local.0 as usize].clone();
+                self.errors.push(
+                    Diagnostic::new(
+                        "E0454",
+                        format!("`'{}'` is a loop's counter, and the loop is what moves it.", declared.name),
+                    )
+                    .secondary(declared.at, "the loop counts this")
+                    .primary(target.name(), "and this would move it too")
+                    .rule("a counter belongs to its loop: the bounds say where it starts and stops, and nothing else may say otherwise")
+                    .tip("`break` is how you leave early, and `perm` is how you keep where it stopped.")
+                    .fix("count with a `var.mut` of your own, or use `break`"),
+                );
+                continue;
+            }
 
             if !self.locals[local.0 as usize].mutable {
                 let declared = self.locals[local.0 as usize].clone();
@@ -1209,6 +1518,11 @@ impl<'a> Checker<'a> {
                 }
                 ast::Piece::At { name, indices, close } => {
                     let Some(value) = self.at(*name, indices, *close) else { continue };
+                    let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
+                    pieces.push(Printed::Value { value, ty });
+                }
+                ast::Piece::Call { name, args, close } => {
+                    let Some(value) = self.call(*name, args, *close) else { continue };
                     let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
                     pieces.push(Printed::Value { value, ty });
                 }

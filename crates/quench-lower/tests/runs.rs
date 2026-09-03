@@ -470,3 +470,171 @@ fn the_two_streams_do_not_leak_into_each_other() {
     assert_eq!(printed("START { print.stderr[str:*only here*]; }").out, "");
     assert_eq!(printed("START { print.stdout[str:*only here*]; }").err, "");
 }
+
+#[test]
+fn a_counting_loop_includes_both_ends() {
+    assert_eq!(
+        said("START {\n    loop.temp.range.i64 ['i'] = [*1*, *5*] {\n        print.stdout['i'];\n    }\n}\n"),
+        "12345",
+    );
+}
+
+#[test]
+fn a_loop_carries_what_it_changed_out_of_itself() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.i64 ['total'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, *10*] {
+        set ['total'] = ['total' + 'i'];
+    }
+    print.stdout['total'];
+}
+"),
+        "55",
+    );
+}
+
+#[test]
+fn a_range_whose_start_is_past_its_end_runs_no_passes() {
+    assert_eq!(
+        said("\
+START {
+    loop.perm.range.i64 ['i'] = [*1*, *0*] {
+        print.stdout[str:*never*];
+    }
+    print.stdout['i'];
+}
+"),
+        // The counter never took a value, so `perm` holds where it would have started.
+        "1",
+    );
+}
+
+#[test]
+fn a_perm_counter_holds_the_last_value_it_took() {
+    // Five, not six. The counter is one past the end by the time the loop stops, and
+    // nobody who wrote five means six -- which is the whole reason `perm` costs a
+    // parameter that `temp` does not.
+    assert_eq!(
+        said("START {\n    loop.perm.range.i64 ['i'] = [*1*, *5*] { }\n    print.stdout['i'];\n}\n"),
+        "5",
+    );
+    assert_eq!(
+        said("\
+START {
+    loop.perm.range.i64 ['i'] = [*1*, *100*] {
+        if 'i' == *3* { break; }
+    }
+    print.stdout['i'];
+}
+"),
+        "3",
+        "which is what `perm` is for: after an early `break`, where it stopped",
+    );
+}
+
+#[test]
+fn break_leaves_the_nearest_loop_and_no_further() {
+    assert_eq!(
+        said("\
+START {
+    loop.temp.range.i64 ['r'] = [*1*, *3*] {
+        loop.temp.range.i64 ['c'] = [*1*, *4*] {
+            if 'c' > *2* { break; }
+            print.stdout['r' 'c'];
+        }
+    }
+}
+"),
+        "111221223132",
+    );
+}
+
+#[test]
+fn an_if_whose_every_arm_leaves_still_lets_the_loop_end() {
+    // Nothing comes out of the far side of that `if`, so the block it would have joined
+    // into is unreachable -- and an unreachable block still has to be well formed.
+    assert_eq!(
+        said("\
+START {
+    var.mut.i64 ['seen'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, *9*] {
+        set ['seen'] = ['seen' + *1*];
+        if 'i' == *4* { break; } else { print.stdout['i']; }
+    }
+    print.stdout[str:*/* 'seen'];
+}
+"),
+        "123/4",
+    );
+}
+
+#[test]
+fn a_while_loop_asks_again_before_every_pass() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.i64 ['n'] = [*1*];
+    var.mut.i64 ['steps'] = [*0*];
+    loop.while 'n' < *100* {
+        set ['n'] = ['n' \u{d7} *3*];
+        set ['steps'] = ['steps' + *1*];
+    }
+    print.stdout['n' str:* in * 'steps'];
+}
+"),
+        "243 in 5",
+    );
+    assert_eq!(
+        said("\
+START {
+    var.immut.bool ['never'] = [*false*];
+    loop.while 'never' {
+        print.stdout[str:*no*];
+    }
+    print.stdout[str:*done*];
+}
+"),
+        "done",
+        "the question comes before the first pass, not after it",
+    );
+}
+
+#[test]
+fn a_body_may_declare_things_of_its_own() {
+    // Which are gone at the closing brace, and whose values must not be carried past it
+    // -- a join handed something defined inside the loop would be reaching where it
+    // cannot see.
+    assert_eq!(
+        said("\
+START {
+    var.mut.i64 ['last'] = [*0*];
+    loop.temp.range.i64 ['j'] = [*1*, *3*] {
+        var.immut.i64 ['ten'] = ['j' \u{d7} *10*];
+        set ['last'] = ['ten'];
+        print.stdout['ten' str:* *];
+    }
+    if 'last' == *30* { print.stdout[str:*kept*]; }
+}
+"),
+        "10 20 30 kept",
+    );
+}
+
+#[test]
+fn count_bounds_a_loop_over_an_array() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.i64 (4) ['xs'] = [[*7* *8* *9* *10*]];
+    var.mut.i64 ['sum'] = [*0*];
+    loop.temp.range.i64 ['n'] = [*1*, count['xs']] {
+        set ['sum'] = ['sum' + 'xs'['n']];
+    }
+    print.stdout['sum'];
+}
+"),
+        "34",
+    );
+}
