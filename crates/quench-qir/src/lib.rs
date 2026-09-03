@@ -234,6 +234,14 @@ pub enum BinOp {
     FSubChecked,
     FMulChecked,
     FDivChecked,
+    /// Unsigned division and remainder, which `u64` needs and no narrower type does.
+    DivU,
+    RemU,
+    /// The three that stop rather than wrapping, read as unsigned. Only `u64` reaches
+    /// these: every narrower type detects its own overflow when it is narrowed.
+    AddTrappingU,
+    SubTrappingU,
+    MulTrappingU,
     /// Both, and either. On `Bool`, and always asking both sides — the form
     /// `[defaults] logic = "asks-both"` lowers to. Stopping early is control flow and
     /// is built out of blocks instead, because that is what stopping early *is*.
@@ -248,6 +256,14 @@ impl BinOp {
         matches!(
             self,
             BinOp::FAddChecked | BinOp::FSubChecked | BinOp::FMulChecked | BinOp::FDivChecked
+        )
+    }
+
+    /// Whether this reads its operands as unsigned.
+    pub fn is_unsigned(self) -> bool {
+        matches!(
+            self,
+            BinOp::DivU | BinOp::RemU | BinOp::AddTrappingU | BinOp::SubTrappingU | BinOp::MulTrappingU
         )
     }
 
@@ -315,6 +331,9 @@ pub enum Host {
     PrintText,
     /// `(stream, number)`
     PrintI64,
+    /// The same bits, read the other way. A `u64` past `i64::MAX` is a negative number
+    /// in a slot and is not a negative number, and this is the one place that shows.
+    PrintU64,
     /// `(stream, bool)`
     PrintBool,
 
@@ -400,6 +419,7 @@ impl Host {
         match self {
             Host::PrintText => "print-text",
             Host::PrintI64 => "print-i64",
+            Host::PrintU64 => "print-u64",
             Host::PrintBool => "print-bool",
             Host::ArrayNew => "array-new",
             Host::ArraySet => "array-set",
@@ -430,7 +450,7 @@ impl Host {
     pub fn params(self) -> &'static [Ty] {
         match self {
             Host::PrintText => &[Ty::I64, Ty::Text],
-            Host::PrintI64 => &[Ty::I64, Ty::I64],
+            Host::PrintI64 | Host::PrintU64 => &[Ty::I64, Ty::I64],
             Host::PrintBool => &[Ty::I64, Ty::Bool],
             Host::ArrayNew => &[Ty::I64, Ty::I64, Ty::I64],
             Host::ArraySet => &[Ty::Handle, Ty::I64, Ty::I64],
@@ -585,6 +605,21 @@ pub enum Inst {
     Cmp { op: CmpOp, lhs: Value, rhs: Value },
     /// Boolean negation.
     Not(Value),
+    /// Put a value back inside a narrower integer type.
+    ///
+    /// Every integer Quench has rides in an `i64`, held **normalised** — sign-extended
+    /// when the type is signed and zero-extended when it is not — so that comparing and
+    /// printing need know nothing about width. This is what restores that after an
+    /// operation, and under `overflow = "trap"` it is also where a `u8` that reached 256
+    /// stops rather than becoming nought.
+    ///
+    /// At 64 bits it changes no bits at all, and is emitted anyway so that one shape of
+    /// arithmetic serves every width.
+    Narrow { of: Value, bits: u8, signed: bool, checked: bool },
+    /// Comparing two values as unsigned, which only `u64` needs: every narrower
+    /// unsigned type is normalised into the positive half of an `i64` and orders the
+    /// same either way.
+    CmpU { op: CmpOp, lhs: Value, rhs: Value },
     /// Comparing two `Float`s, which is its own instruction rather than [`Inst::Cmp`]
     /// with different operands: the bits of a float do not order the way the float does
     /// — a negative one has its sign bit set, and a not-a-number compares false against

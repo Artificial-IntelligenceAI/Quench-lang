@@ -96,7 +96,7 @@ fn a_file_with_no_start_is_not_a_program() {
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
         // A type Quench means to have and does not have yet.
-        ("START { print.stdout[u8:*1*]; }", "`u8` is not built yet"),
+        ("START { print.stdout[d32:*1*]; }", "`d32` is not built yet"),
         // A number is not text, and nothing converts on its own.
         ("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }", "text is made of text"),
     ];
@@ -1621,5 +1621,53 @@ START {
 "),
         "65504.0 infinity 0.000000059604645",
         "the largest binary16, what is past it, and the smallest subnormal",
+    );
+}
+
+#[test]
+fn every_whole_number_type_wraps_at_its_own_edge() {
+    // All of them ride in an `i64`, so what makes a `u8` a `u8` is being put back
+    // inside it after every operation.
+    assert_eq!(
+        said("\
+START {
+    var.immut.u8 ['a'] = [*200*];
+    var.immut.u8 ['b'] = [*100*];
+    var.immut.i8 ['c'] = [*120*];
+    var.immut.i16 ['low'] = [*-32768*];
+    var.immut.u8 ['over'] = ['a' + 'b'];
+    var.immut.i8 ['twice'] = ['c' + 'c'];
+    var.immut.i16 ['under'] = ['low' - *1*];
+    print.stdout['over' str:* * 'twice' str:* * 'under'];
+}
+"),
+        "44 -16 32767",
+    );
+}
+
+#[test]
+fn a_u64_is_read_as_unsigned_wherever_that_shows() {
+    // Past `i64::MAX` a `u64` is a negative number in a slot and is not a negative
+    // number. Printing, comparing and dividing are the three places that notice.
+    assert_eq!(
+        said("\
+START {
+    var.immut.u64 ['big'] = [*18446744073709551615*];
+    var.immut.u64 ['one'] = [*1*];
+    var.immut.bool ['gt'] = ['big' > 'one'];
+    var.immut.u64 ['half'] = ['big' / *2*];
+    print.stdout['big' str:* * 'gt' str:* * 'half'];
+}
+"),
+        "18446744073709551615 true 9223372036854775807",
+    );
+}
+
+#[test]
+fn a_written_number_is_read_by_the_width_asking_for_it() {
+    assert_eq!(
+        said("START {\n    var.immut.u32 ['q'] = [*4000000000*];\n    var.immut.u32 ['h'] = ['q' / *2*];\n    print.stdout['h'];\n}\n"),
+        "2000000000",
+        "and an unsigned division has neither edge a signed one has",
     );
 }

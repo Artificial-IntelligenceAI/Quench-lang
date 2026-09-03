@@ -188,6 +188,19 @@ fn put_inst(out: &mut Vec<u8>, inst: &Inst) {
             out.push(8);
             put_value(out, v);
         }
+        Inst::Narrow { of, bits, signed, checked } => {
+            out.push(11);
+            put_value(out, of);
+            out.push(*bits);
+            out.push(u8::from(*signed));
+            out.push(u8::from(*checked));
+        }
+        Inst::CmpU { op, lhs, rhs } => {
+            out.push(12);
+            out.push(cmp_code(*op));
+            put_value(out, lhs);
+            put_value(out, rhs);
+        }
         Inst::Call { func, args } => {
             out.push(9);
             put_u32(out, func.0);
@@ -248,6 +261,11 @@ fn bin_code(op: BinOp) -> u8 {
         BinOp::FDivChecked => 17,
         BinOp::And => 18,
         BinOp::Or => 19,
+        BinOp::DivU => 20,
+        BinOp::RemU => 21,
+        BinOp::AddTrappingU => 22,
+        BinOp::SubTrappingU => 23,
+        BinOp::MulTrappingU => 24,
     }
 }
 
@@ -266,6 +284,7 @@ fn host_code(host: Host) -> u8 {
     match host {
         Host::PrintText => 0,
         Host::PrintI64 => 1,
+        Host::PrintU64 => 25,
         Host::PrintBool => 2,
         Host::ArrayNew => 3,
         Host::ArraySet => 4,
@@ -514,6 +533,13 @@ impl<'a> Reader<'a> {
             8 => Inst::Not(self.value()?),
             9 => Inst::Call { func: FuncId(self.u32()?), args: self.many(|r| r.value())? },
             10 => Inst::CallHost { host: self.host()?, args: self.many(|r| r.value())? },
+            11 => Inst::Narrow {
+                of: self.value()?,
+                bits: self.byte()?,
+                signed: self.byte()? != 0,
+                checked: self.byte()? != 0,
+            },
+            12 => Inst::CmpU { op: self.cmp()?, lhs: self.value()?, rhs: self.value()? },
             code => return Err(Wrong::Unknown { what: "an instruction", code }),
         })
     }
@@ -557,6 +583,11 @@ impl<'a> Reader<'a> {
             17 => BinOp::FDivChecked,
             18 => BinOp::And,
             19 => BinOp::Or,
+            20 => BinOp::DivU,
+            21 => BinOp::RemU,
+            22 => BinOp::AddTrappingU,
+            23 => BinOp::SubTrappingU,
+            24 => BinOp::MulTrappingU,
             code => return Err(Wrong::Unknown { what: "an operation", code }),
         })
     }
@@ -577,6 +608,7 @@ impl<'a> Reader<'a> {
         Ok(match self.byte()? {
             0 => Host::PrintText,
             1 => Host::PrintI64,
+            25 => Host::PrintU64,
             2 => Host::PrintBool,
             3 => Host::ArrayNew,
             4 => Host::ArraySet,

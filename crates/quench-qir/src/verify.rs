@@ -215,6 +215,24 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                             }
                         }
                     }
+                    Inst::Narrow { of, .. } => {
+                        if known(*of, &mut say) && func.ty_of(*of) != Ty::I64 {
+                            say(format!(
+                                "block {i}: narrowing wants i64 and {of:?} is {}",
+                                func.ty_of(*of).name()
+                            ));
+                        }
+                    }
+                    Inst::CmpU { op, lhs, rhs } => {
+                        for v in [lhs, rhs] {
+                            if known(*v, &mut say) && func.ty_of(*v) != Ty::I64 {
+                                say(format!(
+                                    "block {i}: {op:?} as unsigned wants i64 and {v:?} is {}",
+                                    func.ty_of(*v).name()
+                                ));
+                            }
+                        }
+                    }
                     Inst::FCmp { op, lhs, rhs } => {
                         for v in [lhs, rhs] {
                             if known(*v, &mut say)

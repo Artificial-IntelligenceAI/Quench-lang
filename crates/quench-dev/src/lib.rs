@@ -235,7 +235,21 @@ fn trapping(
             let r = b.ins().smul_overflow(lhs, rhs);
             (r.0, r.1)
         }
-        _ => unreachable!("only the trapping three reach here"),
+        // The same three read as unsigned, which only `u64` needs: every narrower
+        // unsigned type notices its own overflow when it is narrowed.
+        qir::BinOp::AddTrappingU => {
+            let r = b.ins().uadd_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        qir::BinOp::SubTrappingU => {
+            let r = b.ins().usub_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        qir::BinOp::MulTrappingU => {
+            let r = b.ins().umul_overflow(lhs, rhs);
+            (r.0, r.1)
+        }
+        _ => unreachable!("only the trapping six reach here"),
     };
     let fits = b.create_block();
     let does_not = b.create_block();
@@ -772,6 +786,12 @@ extern "C" fn print_i64(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn print_u64(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
+    write_out(stream, (value as u64).to_string().as_bytes());
+    0
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn print_text(_rt: *mut Runtime, stream: i64, index: i64) -> i64 {
     write_out(stream, text_of(index).as_bytes());
     0
@@ -851,6 +871,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     // The one symbol generated code is allowed to reach outside itself for.
     builder.symbol("quench_print_text", print_text as *const u8);
     builder.symbol("quench_print_i64", print_i64 as *const u8);
+    builder.symbol("quench_print_u64", print_u64 as *const u8);
     builder.symbol("quench_print_bool", print_bool as *const u8);
     builder.symbol("quench_array_new", array_new as *const u8);
     builder.symbol("quench_array_set", array_set as *const u8);
@@ -914,6 +935,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     for (host, symbol) in [
         (qir::Host::PrintText, "quench_print_text"),
         (qir::Host::PrintI64, "quench_print_i64"),
+        (qir::Host::PrintU64, "quench_print_u64"),
         (qir::Host::PrintBool, "quench_print_bool"),
         (qir::Host::ArrayNew, "quench_array_new"),
         (qir::Host::ArraySet, "quench_array_set"),
@@ -1212,8 +1234,32 @@ fn lower(
                         qir::BinOp::Mul => b.ins().imul(l, r),
                         qir::BinOp::AddTrapping
                         | qir::BinOp::SubTrapping
-                        | qir::BinOp::MulTrapping => {
+                        | qir::BinOp::MulTrapping
+                        | qir::BinOp::AddTrappingU
+                        | qir::BinOp::SubTrappingU
+                        | qir::BinOp::MulTrappingU => {
                             trapping(&mut b, table, stopping, *op, l, r)
+                        }
+                        // Unsigned division faults on nought and on nothing else, so
+                        // the guard is the smaller half of the signed one.
+                        qir::BinOp::DivU | qir::BinOp::RemU => {
+                            let zero = b.ins().iconst(types::I64, 0);
+                            let by_zero = b.create_block();
+                            let not_zero = b.create_block();
+                            let is_zero = b.ins().icmp(IntCC::Equal, r, zero);
+                            b.ins().brif(is_zero, by_zero, &[], not_zero, &[]);
+                            b.switch_to_block(by_zero);
+                            let code =
+                                b.ins().iconst(types::I64, qir::Trap::DividedByZero as i64);
+                            let at = b.ins().iconst(types::I64, table);
+                            b.ins().store(MemFlagsData::trusted(), code, at, STOPPED_AT);
+                            b.ins().jump(stopping, &[]);
+                            b.switch_to_block(not_zero);
+                            if *op == qir::BinOp::DivU {
+                                b.ins().udiv(l, r)
+                            } else {
+                                b.ins().urem(l, r)
+                            }
                         }
                         // The processor's own division, which rounds toward zero --
                         // after the two cases it would fault on have been refused.
@@ -1247,6 +1293,49 @@ fn lower(
                             b.ins().select(wrong_way, shifted, rest)
                         }
                     }
+                }
+                // Signed types are sign-extended and unsigned ones zero-extended, so
+                // whatever is in a register orders and prints the same however it got
+                // there. Two shifts, or a branch when it has to stop instead.
+                qir::Inst::Narrow { of, bits, signed, checked } => {
+                    let value = vals[of.0 as usize].unwrap();
+                    if *bits >= 64 {
+                        value
+                    } else {
+                        let spare = i64::from(64 - u32::from(*bits));
+                        let up = b.ins().ishl_imm_s(value, spare);
+                        let put = if *signed {
+                            b.ins().sshr_imm_s(up, spare)
+                        } else {
+                            b.ins().ushr_imm_s(up, spare)
+                        };
+                        if *checked {
+                            let same = b.ins().icmp(IntCC::Equal, put, value);
+                            let fits = b.create_block();
+                            let does_not = b.create_block();
+                            b.ins().brif(same, fits, &[], does_not, &[]);
+                            b.switch_to_block(does_not);
+                            let code =
+                                b.ins().iconst(types::I64, qir::Trap::Overflowed as i64);
+                            let at = b.ins().iconst(types::I64, table);
+                            b.ins().store(MemFlagsData::trusted(), code, at, STOPPED_AT);
+                            b.ins().jump(stopping, &[]);
+                            b.switch_to_block(fits);
+                        }
+                        put
+                    }
+                }
+                qir::Inst::CmpU { op, lhs, rhs } => {
+                    let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());
+                    let how = match op {
+                        qir::CmpOp::Eq => IntCC::Equal,
+                        qir::CmpOp::Ne => IntCC::NotEqual,
+                        qir::CmpOp::Lt => IntCC::UnsignedLessThan,
+                        qir::CmpOp::Le => IntCC::UnsignedLessThanOrEqual,
+                        qir::CmpOp::Gt => IntCC::UnsignedGreaterThan,
+                        qir::CmpOp::Ge => IntCC::UnsignedGreaterThanOrEqual,
+                    };
+                    b.ins().icmp(how, l, r)
                 }
                 qir::Inst::FCmp { op, lhs, rhs } => {
                     let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());

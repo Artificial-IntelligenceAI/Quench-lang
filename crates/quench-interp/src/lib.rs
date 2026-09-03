@@ -142,6 +142,23 @@ fn rooted(stack: &[Frame], module: &qir::Module) -> Vec<(qir::Ty, i64)> {
     roots
 }
 
+/// A value put back inside a narrower integer type, normalised for its sign.
+///
+/// Signed types are sign-extended and unsigned ones zero-extended, so that whatever is
+/// in a slot orders and prints the same however it got there. Written once here and
+/// once in the Dev JIT, and the oracle is what says the two agree.
+fn narrowed(value: i64, bits: u8, signed: bool) -> i64 {
+    if bits >= 64 {
+        return value;
+    }
+    let spare = 64 - u32::from(bits);
+    if signed {
+        (value << spare) >> spare
+    } else {
+        ((value as u64) << spare >> spare) as i64
+    }
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> Trap {
     match trouble {
@@ -550,6 +567,10 @@ fn evaluate(
                     let yes = slots[args[1].0 as usize] != 0;
                     let _ = write!(to, "{}", if yes { "true" } else { "false" });
                 }
+                qir::Host::PrintU64 => {
+                    let value = slots[args[1].0 as usize] as u64;
+                    let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
+                }
                 qir::Host::PrintI64 => {
                     let value = slots[args[1].0 as usize];
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{value}");
@@ -612,6 +633,29 @@ fn evaluate(
                         }
                         i64::from(answer.to_bits())
                     }
+                }
+                qir::BinOp::DivU => {
+                    let (a, b) = (l as u64, r as u64);
+                    if b == 0 {
+                        return Err(Trap::DividedByZero);
+                    }
+                    (a / b) as i64
+                }
+                qir::BinOp::RemU => {
+                    let (a, b) = (l as u64, r as u64);
+                    if b == 0 {
+                        return Err(Trap::DividedByZero);
+                    }
+                    (a % b) as i64
+                }
+                qir::BinOp::AddTrappingU => {
+                    (l as u64).checked_add(r as u64).ok_or(Trap::Overflowed)? as i64
+                }
+                qir::BinOp::SubTrappingU => {
+                    (l as u64).checked_sub(r as u64).ok_or(Trap::Overflowed)? as i64
+                }
+                qir::BinOp::MulTrappingU => {
+                    (l as u64).checked_mul(r as u64).ok_or(Trap::Overflowed)? as i64
                 }
                 qir::BinOp::And => i64::from(l != 0 && r != 0),
                 qir::BinOp::Or => i64::from(l != 0 || r != 0),
@@ -677,6 +721,25 @@ fn evaluate(
             })
         }
         qir::Inst::Not(v) => slots[v.0 as usize] ^ 1,
+        qir::Inst::Narrow { of, bits, signed, checked } => {
+            let value = slots[of.0 as usize];
+            let put = narrowed(value, *bits, *signed);
+            if *checked && put != value {
+                return Err(Trap::Overflowed);
+            }
+            put
+        }
+        qir::Inst::CmpU { op, lhs, rhs } => {
+            let (l, r) = (slots[lhs.0 as usize] as u64, slots[rhs.0 as usize] as u64);
+            i64::from(match op {
+                qir::CmpOp::Eq => l == r,
+                qir::CmpOp::Ne => l != r,
+                qir::CmpOp::Lt => l < r,
+                qir::CmpOp::Le => l <= r,
+                qir::CmpOp::Gt => l > r,
+                qir::CmpOp::Ge => l >= r,
+            })
+        }
         qir::Inst::Call { .. } => unreachable!("calls are handled on the stack, not here"),
     })
 }

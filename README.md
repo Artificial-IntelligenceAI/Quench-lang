@@ -189,6 +189,13 @@ Both print the same thing, which is not a coincidence — it is
   binary16 *is* the correctly-rounded binary16 answer when the carrier has `2p + 2`
   bits, and `f32` has exactly the 24 that binary16's 11 asks for. See
   [notes/what-a-float-is-allowed-to-do.md](notes/what-a-float-is-allowed-to-do.md).
+- **Every whole-number type rides in an `i64`**, held normalised — sign-extended when
+  signed, zero-extended when not — so comparing and printing need know nothing about
+  width. What makes a `u8` a `u8` is being **put back inside it after every operation**,
+  and under `overflow = "trap"` that is where one which reached 256 stops rather than
+  becoming nought. A narrow type finds its own overflow that way; only `u64` needs the
+  operation itself to notice, and it is also the only one whose *comparison*, *division*
+  and *printing* have to read the bits as unsigned.
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

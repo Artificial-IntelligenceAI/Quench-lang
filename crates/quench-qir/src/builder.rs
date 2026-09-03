@@ -130,6 +130,15 @@ impl Builder {
         self.push(Inst::ConstFloat(bits), ty)
     }
 
+    /// Put a value back inside a narrower integer type, normalised for its sign.
+    pub fn narrow(&mut self, of: Value, bits: u8, signed: bool, checked: bool) -> Value {
+        self.push(Inst::Narrow { of, bits, signed, checked }, Ty::I64)
+    }
+
+    pub fn cmp_unsigned(&mut self, op: CmpOp, lhs: Value, rhs: Value) -> Value {
+        self.push(Inst::CmpU { op, lhs, rhs }, Ty::Bool)
+    }
+
     pub fn fcmp(&mut self, op: CmpOp, lhs: Value, rhs: Value) -> Value {
         self.push(Inst::FCmp { op, lhs, rhs }, Ty::Bool)
     }

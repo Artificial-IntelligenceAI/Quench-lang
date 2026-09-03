@@ -18,7 +18,7 @@ fn a_declaration_is_understood() {
     assert!(out.ok(), "{}", errors("START { var.mut.i64 ['count'] = [*7*]; }"));
     assert_eq!(out.locals().len(), 1);
     assert_eq!(out.locals()[0].name, "count");
-    assert_eq!(out.locals()[0].ty, quench_check::Ty::I64);
+    assert_eq!(out.locals()[0].ty, quench_check::Ty::Int { bits: 64, signed: true });
     assert!(out.locals()[0].mutable);
 }
 
@@ -43,7 +43,7 @@ START {
 fn a_type_that_is_not_built_does_not_hide_a_name_declared_twice() {
     // Two separate mistakes on one line, and both get said. Reporting only the type
     // would leave the reader to discover the collision on their own after fixing it.
-    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.u8 ['x'] = [*1*]; }";
+    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.d32 ['x'] = [*1*]; }";
     let found = codes(source);
     assert!(found.contains(&"E0405".to_string()), "{}", errors(source));
     assert!(found.contains(&"E0201".to_string()), "{}", errors(source));
@@ -88,10 +88,10 @@ fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
 
 #[test]
 fn a_type_that_is_meant_to_exist_and_a_type_that_is_not_are_different_errors() {
-    // `u8` is a type Quench means to have. `b17` is a typo. A reader deserves to know
+    // `d32` is a type Quench means to have. `b17` is a typo. A reader deserves to know
     // which of those happened.
-    let not_built = errors("START { var.immut.u8 ['x'] = [*1*]; }");
-    assert!(not_built.contains("`u8` is not built yet"), "{not_built}");
+    let not_built = errors("START { var.immut.d32 ['x'] = [*1*]; }");
+    assert!(not_built.contains("`d32` is not built yet"), "{not_built}");
     assert!(not_built.contains("Error code: E0405"), "{not_built}");
 
     let nonsense = errors("START { var.immut.b17 ['x'] = [*1*]; }");
@@ -110,8 +110,17 @@ fn nothing_converts_on_its_own() {
 #[test]
 fn a_written_value_is_read_by_the_type_it_is_given_to() {
     let rendered = errors("START { var.immut.i64 ['n'] = [*hello*]; }");
-    assert!(rendered.contains("`hello` is not a whole number"), "{rendered}");
-    assert!(rendered.contains("-9223372036854775808"), "{rendered}");
+    assert!(rendered.contains("`hello` is not an `i64`"), "{rendered}");
+
+    // And the same digits are a different thing under each whole-number type: a `u8`
+    // holds two hundred and an `i8` does not, which is a mistake about the type rather
+    // than about the number, and the message says which.
+    assert!(check("START { var.immut.u8 ['n'] = [*200*]; }").ok());
+    let too_big = errors("START { var.immut.i8 ['n'] = [*200*]; }");
+    assert!(too_big.contains("`200` does not fit in an `i8`"), "{too_big}");
+    assert!(too_big.contains("`i8` holds -128 to 127"), "{too_big}");
+    let negative = errors("START { var.immut.u8 ['n'] = [*-1*]; }");
+    assert!(negative.contains("holds no negative number"), "{negative}");
 
     // And the same characters are perfectly good text.
     assert!(check("START { var.immut.str ['s'] = [*hello*]; }").ok());
@@ -410,7 +419,7 @@ fn changing_something_that_was_never_declared() {
 #[test]
 fn what_is_put_in_has_to_fit_what_is_there() {
     let rendered = errors("START { var.mut.i64 ['n'] = [*1*]; set ['n'] = [*hello*]; }");
-    assert!(rendered.contains("is not a whole number"), "{rendered}");
+    assert!(rendered.contains("is not an `i64`"), "{rendered}");
 }
 
 #[test]
@@ -568,7 +577,11 @@ fn count_is_answered_where_the_shape_was_written() {
     let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
     assert!(out.ok());
     let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
-    assert_eq!(*value, quench_check::Value::Number(6), "every element, however many dimensions");
+    assert_eq!(
+        *value,
+        quench_check::Value::Number { value: 6, bits: 64, signed: true },
+        "every element, however many dimensions"
+    );
 
     assert_eq!(codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [count['n']]; }"), ["E0457"]);
     assert_eq!(codes("START { var.immut.i64 ['c'] = [size['n']]; }"), ["E0455"]);
@@ -867,5 +880,9 @@ fn count_counts_any_array_and_folds_where_it_can() {
 
     let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
     let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
-    assert_eq!(*value, quench_check::Value::Number(6), "a fixed shape is known here");
+    assert_eq!(
+        *value,
+        quench_check::Value::Number { value: 6, bits: 64, signed: true },
+        "a fixed shape is known here"
+    );
 }

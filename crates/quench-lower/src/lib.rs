@@ -99,7 +99,7 @@ fn lay_out(module: &mut qir::Module, value: &Value) -> u32 {
     let mut slots = Vec::with_capacity(elements.len());
     for element in elements {
         slots.push(match element {
-            Value::Number(n) => *n,
+            Value::Number { value, .. } => *value,
             Value::Bool(yes) => i64::from(*yes),
             Value::Text(text) => i64::from(module.intern(text)),
             Value::Array { .. } => i64::from(lay_out(module, element)),
@@ -154,7 +154,8 @@ fn lower_func(
 /// What a QIR value of this type looks like.
 fn qir_ty(ty: &Ty) -> qir::Ty {
     match ty {
-        Ty::I64 => qir::Ty::I64,
+        // Every whole-number type rides in an `i64`, held normalised for its width.
+        Ty::Int { .. } => qir::Ty::I64,
         Ty::Bool => qir::Ty::Bool,
         Ty::Str => qir::Ty::Text,
         Ty::Exact => qir::Ty::Exact,
@@ -276,7 +277,8 @@ fn lower_body(
                             let value = emit(b, module, value, held, w);
                             let host = match ty {
                                 Ty::Str => qir::Host::PrintText,
-                                Ty::I64 => qir::Host::PrintI64,
+                                Ty::Int { bits: 64, signed: false } => qir::Host::PrintU64,
+                                Ty::Int { .. } => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
                                 Ty::Exact => qir::Host::PrintExact,
                                 // All three arrive in the same register, so the
@@ -550,6 +552,7 @@ fn lower_if(
 /// lowering has to know: everything else already says what it is in the IR.
 fn ty_of(value: &Value, w: &Where<'_>) -> Option<Ty> {
     Some(match value {
+        Value::Number { bits, signed, .. } => Ty::Int { bits: *bits, signed: *signed },
         Value::Copy(local) => w.locals[local.0 as usize].ty.clone(),
         Value::Copied(of) => ty_of(of, w)?,
         Value::Const(which) => w.checked.constants[*which as usize].ty.clone(),
@@ -575,7 +578,7 @@ fn element_type(array: &Value, w: &Where<'_>) -> Option<Ty> {
 /// What an array holds at the bottom, and how many allocations lie under the top one.
 fn elements(of: &Ty) -> (qir::Elements, i64) {
     match of {
-        Ty::I64 => (qir::Elements::I64, 0),
+        Ty::Int { .. } => (qir::Elements::I64, 0),
         Ty::Bool => (qir::Elements::Bool, 0),
         Ty::Str => (qir::Elements::Text, 0),
         Ty::Exact => (qir::Elements::Exact, 0),
@@ -688,7 +691,7 @@ fn emit(
             let at = module.intern(text);
             b.const_text(at)
         }
-        Value::Number(n) => b.const_i64(*n),
+        Value::Number { value, .. } => b.const_i64(*value),
         Value::Float { bits, width } => {
             let ty = match width {
                 16 => qir::Ty::F16,
@@ -886,30 +889,61 @@ fn emit(
             }
 
             let floored = w.settings.division == Division::Floored;
+            // Which whole-number type this is. Every one rides in an `i64`, so what
+            // makes a `u8` a `u8` is the narrowing after the operation and the
+            // unsigned reading of the ones that care.
+            let (bits, signed) = match ty_of(lhs, w) {
+                Some(Ty::Int { bits, signed }) => (bits, signed),
+                _ => (64, true),
+            };
+            let stops = w.settings.overflow == Overflow::Trap;
+            // A narrower type finds its own overflow when it is put back: an `i64` add
+            // of two `u8`s cannot overflow, and 256 is not a `u8`. Only the widest two
+            // need the operation itself to notice.
+            let widest = bits >= 64;
+            let put = |b: &mut qir::Builder, v: qir::Value| {
+                if widest { v } else { b.narrow(v, bits, signed, stops) }
+            };
             match op {
                 // Whether a sum that does not fit rounds or stops is the project's
                 // decision, written down here as an instruction.
-                OpKind::Add if w.settings.overflow == Overflow::Trap => b.add_trapping(l, r),
-                OpKind::Sub if w.settings.overflow == Overflow::Trap => b.sub_trapping(l, r),
-                OpKind::Mul if w.settings.overflow == Overflow::Trap => b.mul_trapping(l, r),
-                OpKind::Add => b.add(l, r),
-                OpKind::Sub => b.sub(l, r),
-                OpKind::Mul => b.mul(l, r),
+                OpKind::Add if stops && widest && signed => b.add_trapping(l, r),
+                OpKind::Sub if stops && widest && signed => b.sub_trapping(l, r),
+                OpKind::Mul if stops && widest && signed => b.mul_trapping(l, r),
+                OpKind::Add if stops && widest => b.bin(qir::BinOp::AddTrappingU, l, r),
+                OpKind::Sub if stops && widest => b.bin(qir::BinOp::SubTrappingU, l, r),
+                OpKind::Mul if stops && widest => b.bin(qir::BinOp::MulTrappingU, l, r),
+                OpKind::Add => { let v = b.add(l, r); put(b, v) }
+                OpKind::Sub => { let v = b.sub(l, r); put(b, v) }
+                OpKind::Mul => { let v = b.mul(l, r); put(b, v) }
                 // The project's decision, written down here as an instruction so that no
-                // backend has to know a setting was ever involved.
+                // backend has to know a setting was ever involved. An unsigned division
+                // has neither of the two edges a signed one has.
+                OpKind::Div if !signed => { let v = b.bin(qir::BinOp::DivU, l, r); put(b, v) }
+                OpKind::Mod if !signed => { let v = b.bin(qir::BinOp::RemU, l, r); put(b, v) }
                 OpKind::Div => {
-                    if floored { b.div_floored(l, r) } else { b.div(l, r) }
+                    let v = if floored { b.div_floored(l, r) } else { b.div(l, r) };
+                    put(b, v)
                 }
                 OpKind::Mod => {
-                    if floored { b.rem_floored(l, r) } else { b.rem(l, r) }
+                    let v = if floored { b.rem_floored(l, r) } else { b.rem(l, r) };
+                    put(b, v)
                 }
                 // By squaring, in the runtime rather than as an instruction: it needs
                 // a loop, and two engines each writing their own would be two chances
                 // to write it differently.
-                OpKind::Pow if w.settings.overflow == Overflow::Trap => {
-                    b.call_host(qir::Host::PowI64Trapping, &[l, r])
+                OpKind::Pow if stops => {
+                    let v = b.call_host(qir::Host::PowI64Trapping, &[l, r]);
+                    put(b, v)
                 }
-                OpKind::Pow => b.call_host(qir::Host::PowI64, &[l, r]),
+                OpKind::Pow => { let v = b.call_host(qir::Host::PowI64, &[l, r]); put(b, v) }
+                // A `u64` past `i64::MAX` is a negative number in a slot and is not a
+                // negative number. Every narrower unsigned type is normalised into the
+                // positive half and orders the same either way, so only this one asks.
+                OpKind::Lt if !signed && widest => b.cmp_unsigned(qir::CmpOp::Lt, l, r),
+                OpKind::Gt if !signed && widest => b.cmp_unsigned(qir::CmpOp::Gt, l, r),
+                OpKind::Le if !signed && widest => b.cmp_unsigned(qir::CmpOp::Le, l, r),
+                OpKind::Ge if !signed && widest => b.cmp_unsigned(qir::CmpOp::Ge, l, r),
                 OpKind::Lt => b.cmp(qir::CmpOp::Lt, l, r),
                 OpKind::Gt => b.cmp(qir::CmpOp::Gt, l, r),
                 OpKind::Le => b.cmp(qir::CmpOp::Le, l, r),

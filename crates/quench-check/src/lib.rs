@@ -20,7 +20,14 @@ use std::collections::HashMap;
 /// down — anything else is read, understood, and then honestly refused as not built.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Ty {
-    I64,
+    /// Every whole-number type: how many bits, and whether one of them is a sign.
+    ///
+    /// All of them ride in an `i64`, held normalised — sign-extended when signed and
+    /// zero-extended when not — so comparing and printing need know nothing about
+    /// width. Putting a value back in that shape after an operation is the whole of
+    /// what makes a `u8` a `u8`, and under `overflow = "trap"` it is where one that
+    /// reached 256 stops rather than becoming nought.
+    Int { bits: u8, signed: bool },
     Str,
     Bool,
     /// IEEE 754 binary64, binary32 and binary16.
@@ -52,7 +59,9 @@ pub enum Ty {
 impl Ty {
     pub fn name(&self) -> String {
         match self {
-            Ty::I64 => "i64".to_string(),
+            Ty::Int { bits, signed } => {
+                format!("{}{bits}", if *signed { "i" } else { "u" })
+            }
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
             Ty::Exact => "e".to_string(),
@@ -83,7 +92,10 @@ impl Ty {
     /// write "a i64" in them.
     pub fn article(&self) -> &'static str {
         match self {
-            Ty::I64 | Ty::Arr { .. } | Ty::Exact => "an",
+            // `an i8`, `an i64` — and `a u8`, `a u64`, because the letter is said
+            // aloud and `u` starts with a consonant when it is.
+            Ty::Int { signed: true, .. } | Ty::Arr { .. } | Ty::Exact => "an",
+            Ty::Int { signed: false, .. } => "a",
             Ty::Str | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16 => "a",
         }
     }
@@ -115,7 +127,14 @@ impl Ty {
 
     fn simple(word: &str) -> Option<Ty> {
         match word {
-            "i64" => Some(Ty::I64),
+            "i8" => Some(Ty::Int { bits: 8, signed: true }),
+            "i16" => Some(Ty::Int { bits: 16, signed: true }),
+            "i32" => Some(Ty::Int { bits: 32, signed: true }),
+            "i64" => Some(Ty::Int { bits: 64, signed: true }),
+            "u8" => Some(Ty::Int { bits: 8, signed: false }),
+            "u16" => Some(Ty::Int { bits: 16, signed: false }),
+            "u32" => Some(Ty::Int { bits: 32, signed: false }),
+            "u64" => Some(Ty::Int { bits: 64, signed: false }),
             "str" => Some(Ty::Str),
             "bool" => Some(Ty::Bool),
             "e" => Some(Ty::Exact),
@@ -224,7 +243,9 @@ pub struct LocalId(pub u32);
 pub enum Value {
     /// Text, with every piece already joined and every escape already meant.
     Text(String),
-    Number(i64),
+    /// A whole number, and how wide the type reading it is — so that the same digits
+    /// are one value under `u8` and a different mistake under it.
+    Number { value: i64, bits: u8, signed: bool },
     Bool(bool),
     /// A binary float, kept as its bits so that a checked tree compares like everything
     /// else in it — a float does not — and carrying which of the three it is, since all
@@ -280,6 +301,20 @@ fn boundaries(ty: &Ty) -> Vec<usize> {
         walking = of;
     }
     stops
+}
+
+/// The lowest and highest a whole-number type holds.
+///
+/// The high end of a `u64` does not fit in an `i64`, and is carried as the bits of one
+/// — which is what the whole type does, so nothing is lost by saying it here too.
+fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
+    if signed {
+        let high = if bits >= 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
+        (-high - 1, high)
+    } else {
+        let high = if bits >= 64 { -1i64 } else { (1i64 << bits) - 1 };
+        (0, high)
+    }
 }
 
 /// Whether an exact number turns up anywhere inside this.
@@ -466,7 +501,7 @@ pub fn check(source: &str) -> Checked {
         constants: Vec::new(),
         known: HashMap::new(),
         at_top: false,
-        reading: Ty::I64,
+        reading: Ty::Int { bits: 64, signed: true },
         in_start: false,
         body: Vec::new(),
         errors,
@@ -900,6 +935,57 @@ impl<'a> Checker<'a> {
         Some(Ty::Arr { of: Box::new(of), shape: fixed, grows })
     }
 
+    /// A written value read as one of the whole-number types.
+    ///
+    /// The same digits are a different thing under each: `*200*` is a `u8` and is not
+    /// an `i8`, which is not a mistake about the number but about which type was asked
+    /// to hold it, and the message says which.
+    fn a_whole_number(&mut self, digits: &str, ty: &Ty, at: Span) -> Option<Value> {
+        let Ty::Int { bits, signed } = ty else {
+            unreachable!("only a whole-number type reads one");
+        };
+        let (bits, signed) = (*bits, *signed);
+        let (low, high) = whole_range(bits, signed);
+        let read = if signed {
+            digits.parse::<i64>().ok()
+        } else {
+            digits.parse::<u64>().ok().map(|n| n as i64)
+        };
+        match read {
+            Some(n) if signed && (n < low || n > high) => {
+                self.errors.push(
+                    Diagnostic::new("E0489", format!("`{digits}` does not fit in {} `{}`.", ty.article(), ty.name()))
+                        .primary(at, "here")
+                        .rule(format!("`{}` holds {low} to {high}", ty.name()))
+                        .tip("a written value is read by the type it is given to, and this one has an edge.")
+                        .fix("write a number in that range, or declare it a wider type"),
+                );
+                None
+            }
+            Some(n) if !signed && ((n as u64) > high as u64) => {
+                self.errors.push(
+                    Diagnostic::new("E0489", format!("`{digits}` does not fit in {} `{}`.", ty.article(), ty.name()))
+                        .primary(at, "here")
+                        .rule(format!("`{}` holds 0 to {}", ty.name(), high as u64))
+                        .tip("a written value is read by the type it is given to, and this one has an edge.")
+                        .fix("write a number in that range, or declare it a wider type"),
+                );
+                None
+            }
+            Some(n) => Some(Value::Number { value: n, bits, signed }),
+            None => {
+                self.errors.push(
+                    Diagnostic::new("E0407", format!("`{digits}` is not {} `{}`.", ty.article(), ty.name()))
+                        .primary(at, "here")
+                        .rule(format!("a written value is read by the type it is given to, and `{}` reads whole numbers", ty.name()))
+                        .tip(if signed { "a negative one wears its minus inside the marks." } else { "an unsigned type holds no negative number at all." })
+                        .fix("write a whole number"),
+                );
+                None
+            }
+        }
+    }
+
     /// A written value read as one of the three binary floats.
     ///
     /// `b16` is rounded to the nearest binary16 here as well as after every operation:
@@ -1313,7 +1399,8 @@ impl<'a> Checker<'a> {
             Ty::F64 => Ty::F64,
             Ty::F32 => Ty::F32,
             Ty::F16 => Ty::F16,
-            _ => Ty::I64,
+            Ty::Int { bits, signed } => Ty::Int { bits: *bits, signed: *signed },
+            _ => Ty::Int { bits: 64, signed: true },
         });
         let built = self.tree(value);
         self.reading = outer;
@@ -1504,22 +1591,9 @@ impl<'a> Checker<'a> {
                     None
                 }
             },
-            Ty::I64 => match value.terms.as_slice() {
+            Ty::Int { .. } => match value.terms.as_slice() {
                 [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
-                    let digits = unmarked(self.text(*mark));
-                    match digits.parse::<i64>() {
-                        Ok(n) => Some(Value::Number(n)),
-                        Err(_) => {
-                            self.errors.push(
-                                Diagnostic::new("E0407", format!("`{digits}` is not a whole number."))
-                                    .primary(*mark, "here")
-                                    .rule("a written value is read by the type it is given to, and `i64` reads whole numbers")
-                                    .tip("`i64` holds -9223372036854775808 to 9223372036854775807.")
-                                    .fix("write a whole number, or declare it a type that fits this"),
-                            );
-                            None
-                        }
-                    }
+                    self.a_whole_number(&unmarked(self.text(*mark)), ty, *mark)
                 }
                 [] => None,
                 // Exactly one thing that is not a written value -- a bare number, an
@@ -1528,7 +1602,7 @@ impl<'a> Checker<'a> {
                 [one] => {
                     let built = self.term(one)?;
                     let found = self.type_of(&built, one.span())?;
-                    if found != Ty::I64 {
+                    if !matches!(found, Ty::Int { .. }) {
                         self.errors.push(
                             Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to an `i64`.", found.article(), found.name()))
                                 .primary(one.span(), format!("a `{}`", found.name()))
@@ -1768,7 +1842,7 @@ impl<'a> Checker<'a> {
         for index in indices {
             let value = self.term(index)?;
             let found = self.type_of(&value, index.span())?;
-            if found != Ty::I64 {
+            if !matches!(found, Ty::Int { .. }) {
                 self.errors.push(
                     Diagnostic::new("E0435", format!("an index is a number, and this is {} `{}`.", found.article(), found.name()))
                         .primary(index.span(), "here")
@@ -1899,7 +1973,11 @@ impl<'a> Checker<'a> {
             // Known here when the shape said a number, and asked while it runs when it
             // said `grow`. The first costs nothing and the second costs one call.
             Ty::Arr { shape, grows: false, .. } => {
-                Some(Value::Number(shape.iter().product::<usize>() as i64))
+                Some(Value::Number {
+                    value: shape.iter().product::<usize>() as i64,
+                    bits: 64,
+                    signed: true,
+                })
             }
             Ty::Arr { .. } => Some(Value::Count(Box::new(built))),
             other => {
@@ -1992,8 +2070,22 @@ impl<'a> Checker<'a> {
                         }
                     };
                 }
+                // A bare number in a sum is read by whatever the chain said, which is
+                // how `*200*` is a `u8` in one line and a mistake in the next.
+                if let Ty::Int { .. } = self.reading {
+                    let reading = self.reading.clone();
+                    if let Some(value) = self.a_whole_number(&digits, &reading, *mark) {
+                        return Some(value);
+                    }
+                    // Not a number at all may still be `*true*`, which the chain would
+                    // have caught if it had said `bool`. Fall through and see.
+                    if digits.parse::<i64>().is_ok() || digits.parse::<u64>().is_ok() {
+                        return None;
+                    }
+                    self.errors.pop();
+                }
                 match digits.parse::<i64>() {
-                    Ok(n) => Some(Value::Number(n)),
+                    Ok(n) => Some(Value::Number { value: n, bits: 64, signed: true }),
                     Err(_) => match digits.as_str() {
                         "true" => Some(Value::Bool(true)),
                         "false" => Some(Value::Bool(false)),
@@ -2028,18 +2120,7 @@ impl<'a> Checker<'a> {
                             None
                         }
                     },
-                    Some(Ty::I64) => match digits.parse::<i64>() {
-                        Ok(n) => Some(Value::Number(n)),
-                        Err(_) => {
-                            self.errors.push(
-                                Diagnostic::new("E0407", format!("`{digits}` is not a whole number."))
-                                    .primary(*mark, "here")
-                                    .rule("a written value in a sum is read as a number")
-                                    .fix("write a whole number"),
-                            );
-                            None
-                        }
-                    },
+                    Some(ty @ Ty::Int { .. }) => self.a_whole_number(&digits, &ty, *mark),
                     Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
                         self.a_float(&digits, &ty, *mark)
                     }
@@ -2104,7 +2185,7 @@ impl<'a> Checker<'a> {
     fn type_of(&mut self, value: &Value, span: Span) -> Option<Ty> {
         match value {
             Value::Text(_) => Some(Ty::Str),
-            Value::Number(_) => Some(Ty::I64),
+            Value::Number { bits, signed, .. } => Some(Ty::Int { bits: *bits, signed: *signed }),
             Value::Exact(_) => Some(Ty::Exact),
             Value::Float { width, .. } => Some(match width {
                 16 => Ty::F16,
@@ -2116,7 +2197,7 @@ impl<'a> Checker<'a> {
             Value::Array { .. } => None,
             Value::Join(_) => Some(Ty::Str),
             Value::Not(_) => Some(Ty::Bool),
-            Value::Count(_) => Some(Ty::I64),
+            Value::Count(_) => Some(Ty::Int { bits: 64, signed: true }),
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
@@ -2158,7 +2239,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
-                if l != r || !matches!(l, Ty::I64 | Ty::Exact | Ty::F64 | Ty::F32 | Ty::F16) {
+                if l != r || !matches!(l, Ty::Int { .. } | Ty::Exact | Ty::F64 | Ty::F32 | Ty::F16) {
                     self.errors.push(
                         Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
                             .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
@@ -2313,7 +2394,7 @@ impl<'a> Checker<'a> {
                 .rule("nothing is truthy — a condition is a `bool` and there is no second way to be one")
                 .tip("a comparison makes one, and so does a `bool` variable.")
                 .fix(match found {
-                    Ty::I64 => "compare it against something, such as `> *0*`",
+                    Ty::Int { bits: 64, signed: true } => "compare it against something, such as `> *0*`",
                     _ => "compare it against something",
                 }),
             );
@@ -2649,8 +2730,8 @@ impl<'a> Checker<'a> {
 
         // Both bounds before the first pass, and neither asked again. A loop whose end
         // moved under it would be a loop nobody could read.
-        let Some(from) = self.value(from, &Ty::I64, name) else { return };
-        let Some(to) = self.value(to, &Ty::I64, name) else { return };
+        let Some(from) = self.value(from, &Ty::Int { bits: 64, signed: true }, name) else { return };
+        let Some(to) = self.value(to, &Ty::Int { bits: 64, signed: true }, name) else { return };
 
         let counter = LocalId(self.locals.len() as u32);
         debug_assert_eq!(counter.0, live);
@@ -2658,7 +2739,7 @@ impl<'a> Checker<'a> {
         self.locals.push(Local {
             counter: true,
             name: text.clone(),
-            ty: Ty::I64,
+            ty: Ty::Int { bits: 64, signed: true },
             mutable: false,
             at: name,
             chain: repeat.word.to(*repeat.chain.last().unwrap_or(&repeat.word)),
@@ -2836,7 +2917,7 @@ impl<'a> Checker<'a> {
                                     .fix("`*true*` or `*false*`"),
                             ),
                         },
-                        Some(Ty::I64) => {
+                        Some(Ty::Int { .. }) => {
                             let digits = unmarked(self.text(*mark));
                             match digits.parse::<i64>() {
                                 Ok(_) => pieces.push(Printed::Text(digits)),
