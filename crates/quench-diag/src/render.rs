@@ -3,14 +3,14 @@
 //! ```text
 //! Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 //!
-//! file: /Users/ts/hello/src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
+//! file: /Users/ts/hello/src/main.qnl, line: 2, column: 16 (src/main.qnl:2:16)
 //!
 //! `'name'` is declared twice.
 //!
-//!   1 | var.str ['name'] = [*Tankun*];
-//!     |          ~~~~~~ declared here first, as `str`
-//!   2 | var.b16 ['name'] = [*1000*];
-//!     |          ^^^^^^ and declared again here, as `b16`
+//!   1 | var.immut.str ['name'] = [*Tankun*];
+//!     |                ~~~~~~ declared here first, as `str`
+//!   2 | var.immut.b16 ['name'] = [*1000*];
+//!     |                ^^^^^^ and declared again here, as `b16`
 //!
 //! Error code: E0201
 //! Rule(s) broken: a name is declared once, and keeps the type it was declared with
@@ -168,8 +168,8 @@ mod tests {
     use crate::diag::Diagnostic;
     use crate::source::Span;
 
-    const PROGRAM: &str = "var.str ['name'] = [*Tankun*];\n\
-                           var.b16 ['name'] = [*1000*];\n";
+    const PROGRAM: &str = "var.immut.str ['name'] = [*Tankun*];\n\
+                           var.immut.b16 ['name'] = [*1000*];\n";
 
     fn source() -> SourceFile {
         SourceFile::new("src/main.qnl", PROGRAM)
@@ -195,14 +195,14 @@ mod tests {
         let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
-file: src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
+file: src/main.qnl, line: 2, column: 16 (src/main.qnl:2:16)
 
 `'name'` is declared twice.
 
-  1 | var.str ['name'] = [*Tankun*];
-    |          ~~~~~~ declared here first, as `str`
-  2 | var.b16 ['name'] = [*1000*];
-    |          ^^^^^^ and declared again here, as `b16`
+  1 | var.immut.str ['name'] = [*Tankun*];
+    |                ~~~~~~ declared here first, as `str`
+  2 | var.immut.b16 ['name'] = [*1000*];
+    |                ^^^^^^ and declared again here, as `b16`
 
 Error code: E0201
 Rule(s) broken: a name is declared once, and keeps the type it was declared with

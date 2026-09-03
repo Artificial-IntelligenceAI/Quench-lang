@@ -1,17 +1,17 @@
 START {
-    var.i64 ['a'] = [*7*];
-    var.i64 ['b'] = [*3*];
+    var.immut.i64 ['a'] = [*7*];
+    var.immut.i64 ['b'] = [*3*];
 
-    var.i64 ['sum'] = ['a' + 'b'];
+    var.immut.i64 ['sum'] = ['a' + 'b'];
     print.stdout[str:*a + b         = * 'sum' \n];
-    var.i64 ['product'] = ['a' x 'b'];
+    var.immut.i64 ['product'] = ['a' x 'b'];
     print.stdout[str:*a x b         = * 'product' \n];
 
-    var.i64 ['plain']  = [*1* + *2* x *3*];
-    var.i64 ['forced'] = [(*1* + *2*) x *3*];
+    var.immut.i64 ['plain']  = [*1* + *2* x *3*];
+    var.immut.i64 ['forced'] = [(*1* + *2*) x *3*];
     print.stdout[str:*1 + 2 x 3     = * 'plain' \n];
     print.stdout[str:*(1 + 2) x 3   = * 'forced' \n];
 
-    var.bool ['bigger'] = ['a' > 'b'];
+    var.immut.bool ['bigger'] = ['a' > 'b'];
     print.stdout[str:*7 > 3         = * 'bigger' \n];
 }

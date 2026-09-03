@@ -26,8 +26,8 @@ fn a_declaration_is_understood() {
 fn declaring_a_name_twice_is_the_error_this_project_was_pitched_on() {
     let source = "\
 START {
-    var.str ['name'] = [*Tankun*];
-    var.i64 ['name'] = [*1000*];
+    var.immut.str ['name'] = [*Tankun*];
+    var.immut.i64 ['name'] = [*1000*];
 }
 ";
     let rendered = errors(source);
@@ -36,14 +36,14 @@ START {
     assert!(rendered.contains("and declared again here, as `i64`"), "{rendered}");
     assert!(rendered.contains("Error code: E0201"), "{rendered}");
     // The name is what collided, so the carets are under the name and not the chain.
-    assert!(rendered.contains("|              ~~~~~~ declared here first"), "{rendered}");
+    assert!(rendered.contains("~~~~~~ declared here first"), "{rendered}");
 }
 
 #[test]
 fn a_type_that_is_not_built_does_not_hide_a_name_declared_twice() {
     // Two separate mistakes on one line, and both get said. Reporting only the type
     // would leave the reader to discover the collision on their own after fixing it.
-    let source = "START { var.str ['x'] = [*a*]; var.b16 ['x'] = [*1*]; }";
+    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.b16 ['x'] = [*1*]; }";
     let found = codes(source);
     assert!(found.contains(&"E0405".to_string()), "{}", errors(source));
     assert!(found.contains(&"E0201".to_string()), "{}", errors(source));
@@ -54,9 +54,9 @@ fn errors_come_out_in_the_order_they_appear_in_the_file() {
     // Otherwise a reader jumps around the file to follow their own mistakes.
     let source = "\
 START {
-    var.b17 ['a'] = [*1*];
+    var.immut.b17 ['a'] = [*1*];
     print.stdout['nope'];
-    var.i64 ['b'] = [*hello*];
+    var.immut.i64 ['b'] = [*hello*];
 }
 ";
     let out = check(source);
@@ -69,7 +69,7 @@ START {
 
 #[test]
 fn a_name_that_is_nearly_right_gets_told_which_one() {
-    let source = "START { var.str ['greeting'] = [*Hello*]; print.stdout['greetng' \\n]; }";
+    let source = "START { var.immut.str ['greeting'] = [*Hello*]; print.stdout['greetng' \\n]; }";
     let rendered = errors(source);
     assert!(rendered.contains("`'greetng'` is not declared."), "{rendered}");
     assert!(rendered.contains("did you mean `'greeting'`?"), "{rendered}");
@@ -79,7 +79,7 @@ fn a_name_that_is_nearly_right_gets_told_which_one() {
 fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
     // A suggestion that is not the answer costs the reader a second look, so nothing is
     // offered unless it is within one edit.
-    let source = "START { var.str ['greeting'] = [*Hello*]; print.stdout['wobble' \\n]; }";
+    let source = "START { var.immut.str ['greeting'] = [*Hello*]; print.stdout['wobble' \\n]; }";
     let rendered = errors(source);
     assert!(rendered.contains("is not declared"), "{rendered}");
     assert!(!rendered.contains("did you mean"), "{rendered}");
@@ -90,18 +90,18 @@ fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
 fn a_type_that_is_meant_to_exist_and_a_type_that_is_not_are_different_errors() {
     // `b16` is a type Quench means to have. `b17` is a typo. A reader deserves to know
     // which of those happened.
-    let not_built = errors("START { var.b16 ['x'] = [*1*]; }");
+    let not_built = errors("START { var.immut.b16 ['x'] = [*1*]; }");
     assert!(not_built.contains("`b16` is not built yet"), "{not_built}");
     assert!(not_built.contains("Error code: E0405"), "{not_built}");
 
-    let nonsense = errors("START { var.b17 ['x'] = [*1*]; }");
+    let nonsense = errors("START { var.immut.b17 ['x'] = [*1*]; }");
     assert!(nonsense.contains("`b17` is not a type"), "{nonsense}");
     assert!(nonsense.contains("Error code: E0402"), "{nonsense}");
 }
 
 #[test]
 fn nothing_converts_on_its_own() {
-    let source = "START { var.i64 ['n'] = [*1*]; var.str ['s'] = ['n']; }";
+    let source = "START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['s'] = ['n']; }";
     let rendered = errors(source);
     assert!(rendered.contains("this is an `i64`, and it is being given to a `str`"), "{rendered}");
     assert!(rendered.contains("two types meet only where something says they should"), "{rendered}");
@@ -109,55 +109,71 @@ fn nothing_converts_on_its_own() {
 
 #[test]
 fn a_written_value_is_read_by_the_type_it_is_given_to() {
-    let rendered = errors("START { var.i64 ['n'] = [*hello*]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*hello*]; }");
     assert!(rendered.contains("`hello` is not a whole number"), "{rendered}");
     assert!(rendered.contains("-9223372036854775808"), "{rendered}");
 
     // And the same characters are perfectly good text.
-    assert!(check("START { var.str ['s'] = [*hello*]; }").ok());
+    assert!(check("START { var.immut.str ['s'] = [*hello*]; }").ok());
     // While these are a fine number and fine text both.
-    assert!(check("START { var.i64 ['n'] = [*1000*]; }").ok());
-    assert!(check("START { var.str ['s'] = [*1000*]; }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [*1000*]; }").ok());
+    assert!(check("START { var.immut.str ['s'] = [*1000*]; }").ok());
 }
 
 #[test]
 fn juxtaposition_builds_text_and_says_so_when_it_cannot() {
-    let rendered = errors("START { var.i64 ['n'] = [*1* \\n *2*]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1* \\n *2*]; }");
     assert!(rendered.contains("a number is one written value, not several"), "{rendered}");
     assert!(rendered.contains("`str` is the type where a value is a list of pieces"), "{rendered}");
 }
 
 #[test]
 fn mut_goes_before_the_type() {
-    let rendered = errors("START { var.i64.mut ['n'] = [*1*]; }");
+    let rendered = errors("START { var.immut.i64.mut ['n'] = [*1*]; }");
     assert!(rendered.contains("`mut` comes before the type"), "{rendered}");
     assert!(rendered.contains("`var.mut.<type>`"), "{rendered}");
 }
 
 #[test]
 fn a_declaration_always_says_what_it_declares() {
-    let rendered = errors("START { var ['n'] = [*1*]; }");
+    let rendered = errors("START { var.immut ['n'] = [*1*]; }");
     assert!(rendered.contains("does not say what it is declaring"), "{rendered}");
     assert!(rendered.contains("a written value means nothing without one"), "{rendered}");
+}
+
+#[test]
+fn a_declaration_always_says_whether_it_can_change() {
+    // The same rule as visibility, applied where it had not been: silence is not an
+    // answer, it is the absence of one.
+    assert!(check("START { var.immut.i64 ['n'] = [*1*]; }").ok());
+    assert!(check("START { var.mut.i64 ['n'] = [*1*]; }").ok());
+
+    let rendered = errors("START { var.i64 ['n'] = [*1*]; }");
+    assert!(rendered.contains("does not say whether it can change"), "{rendered}");
+    assert!(rendered.contains("silence is not one of them"), "{rendered}");
+    assert!(rendered.contains("`var.immut.<type>` if it never changes"), "{rendered}");
+
+    let twice = errors("START { var.mut.immut.i64 ['n'] = [*1*]; }");
+    assert!(twice.contains("says twice whether it can change"), "{twice}");
 }
 
 #[test]
 fn a_name_inside_a_longer_value_needs_something_that_is_not_built() {
     // Joining a name to text builds a *new* value, which needs the collector. Copying a
     // whole one does not, and works.
-    let rendered = errors("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a' *y*]; }");
+    let rendered = errors("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }");
     assert!(rendered.contains("cannot be one piece of a longer value yet"), "{rendered}");
     assert!(rendered.contains("needs the collector"), "{rendered}");
 
-    assert!(check("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; }").ok());
+    assert!(check("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a']; }").ok());
 }
 
 #[test]
 fn everything_wrong_is_reported_and_not_the_first_thing() {
     let source = "\
 START {
-    var.b17 ['a'] = [*1*];
-    var.i64 ['b'] = [*hello*];
+    var.immut.b17 ['a'] = [*1*];
+    var.immut.i64 ['b'] = [*hello*];
     print.stdout['nope'];
 }
 ";
@@ -170,10 +186,10 @@ START {
 fn the_precedence_mathematics_settled_is_kept() {
     // `x` before `+`, and comparison looser than both. Nobody has to be told these.
     for source in [
-        "START { var.i64 ['n'] = [*1* + *2* x *3*]; }",
-        "START { var.i64 ['n'] = [*1* x *2* + *3*]; }",
-        "START { var.bool ['b'] = [*1* + *2* < *4*]; }",
-        "START { var.i64 ['n'] = [*10* / *2* - *1*]; }",
+        "START { var.immut.i64 ['n'] = [*1* + *2* x *3*]; }",
+        "START { var.immut.i64 ['n'] = [*1* x *2* + *3*]; }",
+        "START { var.immut.bool ['b'] = [*1* + *2* < *4*]; }",
+        "START { var.immut.i64 ['n'] = [*10* / *2* - *1*]; }",
     ] {
         assert!(check(source).ok(), "{source}\n{}", errors(source));
     }
@@ -181,7 +197,7 @@ fn the_precedence_mathematics_settled_is_kept() {
 
 #[test]
 fn what_mathematics_left_open_is_refused_with_both_readings() {
-    let source = "START { var.i64 ['n'] = [*10* mod *3* + *1*]; }";
+    let source = "START { var.immut.i64 ['n'] = [*10* mod *3* + *1*]; }";
     let rendered = errors(source);
     assert!(rendered.contains("`mod` and `+` have no agreed order"), "{rendered}");
     assert!(rendered.contains("could be read two ways"), "{rendered}");
@@ -191,44 +207,44 @@ fn what_mathematics_left_open_is_refused_with_both_readings() {
     assert!(rendered.contains("Error code: E0421"), "{rendered}");
 
     // And brackets settle it, both ways.
-    assert!(check("START { var.i64 ['n'] = [(*10* mod *3*) + *1*]; }").ok());
-    assert!(check("START { var.i64 ['n'] = [*10* mod (*3* + *1*)]; }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [(*10* mod *3*) + *1*]; }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [*10* mod (*3* + *1*)]; }").ok());
 }
 
 #[test]
 fn one_unsettled_operator_on_its_own_is_fine() {
     // There is nothing to be ambiguous *with*. The rule is about two operators, not
     // about `mod` being suspicious.
-    assert!(check("START { var.i64 ['n'] = [*10* mod *3*]; }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [*10* mod *3*]; }").ok());
 }
 
 #[test]
 fn a_chain_of_comparisons_is_not_settled_either() {
     // Mathematics reads `a < b < c` as two comparisons joined; most languages read it
     // as one comparison against a boolean. Nobody agreed, so nobody guesses.
-    let rendered = errors("START { var.bool ['b'] = [*1* < *2* < *3*]; }");
+    let rendered = errors("START { var.immut.bool ['b'] = [*1* < *2* < *3*]; }");
     assert!(rendered.contains("have no agreed order"), "{rendered}");
 }
 
 #[test]
 fn a_line_that_both_joins_and_adds_says_which_it_meant() {
-    let rendered = errors("START { var.i64 ['n'] = [*1* *2* + *3*]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1* *2* + *3*]; }");
     assert!(rendered.contains("some of these are joined and some are added"), "{rendered}");
     assert!(rendered.contains("a value does one or the other"), "{rendered}");
 }
 
 #[test]
 fn arithmetic_is_for_numbers() {
-    let rendered = errors("START { var.str ['s'] = [*a*]; var.i64 ['n'] = ['s' + *1*]; }");
+    let rendered = errors("START { var.immut.str ['s'] = [*a*]; var.immut.i64 ['n'] = ['s' + *1*]; }");
     assert!(rendered.contains("`+` works on numbers"), "{rendered}");
     assert!(rendered.contains("nothing converts on its own"), "{rendered}");
 }
 
 #[test]
 fn a_comparison_is_a_bool_and_a_sum_is_not() {
-    assert!(check("START { var.bool ['b'] = [*1* < *2*]; }").ok());
+    assert!(check("START { var.immut.bool ['b'] = [*1* < *2*]; }").ok());
 
-    let rendered = errors("START { var.i64 ['n'] = [*1* < *2*]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1* < *2*]; }");
     assert!(rendered.contains("works out to a `bool`"), "{rendered}");
     assert!(rendered.contains("given to an `i64`"), "{rendered}");
 }
@@ -236,8 +252,8 @@ fn a_comparison_is_a_bool_and_a_sum_is_not() {
 #[test]
 fn the_operators_that_are_not_built_say_so() {
     for (source, which) in [
-        ("START { var.i64 ['n'] = [*2* ^ *8*]; }", "`^` is not built yet"),
-        ("START { var.bool ['b'] = [*true* and *false*]; }", "`and` is not built yet"),
+        ("START { var.immut.i64 ['n'] = [*2* ^ *8*]; }", "`^` is not built yet"),
+        ("START { var.immut.bool ['b'] = [*true* and *false*]; }", "`and` is not built yet"),
     ] {
         assert!(errors(source).contains(which), "{source}\n{}", errors(source));
     }
@@ -247,14 +263,14 @@ fn the_operators_that_are_not_built_say_so() {
 
 #[test]
 fn an_array_says_its_size_in_its_type() {
-    let out = check("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }");
-    assert!(out.ok(), "{}", errors("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }"));
+    let out = check("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }");
+    assert!(out.ok(), "{}", errors("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }"));
     assert_eq!(out.locals[0].ty.name(), "arr.i64 (5)");
 }
 
 #[test]
 fn the_shape_and_the_elements_have_to_agree() {
-    let rendered = errors("START { var.arr.i64 (5) ['xs'] = [[*1* *2*]]; }");
+    let rendered = errors("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2*]]; }");
     assert!(rendered.contains("this holds 5 element(s), and 2 were written"), "{rendered}");
     assert!(rendered.contains("written flat, row by row"), "{rendered}");
     assert!(rendered.contains("declared (5)"), "{rendered}");
@@ -263,48 +279,48 @@ fn the_shape_and_the_elements_have_to_agree() {
 #[test]
 fn a_shape_is_written_without_marks_because_it_is_part_of_a_type() {
     // `(5)`, not `(*5*)`. Marks tell a name from a written value, and a size is neither.
-    assert!(check("START { var.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }").ok());
+    assert!(check("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }").ok());
 
-    let rendered = errors("START { var.i64 ['n'] = [5]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [5]; }");
     assert!(rendered.contains("a bare number is a size, not a value"), "{rendered}");
     assert!(rendered.contains("`*5*`"), "{rendered}");
 }
 
 #[test]
 fn an_array_has_to_say_how_big_it_is() {
-    let rendered = errors("START { var.arr.i64 ['xs'] = [[*1*]]; }");
+    let rendered = errors("START { var.immut.arr.i64 ['xs'] = [[*1*]]; }");
     assert!(rendered.contains("does not say how big it is"), "{rendered}");
     assert!(rendered.contains("a growing array is not built yet"), "{rendered}");
 }
 
 #[test]
 fn only_an_array_has_a_shape() {
-    let rendered = errors("START { var.i64 (5) ['n'] = [*1*]; }");
+    let rendered = errors("START { var.immut.i64 (5) ['n'] = [*1*]; }");
     assert!(rendered.contains("only an array has a shape"), "{rendered}");
 }
 
 #[test]
 fn an_index_needs_one_number_per_dimension() {
-    let rendered = errors("START { var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print.stdout['m'[*1*]]; }");
+    let rendered = errors("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print.stdout['m'[*1*]]; }");
     assert!(rendered.contains("has 2 dimension(s), and 1 index(es) were given"), "{rendered}");
     assert!(rendered.contains("declared (2 3)"), "{rendered}");
 }
 
 #[test]
 fn only_an_array_can_be_indexed() {
-    let rendered = errors("START { var.i64 ['n'] = [*1*]; print.stdout['n'[*1*]]; }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1*]; print.stdout['n'[*1*]]; }");
     assert!(rendered.contains("`i64` is not an array"), "{rendered}");
 }
 
 #[test]
 fn every_element_is_the_type_the_array_said() {
-    let rendered = errors("START { var.arr.i64 (2) ['xs'] = [[*1* *hello*]]; }");
+    let rendered = errors("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *hello*]]; }");
     assert!(rendered.contains("is not a whole number"), "{rendered}");
 }
 
 #[test]
 fn an_array_of_arrays_says_it_is_not_built() {
-    let rendered = errors("START { var.arr.arr.i64 (2 3) ['m'] = [[*1*]]; }");
+    let rendered = errors("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1*]]; }");
     assert!(rendered.contains("an array of arrays is not built yet"), "{rendered}");
     assert!(rendered.contains("one `arr` is one allocation"), "{rendered}");
     assert!(rendered.contains("`arr.i64 (2 3)` is two rows of three"), "{rendered}");
@@ -312,14 +328,14 @@ fn an_array_of_arrays_says_it_is_not_built() {
 
 #[test]
 fn an_array_of_something_that_is_not_a_number_says_so() {
-    let rendered = errors("START { var.arr.str (2) ['xs'] = [[*a* *b*]]; }");
+    let rendered = errors("START { var.immut.arr.str (2) ['xs'] = [[*a* *b*]]; }");
     assert!(rendered.contains("an array of `str` is not built yet"), "{rendered}");
     assert!(rendered.contains("packed by width"), "{rendered}");
 }
 
 #[test]
 fn an_array_of_nothing_is_refused() {
-    let rendered = errors("START { var.arr.i64 (0) ['xs'] = [[]]; }");
+    let rendered = errors("START { var.immut.arr.i64 (0) ['xs'] = [[]]; }");
     assert!(rendered.contains("an array of nothing holds nothing"), "{rendered}");
 }
 
@@ -330,16 +346,19 @@ fn mut_finally_means_something() {
     // It has been a word in the chain that did nothing since the chain was designed.
     assert!(check("START { var.mut.i64 ['n'] = [*0*]; set ['n'] = [*5*]; }").ok());
 
-    let rendered = errors("START { var.i64 ['total'] = [*0*]; set ['total'] = [*55*]; }");
+    let rendered = errors("START { var.immut.i64 ['total'] = [*0*]; set ['total'] = [*55*]; }");
     assert!(
         rendered.contains("`'total'` cannot be changed, because its declaration never said it could."),
         "{rendered}"
     );
-    assert!(rendered.contains("declared here, and `mut` is not in the chain"), "{rendered}");
+    assert!(rendered.contains("declared `immut` here"), "{rendered}");
     assert!(rendered.contains("changed here"), "{rendered}");
     assert!(rendered.contains("a variable changes only if its declaration says `mut`"), "{rendered}");
-    // The fix is the line they wanted, not a description of it.
-    assert!(rendered.contains("`var.mut.i64`"), "{rendered}");
+    // The fix is the line they wanted, not a description of it -- and `immut` is
+    // replaced rather than `mut` inserted, or it would say both.
+    let out = check("START { var.immut.i64 ['total'] = [*0*]; set ['total'] = [*55*]; }");
+    let fixes = out.errors[0].fixes.join(" ");
+    assert_eq!(fixes, "`var.mut.i64`", "the fix must not keep the word it replaces");
 }
 
 #[test]
@@ -370,10 +389,10 @@ fn set_gives_one_value_for_each_thing_it_changes() {
 
 #[test]
 fn a_condition_is_a_bool_and_nothing_is_truthy() {
-    assert!(check("START { var.i64 ['n'] = [*1*]; if 'n' > *0* { print.stdout[str:*yes*]; } }").ok());
-    assert!(check("START { var.bool ['f'] = [*true*]; if 'f' { print.stdout[str:*yes*]; } }").ok());
+    assert!(check("START { var.immut.i64 ['n'] = [*1*]; if 'n' > *0* { print.stdout[str:*yes*]; } }").ok());
+    assert!(check("START { var.immut.bool ['f'] = [*true*]; if 'f' { print.stdout[str:*yes*]; } }").ok());
 
-    let rendered = errors("START { var.i64 ['n'] = [*1*]; if 'n' { print.stdout[str:*yes*]; } }");
+    let rendered = errors("START { var.immut.i64 ['n'] = [*1*]; if 'n' { print.stdout[str:*yes*]; } }");
     assert!(rendered.contains("`if` asks something true or false, and this is an `i64`"), "{rendered}");
     assert!(rendered.contains("nothing is truthy"), "{rendered}");
     assert!(rendered.contains("such as `> *0*`"), "{rendered}");
@@ -383,20 +402,20 @@ fn a_condition_is_a_bool_and_nothing_is_truthy() {
 fn an_arm_is_a_scope_of_its_own() {
     // An `if` introduces nothing, so what is declared inside one is gone at the brace.
     let rendered = errors(
-        "START { if *true* == *true* { var.i64 ['inside'] = [*1*]; } print.stdout['inside']; }",
+        "START { if *true* == *true* { var.immut.i64 ['inside'] = [*1*]; } print.stdout['inside']; }",
     );
     assert!(rendered.contains("`'inside'` is not declared"), "{rendered}");
 
     // And the same name may be used again afterwards, since the first one is gone.
     assert!(check(
-        "START { if *true* == *true* { var.i64 ['x'] = [*1*]; } var.i64 ['x'] = [*2*]; }"
+        "START { if *true* == *true* { var.immut.i64 ['x'] = [*1*]; } var.immut.i64 ['x'] = [*2*]; }"
     )
     .ok());
 }
 
 #[test]
 fn a_wrong_condition_does_not_hide_what_is_inside_the_arm() {
-    let out = check("START { var.i64 ['n'] = [*1*]; if 'n' { print.stdout['nope']; } }");
+    let out = check("START { var.immut.i64 ['n'] = [*1*]; if 'n' { print.stdout['nope']; } }");
     let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
     assert!(codes.contains(&"E0440"), "{codes:?}");
     assert!(codes.contains(&"E0413"), "the undeclared name inside is reported too: {codes:?}");
@@ -406,13 +425,13 @@ fn a_wrong_condition_does_not_hide_what_is_inside_the_arm() {
 fn the_same_or_not_works_on_anything_but_larger_only_on_numbers() {
     // Two things are the same or they are not, whatever they are. Which of two is
     // *larger* only means something for numbers.
-    assert!(check("START { var.bool ['b'] = [*true* == *false*]; }").ok());
-    assert!(check("START { var.bool ['b'] = [*1* == *2*]; }").ok());
+    assert!(check("START { var.immut.bool ['b'] = [*true* == *false*]; }").ok());
+    assert!(check("START { var.immut.bool ['b'] = [*1* == *2*]; }").ok());
 
-    let rendered = errors("START { var.bool ['b'] = [*true* > *false*]; }");
+    let rendered = errors("START { var.immut.bool ['b'] = [*true* > *false*]; }");
     assert!(rendered.contains("`>` works on numbers"), "{rendered}");
 
-    let mixed = errors("START { var.str ['s'] = [*a*]; var.bool ['b'] = ['s' == *1*]; }");
+    let mixed = errors("START { var.immut.str ['s'] = [*a*]; var.immut.bool ['b'] = ['s' == *1*]; }");
     assert!(mixed.contains("compares two of the same thing"), "{mixed}");
     assert!(mixed.contains("two types are never equal"), "{mixed}");
 }
@@ -420,7 +439,7 @@ fn the_same_or_not_works_on_anything_but_larger_only_on_numbers() {
 #[test]
 fn types_get_the_right_article() {
     // A language selling its error messages cannot write "a i64" in one.
-    let rendered = errors("START { var.str ['s'] = [*a*]; var.i64 ['n'] = ['s']; }");
+    let rendered = errors("START { var.immut.str ['s'] = [*a*]; var.immut.i64 ['n'] = ['s']; }");
     assert!(rendered.contains("this is a `str`"), "{rendered}");
     assert!(rendered.contains("given to an `i64`"), "{rendered}");
 }

@@ -29,8 +29,8 @@ Agreement between them is not a hope, it is a test. See [The oracle](#the-oracle
 
 ```quench
 START {
-    var.str ['greeting'] = [*Hello*];
-    var.i64 ['answer']   = [*42*];
+    var.immut.str ['greeting'] = [*Hello*];
+    var.immut.i64 ['answer']   = [*42*];
 
     print.stdout['greeting' str:*, World!* \n];
     print.stdout[str:*The answer is * 'answer' str:*.* \n];
@@ -107,7 +107,7 @@ Both print the same thing, which is not a coincidence — it is
 - **`set` changes things**, and `mut` finally means something: `set ['total'] =
   ['total' + *55*];`, `set ['xs'[*2*]] = [*99*];`. Changing something not declared
   `mut` is refused, with the line that would have worked.
-- **Arrays.** `var.arr.i64 (2 3) ['m']` is one allocation of six, laid out row by
+- **Arrays.** `var.immut.arr.i64 (2 3) ['m']` is one allocation of six, laid out row by
   row; `arr.arr.i64` would be an array of handles and is a different type. The
   shape is written **without marks** — it is part of the type, and the `64` in
   `i64` wears none either. Counted from one, because an inclusive loop with an
@@ -121,6 +121,10 @@ Both print the same thing, which is not a coincidence — it is
   `>/=` `==` `!=`. Two spellings were not available rather than not chosen: `**`
   lexes as an *empty written value*, and `=` would have meant a declaration outside
   the brackets and a comparison inside them.
+- **A declaration says whether it can change**: `var.immut.i64` or `var.mut.i64`,
+  and silence is neither. The same rule as visibility, applied where it had not
+  been — it was the one place left where not writing something still meant
+  something.
 - **Three visibilities**, on top-level declarations only: `file`, `program` and
   `export`. **Required** — there is no default, so a missing one is an error on the
   declaration rather than on some innocent use of it later. Words rather than
@@ -197,9 +201,9 @@ file: src/main.qnl, line: 2, column: 10 (src/main.qnl:2:10)
 
 `'name'` is declared twice.
 
-  1 | var.str ['name'] = [*Tankun*];
+  1 | var.immut.str ['name'] = [*Tankun*];
     |          ~~~~~~ declared here first, as `str`
-  2 | var.b16 ['name'] = [*1000*];
+  2 | var.immut.b16 ['name'] = [*1000*];
     |          ^^^^^^ and declared again here, as `b16`
 
 Error code: E0201

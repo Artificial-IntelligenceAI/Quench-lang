@@ -98,7 +98,7 @@ fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
         // A type Quench means to have and does not have yet.
         ("START { print.stdout[b16:*1*]; }", "`b16` is not built yet"),
         // Joining a name to something else builds a new value, which needs the collector.
-        ("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a' *y*]; }", "needs the collector"),
+        ("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a' *y*]; }", "needs the collector"),
     ];
     for (source, expected) in cases {
         let rendered = report(source);
@@ -106,7 +106,7 @@ fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     }
 
     // And declaring things, which this test used to assert was not built, now is.
-    assert!(lower("START { var.str ['a'] = [*x*]; print.stdout['a']; }").ok());
+    assert!(lower("START { var.immut.str ['a'] = [*x*]; print.stdout['a']; }").ok());
 }
 
 #[test]
@@ -117,17 +117,17 @@ fn a_program_that_prints_nothing_is_still_a_program() {
 #[test]
 fn a_declaration_and_the_name_that_uses_it() {
     assert_eq!(
-        said("START {\n var.str ['greeting'] = [*Hello*];\n print.stdout['greeting' str:*, World!* \\n];\n}\n"),
+        said("START {\n var.immut.str ['greeting'] = [*Hello*];\n print.stdout['greeting' str:*, World!* \\n];\n}\n"),
         "Hello, World!\n"
     );
 }
 
 #[test]
 fn a_number_prints_as_a_number() {
-    assert_eq!(said("START { var.i64 ['n'] = [*42*]; print.stdout['n']; }"), "42");
-    assert_eq!(said("START { var.i64 ['n'] = [*-7*]; print.stdout['n']; }"), "-7");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*42*]; print.stdout['n']; }"), "42");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*-7*]; print.stdout['n']; }"), "-7");
     assert_eq!(
-        said("START { var.i64 ['n'] = [*9223372036854775807*]; print.stdout['n']; }"),
+        said("START { var.immut.i64 ['n'] = [*9223372036854775807*]; print.stdout['n']; }"),
         "9223372036854775807",
         "the whole range of an i64 survives the trip"
     );
@@ -136,8 +136,8 @@ fn a_number_prints_as_a_number() {
 #[test]
 fn the_same_characters_are_a_number_or_text_depending_on_the_type() {
     // Which is the rule the marks exist for, running for the first time.
-    assert_eq!(said("START { var.i64 ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
-    assert_eq!(said("START { var.str ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
+    assert_eq!(said("START { var.immut.i64 ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
+    assert_eq!(said("START { var.immut.str ['a'] = [*1000*]; print.stdout['a']; }"), "1000");
     // The same output, arrived at two different ways -- one printed a number, the other
     // printed four characters.
 }
@@ -145,17 +145,17 @@ fn the_same_characters_are_a_number_or_text_depending_on_the_type() {
 #[test]
 fn copying_a_value_names_it_again_rather_than_building_anything() {
     assert_eq!(
-        said("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print.stdout['a' 'b']; }"),
+        said("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a']; print.stdout['a' 'b']; }"),
         "xx"
     );
     // And the module holds that text once, because copying did not make a second one.
-    let out = lower("START { var.str ['a'] = [*x*]; var.str ['b'] = ['a']; print.stdout['a' 'b']; }");
+    let out = lower("START { var.immut.str ['a'] = [*x*]; var.immut.str ['b'] = ['a']; print.stdout['a' 'b']; }");
     assert_eq!(out.module.expect("a program").text.len(), 1);
 }
 
 #[test]
 fn a_declaration_that_is_never_used_still_has_to_make_sense() {
-    assert!(!lower("START { var.i64 ['n'] = [*hello*]; }").ok());
+    assert!(!lower("START { var.immut.i64 ['n'] = [*hello*]; }").ok());
 }
 
 #[test]
@@ -169,32 +169,32 @@ fn a_program_that_does_not_check_out_is_not_lowered() {
 
 #[test]
 fn arithmetic_comes_out_the_same_in_both_engines() {
-    assert_eq!(said("START { var.i64 ['n'] = [*7* + *3*]; print.stdout['n']; }"), "10");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* - *3*]; print.stdout['n']; }"), "4");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* x *3*]; print.stdout['n']; }"), "21");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* / *3*]; print.stdout['n']; }"), "2");
-    assert_eq!(said("START { var.i64 ['n'] = [*7* mod *3*]; print.stdout['n']; }"), "1");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* + *3*]; print.stdout['n']; }"), "10");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* - *3*]; print.stdout['n']; }"), "4");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* x *3*]; print.stdout['n']; }"), "21");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* / *3*]; print.stdout['n']; }"), "2");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*7* mod *3*]; print.stdout['n']; }"), "1");
 }
 
 #[test]
 fn precedence_shows_up_in_the_answer() {
-    assert_eq!(said("START { var.i64 ['n'] = [*1* + *2* x *3*]; print.stdout['n']; }"), "7");
-    assert_eq!(said("START { var.i64 ['n'] = [(*1* + *2*) x *3*]; print.stdout['n']; }"), "9");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*1* + *2* x *3*]; print.stdout['n']; }"), "7");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [(*1* + *2*) x *3*]; print.stdout['n']; }"), "9");
     // Equal tiers go left to right, which is what everybody expects of subtraction.
-    assert_eq!(said("START { var.i64 ['n'] = [*10* - *3* - *2*]; print.stdout['n']; }"), "5");
+    assert_eq!(said("START { var.immut.i64 ['n'] = [*10* - *3* - *2*]; print.stdout['n']; }"), "5");
 }
 
 #[test]
 fn a_comparison_prints_as_a_word() {
-    assert_eq!(said("START { var.bool ['b'] = [*7* > *3*]; print.stdout['b']; }"), "true");
-    assert_eq!(said("START { var.bool ['b'] = [*7* < *3*]; print.stdout['b']; }"), "false");
-    assert_eq!(said("START { var.bool ['b'] = [*7* == *7*]; print.stdout['b']; }"), "true");
+    assert_eq!(said("START { var.immut.bool ['b'] = [*7* > *3*]; print.stdout['b']; }"), "true");
+    assert_eq!(said("START { var.immut.bool ['b'] = [*7* < *3*]; print.stdout['b']; }"), "false");
+    assert_eq!(said("START { var.immut.bool ['b'] = [*7* == *7*]; print.stdout['b']; }"), "true");
 }
 
 #[test]
 fn the_division_setting_reaches_the_answer() {
     use quench_conf::{Division, Settings};
-    let source = "START { var.i64 ['n'] = [*0* - *7*]; var.i64 ['q'] = ['n' / *2*]; print.stdout['q']; }";
+    let source = "START { var.immut.i64 ['n'] = [*0* - *7*]; var.immut.i64 ['q'] = ['n' / *2*]; print.stdout['q']; }";
 
     let truncated = quench_lower::lower_under(source, Settings::default());
     let floored = quench_lower::lower_under(
@@ -217,7 +217,7 @@ fn the_division_setting_reaches_the_answer() {
 #[test]
 fn an_array_holds_what_it_was_given() {
     assert_eq!(
-        said("START { var.arr.i64 (3) ['xs'] = [[*10* *20* *30*]]; print.stdout['xs'[*2*]]; }"),
+        said("START { var.immut.arr.i64 (3) ['xs'] = [[*10* *20* *30*]]; print.stdout['xs'[*2*]]; }"),
         "20"
     );
 }
@@ -227,7 +227,7 @@ fn a_shaped_array_is_written_flat_and_indexed_by_dimension() {
     // (2 3) is two rows of three, laid out row by row in one allocation. Element (2, 3)
     // is the last one, and finding it is arithmetic rather than following a handle.
     let source = "START {
-        var.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
+        var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
         print.stdout['m'[*1* *1*] str:*,* 'm'[*1* *3*] str:*,* 'm'[*2* *1*] str:*,* 'm'[*2* *3*]];
     }";
     assert_eq!(said(source), "1,3,4,6");
@@ -238,7 +238,7 @@ fn arrays_are_counted_from_one() {
     // Which is not a preference: a counting loop is inclusive and its counter unsigned,
     // so `[1, count]` walks an array exactly while `[0, count - 1]` wraps on an empty one.
     assert_eq!(
-        said("START { var.arr.i64 (2) ['xs'] = [[*7* *8*]]; print.stdout['xs'[*1*]]; }"),
+        said("START { var.immut.arr.i64 (2) ['xs'] = [[*7* *8*]]; print.stdout['xs'[*1*]]; }"),
         "7",
         "the first element is 1"
     );
@@ -249,14 +249,14 @@ fn an_index_outside_the_array_stops_the_interpreter() {
     // The Dev JIT aborts instead, having nowhere to put a failure and no way to unwind.
     // That asymmetry is why the generator writes nothing that can stop, and it is the
     // thing to fix before it can.
-    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*3*]]; }");
+    let out = lower("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*3*]]; }");
     let module = out.module.expect("a program");
     assert_eq!(
         quench_interp::run(&module).expect("it runs"),
         quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray)
     );
 
-    let out = lower("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }");
+    let out = lower("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }");
     assert_eq!(
         quench_interp::run(&out.module.expect("a program")).expect("it runs"),
         quench_interp::Outcome::Trapped(quench_interp::Trap::OutsideTheArray),
@@ -280,19 +280,19 @@ fn stopping_is_agreed_on_as_much_as_answering() {
     // Not merely *that* it stopped -- which stop it was. An engine that said "something
     // went wrong" could not be compared with one that said what.
     assert_eq!(
-        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* / 'z']; print.stdout['q']; }"),
+        ended("START { var.immut.i64 ['z'] = [*0*]; var.immut.i64 ['q'] = [*1* / 'z']; print.stdout['q']; }"),
         Outcome::Trapped(Trap::DividedByZero)
     );
     assert_eq!(
-        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* mod 'z']; print.stdout['q']; }"),
+        ended("START { var.immut.i64 ['z'] = [*0*]; var.immut.i64 ['q'] = [*1* mod 'z']; print.stdout['q']; }"),
         Outcome::Trapped(Trap::DividedByZero)
     );
     assert_eq!(
-        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*9*]]; }"),
+        ended("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*9*]]; }"),
         Outcome::Trapped(Trap::OutsideTheArray)
     );
     assert_eq!(
-        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }"),
+        ended("START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; print.stdout['xs'[*0*]]; }"),
         Outcome::Trapped(Trap::OutsideTheArray),
         "counted from one, so nought is no element"
     );
@@ -304,9 +304,9 @@ fn the_one_division_that_does_not_fit() {
     // i64::MIN / -1 is one larger than an i64 holds. It is a different stop from
     // dividing by zero, and both engines have to know which happened.
     let source = "START {
-        var.i64 ['least'] = [*-9223372036854775808*];
-        var.i64 ['minus'] = [*0* - *1*];
-        var.i64 ['q'] = ['least' / 'minus'];
+        var.immut.i64 ['least'] = [*-9223372036854775808*];
+        var.immut.i64 ['minus'] = [*0* - *1*];
+        var.immut.i64 ['q'] = ['least' / 'minus'];
         print.stdout['q'];
     }";
     assert_eq!(ended(source), Outcome::Trapped(Trap::DivisionOverflowed));
@@ -317,8 +317,8 @@ fn a_program_that_stops_stops_where_it_stopped() {
     // What ran before the stop happened; what came after did not.
     let source = "START {
         print.stdout[str:*before* \\n];
-        var.i64 ['z'] = [*0*];
-        var.i64 ['q'] = [*1* / 'z'];
+        var.immut.i64 ['z'] = [*0*];
+        var.immut.i64 ['q'] = [*1* / 'z'];
         print.stdout[str:*after* \\n];
     }";
     let module = lower(source).module.expect("a program");
@@ -363,8 +363,8 @@ fn the_overflow_setting_reaches_the_answer() {
     use quench_conf::{Overflow, Settings};
     use quench_qir::{Outcome, Trap};
     let source = "START {
-        var.i64 ['big'] = [*9223372036854775807*];
-        var.i64 ['n'] = ['big' + *1*];
+        var.immut.i64 ['big'] = [*9223372036854775807*];
+        var.immut.i64 ['n'] = ['big' + *1*];
         print.stdout['n'];
     }";
 
@@ -390,7 +390,7 @@ fn the_overflow_setting_reaches_the_answer() {
 #[test]
 fn exactly_one_arm_runs() {
     let source = "START {
-        var.i64 ['n'] = [*12*];
+        var.immut.i64 ['n'] = [*12*];
         if 'n' > *100* { print.stdout[str:*huge*]; }
         else-if 'n' > *10* { print.stdout[str:*big*]; }
         else-if 'n' > *1*  { print.stdout[str:*small*]; }
@@ -410,7 +410,7 @@ fn a_variable_changed_in_one_arm_is_changed_after_it() {
     // Which is the whole of the block-parameter work: `label` is a different value
     // depending on which arm ran, and afterwards it is whichever one that was.
     let source = "START {
-        var.i64 ['n'] = [*12*];
+        var.immut.i64 ['n'] = [*12*];
         var.mut.i64 ['label'] = [*0*];
         if 'n' > *100* { set ['label'] = [*3*]; }
         else-if 'n' > *10* { set ['label'] = [*2*]; }
@@ -433,7 +433,7 @@ fn a_variable_left_alone_in_an_arm_keeps_what_it_had() {
 #[test]
 fn conditionals_nest() {
     let source = "START {
-        var.i64 ['a'] = [*2*];
+        var.immut.i64 ['a'] = [*2*];
         var.mut.str ['out'] = [*none*];
         if 'a' > *1* {
             if 'a' > *5* { set ['out'] = [*both*]; }

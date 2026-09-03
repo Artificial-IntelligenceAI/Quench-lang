@@ -29,7 +29,7 @@ fn hello_world() {
 fn a_declaration_and_a_print() {
     let source = "\
 START {
-var.str ['greeting'] = [*Hello*];
+var.immut.str ['greeting'] = [*Hello*];
 print.stdout['greeting' \\n];
 }
 ";
@@ -43,7 +43,7 @@ print.stdout['greeting' \\n];
 
 #[test]
 fn several_names_and_several_values() {
-    let source = "START {\nvar.str ['s', 'ss'] = [*line one* \\n *line two*, *idk* \\n *Claude*];\n}\n";
+    let source = "START {\nvar.immut.str ['s', 'ss'] = [*line one* \\n *line two*, *idk* \\n *Claude*];\n}\n";
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
     let Stmt::Var(var) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
@@ -67,7 +67,7 @@ fn the_chain_is_kept_link_by_link() {
 
 #[test]
 fn counts_that_do_not_match_point_at_both_lists() {
-    let source = "START {\nvar.str ['a', 'b'] = [*one*];\n}\n";
+    let source = "START {\nvar.immut.str ['a', 'b'] = [*one*];\n}\n";
     let out = parse(source);
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     let rendered = report(source);
@@ -89,7 +89,7 @@ fn a_bare_written_value_in_a_print_is_told_what_is_missing() {
 
 #[test]
 fn a_typed_value_in_a_declaration_is_saying_it_twice() {
-    let source = "START {\nvar.str ['a'] = [str:*Hello*];\n}\n";
+    let source = "START {\nvar.immut.str ['a'] = [str:*Hello*];\n}\n";
     let rendered = report(source);
     assert!(rendered.contains("says its type twice"), "{rendered}");
     assert!(rendered.contains("Error code: E0107"), "{rendered}");
@@ -108,10 +108,10 @@ fn four_mistakes_report_as_four() {
     // it has found the start of the next one.
     let source = "\
 START {
-var.str ['a', 'b'] = [*one*];
+var.immut.str ['a', 'b'] = [*one*];
 print.stdout[*bare*];
 wobble ['x'];
-var.str ['c'] = [str:*twice*];
+var.immut.str ['c'] = [str:*twice*];
 }
 ";
     let out = parse(source);
@@ -139,7 +139,7 @@ fn a_file_with_nothing_in_it_is_not_an_error_yet() {
 
 #[test]
 fn things_before_start_are_not_built_yet_and_say_so() {
-    let source = "var.str ['a'] = [*x*];\nSTART {\nprint.stdout[str:*a*];\n}\n";
+    let source = "var.immut.str ['a'] = [*x*];\nSTART {\nprint.stdout[str:*a*];\n}\n";
     let rendered = report(source);
     assert!(rendered.contains("only `START` can be at the top of a file so far"), "{rendered}");
     assert!(rendered.contains("not built yet"), "{rendered}");
@@ -149,7 +149,7 @@ fn things_before_start_are_not_built_yet_and_say_so() {
 fn the_worked_error_renders_whole() {
     // Both labels are on one line, so the line is shown once with the carets stacked --
     // saying it twice was what the renderer used to do, and reads as a stutter.
-    let source = "START {\nvar.str ['a', 'b'] = [*one*];\n}\n";
+    let source = "START {\nvar.immut.str ['a', 'b'] = [*one*];\n}\n";
     let expected = "\
 Hello, I think there may be thing(s) wrong with your code. I'm sorry, if I'm wrong.
 
@@ -157,7 +157,7 @@ file: src/main.qnl, line: 2, column: 23 (src/main.qnl:2:23)
 
 two names declared, and one value given.
 
-  2 | var.str ['a', 'b'] = [*one*];
+  2 | var.immut.str ['a', 'b'] = [*one*];
     |          ~~~~~~~~ two names
     |                       ^^^^^ one value
 

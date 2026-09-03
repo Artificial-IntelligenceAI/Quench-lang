@@ -301,19 +301,32 @@ impl<'a> Checker<'a> {
 
     /// `var` . `mut`? . `arr`* . type, then a shape in brackets.
     fn chain(&mut self, var: &ast::Var) -> Option<Chain> {
-        let mut mutable = false;
+        // Not a `bool` with a default. Silence is a third answer, and it is refused.
+        let mut mutable: Option<(bool, Span)> = None;
         let mut ty_span = None;
         let mut arrays: Vec<Span> = Vec::new();
 
         for link in var.chain.iter().skip(1) {
             match self.text(*link) {
-                "mut" if !mutable && ty_span.is_none() => mutable = true,
-                "mut" => {
+                word @ ("mut" | "immut") if mutable.is_none() && ty_span.is_none() => {
+                    mutable = Some((word == "mut", *link));
+                }
+                word @ ("mut" | "immut") if ty_span.is_some() => {
                     self.errors.push(
-                        Diagnostic::new("E0401", "`mut` comes before the type.")
+                        Diagnostic::new("E0401", format!("`{word}` comes before the type."))
                             .primary(*link, "here")
                             .rule("a chain reads `var`, then whether it changes, then what it is")
-                            .fix("`var.mut.<type>`"),
+                            .fix(format!("`var.{word}.<type>`")),
+                    );
+                }
+                word @ ("mut" | "immut") => {
+                    let (_, first) = mutable.expect("something was said already");
+                    self.errors.push(
+                        Diagnostic::new("E0443", "this says twice whether it can change.")
+                            .secondary(first, format!("`{}` here", self.text(first)))
+                            .primary(*link, format!("and `{word}` here"))
+                            .rule("a declaration says `mut` or `immut`, once")
+                            .fix("keep the one that was meant"),
                     );
                 }
                 "arr" if ty_span.is_none() => arrays.push(*link),
@@ -340,6 +353,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+
+        let Some((mutable, _)) = mutable else {
+            self.errors.push(
+                Diagnostic::new("E0444", "this declaration does not say whether it can change.")
+                    .primary(var.chain[0], "here")
+                    .rule("a declaration says `mut` or `immut`, and silence is not one of them")
+                    .tip("it goes between `var` and the type, where visibility goes on the things that have it.")
+                    .fix("`var.immut.<type>` if it never changes, `var.mut.<type>` if it does"),
+            );
+            return None;
+        };
 
         let ty_span = ty_span.or_else(|| {
             self.errors.push(
@@ -1064,18 +1088,19 @@ impl<'a> Checker<'a> {
 
             if !self.locals[local.0 as usize].mutable {
                 let declared = self.locals[local.0 as usize].clone();
-                let chain = self.text(declared.chain);
-                // `var.i64` becomes `var.mut.i64`, which is the line they wanted.
-                let with_mut = chain.replacen("var", "var.mut", 1);
+                // `var.immut.i64` becomes `var.mut.i64`, which is the line they wanted.
+                // A replacement rather than an insertion, since every declaration now
+                // says one or the other and inserting would say both.
+                let with_mut = self.text(declared.chain).replacen("immut", "mut", 1);
                 self.errors.push(
                     Diagnostic::new(
                         "E0438",
                         format!("`'{}'` cannot be changed, because its declaration never said it could.", declared.name),
                     )
-                    .secondary(declared.chain, "declared here, and `mut` is not in the chain")
+                    .secondary(declared.chain, "declared `immut` here")
                     .primary(target.name(), "changed here")
                     .rule("a variable changes only if its declaration says `mut`")
-                    .tip("`mut` goes between `var` and the type.")
+                    .tip("`immut` and `mut` are the two answers, and this one gave the other.")
                     .fix(format!("`{with_mut}`")),
                 );
                 continue;
