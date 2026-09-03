@@ -134,7 +134,12 @@ Both print the same thing, which is not a coincidence — it is
   ['total' + *55*];`, `set ['xs'[*2*]] = [*99*];`. Changing something not declared
   `mut` is refused, with the line that would have worked.
 - **Arrays.** `var.immut.arr.i64 (2 3) ['m']` is one allocation of six, laid out row by
-  row; `arr.arr.i64` would be an array of handles and is a different type. Holds any
+  row; `arr.arr.i64 (2 3)` is three allocations — two of three, and two handles over
+  them. **Every `arr` link is one allocation**, sizes are spent one per link outside in,
+  and the innermost takes what is left. Both are written flat and they print
+  differently (`[1 2 3 4 5 6]` against `[[1 2 3] [4 5 6]]`), because only one of them
+  can be taken apart: an index may stop where an allocation ends, and hands back the
+  array that lives there. Holds any
   built type — `arr.bool`, `arr.str`, `arr.e` — and crosses into and out of functions,
   where the **call site** says `share` or `copy` so a reader knows what happens to their
   array without opening the function. The

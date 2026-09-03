@@ -372,10 +372,10 @@ impl Host {
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
             Host::ArrayCopy => &[Ty::Handle],
-            // The last is which [`Elements`] it holds, always a constant by the time it
-            // arrives here.
-            Host::ArrayEqual => &[Ty::Handle, Ty::Handle, Ty::I64],
-            Host::PrintArray => &[Ty::I64, Ty::Handle, Ty::I64],
+            // The last two are which [`Elements`] it holds and how many allocations
+            // deep it goes, always constants by the time they arrive here.
+            Host::ArrayEqual => &[Ty::Handle, Ty::Handle, Ty::I64, Ty::I64],
+            Host::PrintArray => &[Ty::I64, Ty::Handle, Ty::I64, Ty::I64],
             Host::ExactRead => &[Ty::Text],
             Host::ExactAdd | Host::ExactSub | Host::ExactMul | Host::ExactDiv => {
                 &[Ty::Exact, Ty::Exact]
@@ -460,6 +460,11 @@ impl Elements {
 }
 
 /// How an array is shown, written once so that no engine can have its own idea of it.
+///
+/// `depth` is how many allocations lie under this one: nought when its slots hold
+/// values, one when they hold arrays of values, and so on. Nesting shows in the output
+/// because it is real — `arr.i64 (2 3)` and `arr.arr.i64 (2 3)` hold the same six
+/// numbers in a different number of places, and only one of them can be taken apart.
 ///
 /// Flat and bracketed: `[1 2 3]`. A `(2 3)` shows six numbers rather than two rows,
 /// because six numbers is how one is written. Each engine works out what its own

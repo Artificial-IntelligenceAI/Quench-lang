@@ -1137,3 +1137,68 @@ START {
         "[5 10 15]",
     );
 }
+
+#[test]
+fn an_array_of_arrays_is_two_allocations_and_shows_it() {
+    // `arr.i64 (2 3)` and `arr.arr.i64 (2 3)` hold the same six numbers in a different
+    // number of places, and only one of them can be taken apart. The printing says so.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
+    var.immut.arr.i64 (2 3) ['flat'] = [[*1* *2* *3* *4* *5* *6*]];
+    print.stdout['m' str:* * 'flat'];
+}
+"),
+        "[[1 2 3] [4 5 6]] [1 2 3 4 5 6]",
+    );
+}
+
+#[test]
+fn an_index_may_stop_where_an_allocation_ends() {
+    // Which is the whole reason to write two `arr` links: the inner array is a thing,
+    // and stopping there hands it to you.
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]];
+    var.mut.arr.i64 (3) ['row'] = [share 'm'[*2*]];
+    set ['row'[*1*]] = [*99*];
+    print.stdout['m'[*1* *2*] str:* * 'row' str:* * 'm'];
+}
+"),
+        "2 [99 5 6] [[1 2 3] [99 5 6]]",
+        "and it is the array that lives there, not a copy of it",
+    );
+}
+
+#[test]
+fn nesting_goes_as_deep_as_it_is_written() {
+    assert_eq!(
+        said("\
+START {
+    var.mut.arr.arr.arr.i64 (2 2 2) ['deep'] = [[*1* *2* *3* *4* *5* *6* *7* *8*]];
+    set ['deep'[*1* *1* *1*]] = [*99*];
+    print.stdout['deep' str:* * 'deep'[*2* *1* *2*]];
+}
+"),
+        "[[[99 2] [3 4]] [[5 6] [7 8]]] 6",
+    );
+}
+
+#[test]
+fn nested_arrays_compare_all_the_way_down() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.arr.i64 (2 2) ['a'] = [[*1* *2* *3* *4*]];
+    var.immut.arr.arr.i64 (2 2) ['twin'] = [[*1* *2* *3* *4*]];
+    var.immut.arr.arr.i64 (2 2) ['other'] = [[*1* *2* *3* *9*]];
+    var.immut.bool ['same'] = ['a' == 'twin'];
+    var.immut.bool ['not'] = ['a' == 'other'];
+    print.stdout['same' str:* * 'not'];
+}
+"),
+        "true false",
+    );
+}

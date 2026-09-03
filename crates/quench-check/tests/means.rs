@@ -313,10 +313,16 @@ fn only_an_array_has_a_shape() {
 }
 
 #[test]
-fn an_index_needs_one_number_per_dimension() {
+fn an_index_may_stop_where_an_allocation_ends_and_nowhere_else() {
+    // One `arr` is one allocation, so a `(2 3)` takes two indices and no fewer.
     let rendered = errors("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; print.stdout['m'[*1*]]; }");
-    assert!(rendered.contains("has 2 dimension(s), and 1 index(es) were given"), "{rendered}");
-    assert!(rendered.contains("declared (2 3)"), "{rendered}");
+    assert!(rendered.contains("this takes 2 index(es), and 1 were given"), "{rendered}");
+    assert!(rendered.contains("declared `arr.i64 (2 3)`"), "{rendered}");
+
+    // Two `arr` links are two allocations, so stopping between them is a place to
+    // stop -- and what it hands back is the array that lives there.
+    let out = check("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.arr.i64 (3) ['row'] = [share 'm'[*2*]]; }");
+    assert!(out.ok(), "{}", errors("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.arr.i64 (3) ['row'] = [share 'm'[*2*]]; }"));
 }
 
 #[test]
@@ -332,11 +338,16 @@ fn every_element_is_the_type_the_array_said() {
 }
 
 #[test]
-fn an_array_of_arrays_says_it_is_not_built() {
-    let rendered = errors("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1*]]; }");
-    assert!(rendered.contains("an array of arrays is not built yet"), "{rendered}");
-    assert!(rendered.contains("one `arr` is one allocation"), "{rendered}");
-    assert!(rendered.contains("`arr.i64 (2 3)` is two rows of three"), "{rendered}");
+fn every_arr_link_is_one_allocation_and_says_how_big() {
+    // One size per link, and the innermost takes what is left -- which is what keeps
+    // `arr.i64 (2 3)` a rectangle while `arr.arr.i64 (2 3)` is two rows of three.
+    let out = check("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; }");
+    assert!(out.ok(), "{}", errors("START { var.immut.arr.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; }"));
+    assert_eq!(out.locals()[0].ty.name(), "arr.arr.i64 (2 3)", "named the way it was written");
+
+    let rendered = errors("START { var.immut.arr.arr.i64 (2) ['m'] = [[*1* *2*]]; }");
+    assert!(rendered.contains("this says `arr` two times and gives one size."), "{rendered}");
+    assert!(rendered.contains("every `arr` link is one allocation"), "{rendered}");
 }
 
 #[test]

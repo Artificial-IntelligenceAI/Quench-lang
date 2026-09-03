@@ -121,3 +121,53 @@ Outside an array a `str` prints bare, because nothing is beside it to run into.
 
 An `e` inside an array compares by value like one outside it: an array of `1/2` and
 an array of `0.5` hold the same numbers.
+
+## Two `arr` links are two allocations
+
+```quench
+var.immut.arr.i64     (2 3) ['flat']   # one allocation of six
+var.immut.arr.arr.i64 (2 3) ['nested'] # three: two of three, and two handles over them
+```
+
+Every `arr` link is one allocation, and every allocation says how big it is — so the
+sizes are spent one per link, outside in, and **the innermost takes whatever is
+left**. That one rule covers both lines above and keeps `arr.i64 (2 3)` the rectangle
+it always was.
+
+They are written the same way, flat, because the type already gave the shape:
+
+```quench
+= [[*1* *2* *3* *4* *5* *6*]]
+```
+
+They print differently, because the difference is real:
+
+```text
+[1 2 3 4 5 6]
+[[1 2 3] [4 5 6]]
+```
+
+Six numbers in one place, or six numbers in two places with something pointing at
+both. Only the second can be taken apart, and taking it apart is the whole reason to
+write it:
+
+```quench
+var.mut.arr.i64 (3) ['row'] = [share 'nested'[*2*]];
+set ['row'[*1*]] = [*99*];        # 'nested' is [[1 2 3] [99 5 6]]
+```
+
+An index may stop where an allocation ends and nowhere else. Stopping hands back the
+array that lives there — which is a thing, with a name of its own, that `share` and
+`copy` already knew how to talk about.
+
+## The first thing the collector will have to follow
+
+Everything Quench holds has been a **leaf** until now. A number is a number, an `e` is
+two magnitudes in a row, an array of `i64` is a run of numbers — nothing in any of
+them points anywhere.
+
+An array of arrays does. It is the first value in the language whose slots hold
+handles, and so the first that a tracing collector would have to walk rather than
+just mark. Nothing is freed yet, so nothing depends on this today; it is written down
+because stage two is where it starts to. See
+[the-collector-earns-its-place.md](the-collector-earns-its-place.md).

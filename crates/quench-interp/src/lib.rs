@@ -62,6 +62,63 @@ pub const DEPTH: usize = 10_000;
 /// Where a running program's output goes.
 ///
 /// Two of them, because a program says which it means. See [`qir::Stream`].
+/// What one array says, following handles as far down as it goes.
+fn shown(
+    handle: i64,
+    kind: qir::Elements,
+    depth: i64,
+    heap: &[Vec<i64>],
+    exacts: &[quench_num::Exact],
+    module: &qir::Module,
+) -> String {
+    let parts: Vec<String> = heap[handle as usize]
+        .iter()
+        .map(|value| {
+            if depth > 0 {
+                return shown(*value, kind, depth - 1, heap, exacts, module);
+            }
+            match kind {
+                qir::Elements::I64 => value.to_string(),
+                qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
+                // Wearing its marks, because an array of text with a space in it is
+                // unreadable without them.
+                qir::Elements::Text => format!("*{}*", module.text[*value as usize]),
+                qir::Elements::Exact => exacts[*value as usize].to_string(),
+            }
+        })
+        .collect();
+    qir::show_array(&parts)
+}
+
+/// Whether two arrays hold the same things, following handles as far down as they go.
+fn alike(
+    a: i64,
+    b: i64,
+    kind: qir::Elements,
+    depth: i64,
+    heap: &[Vec<i64>],
+    exacts: &[quench_num::Exact],
+    module: &qir::Module,
+) -> bool {
+    let (left, right) = (&heap[a as usize], &heap[b as usize]);
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(right).all(|(x, y)| {
+        if depth > 0 {
+            return alike(*x, *y, kind, depth - 1, heap, exacts, module);
+        }
+        match kind {
+            // Two names for one exact number are not the only way to hold the same one,
+            // so these are compared by value rather than by which they are -- and so is
+            // text, for the same reason.
+            qir::Elements::Exact => exacts[*x as usize] == exacts[*y as usize],
+            qir::Elements::Text => module.text[*x as usize] == module.text[*y as usize],
+            _ => x == y,
+        }
+    })
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> Trap {
     match trouble {
@@ -311,42 +368,17 @@ fn evaluate(
                 qir::Host::ArrayEqual => {
                     let kind = qir::Elements::from_code(slots[args[2].0 as usize])
                         .expect("the lowering wrote this constant");
-                    let (a, b) = (
-                        heap[slots[args[0].0 as usize] as usize].clone(),
-                        heap[slots[args[1].0 as usize] as usize].clone(),
-                    );
-                    if a.len() != b.len() {
-                        return Ok(0);
-                    }
-                    let same = a.iter().zip(&b).all(|(x, y)| match kind {
-                        // Two names for one exact number are not the only way to hold
-                        // the same one, so these are compared by value rather than by
-                        // which they are -- and so is text, for the same reason.
-                        qir::Elements::Exact => exacts[*x as usize] == exacts[*y as usize],
-                        qir::Elements::Text => {
-                            module.text[*x as usize] == module.text[*y as usize]
-                        }
-                        _ => x == y,
-                    });
-                    return Ok(i64::from(same));
+                    let depth = slots[args[3].0 as usize];
+                    let (a, b) =
+                        (slots[args[0].0 as usize], slots[args[1].0 as usize]);
+                    return Ok(i64::from(alike(a, b, kind, depth, heap, exacts, module)));
                 }
                 qir::Host::PrintArray => {
                     let kind = qir::Elements::from_code(slots[args[2].0 as usize])
                         .expect("the lowering wrote this constant");
-                    let parts: Vec<String> = heap[slots[args[1].0 as usize] as usize]
-                        .iter()
-                        .map(|value| match kind {
-                            qir::Elements::I64 => value.to_string(),
-                            qir::Elements::Bool => {
-                                if *value != 0 { "true" } else { "false" }.to_string()
-                            }
-                            // Wearing its marks, because an array of text with a space
-                            // in it is unreadable without them.
-                            qir::Elements::Text => format!("*{}*", module.text[*value as usize]),
-                            qir::Elements::Exact => exacts[*value as usize].to_string(),
-                        })
-                        .collect();
-                    let shown = qir::show_array(&parts);
+                    let depth = slots[args[3].0 as usize];
+                    let shown =
+                        shown(slots[args[1].0 as usize], kind, depth, heap, exacts, module);
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
                 }
                 qir::Host::ExactRead => {

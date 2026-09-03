@@ -45,9 +45,17 @@ impl Ty {
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
             Ty::Exact => "e".to_string(),
-            Ty::Arr { of, shape } => {
-                let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
-                format!("arr.{} ({})", of.name(), sizes.join(" "))
+            // Named the way it was written: every `arr` link, then every size in one
+            // pair of brackets, outside in. Which is also the order they were read in.
+            Ty::Arr { .. } => {
+                let (mut links, mut sizes) = (0, Vec::new());
+                let mut walking = self;
+                while let Ty::Arr { of, shape } = walking {
+                    links += 1;
+                    sizes.extend(shape.iter().map(usize::to_string));
+                    walking = of;
+                }
+                format!("{}{} ({})", "arr.".repeat(links), walking.name(), sizes.join(" "))
             }
         }
     }
@@ -63,10 +71,13 @@ impl Ty {
         }
     }
 
-    /// How many elements one of these holds, all told.
+    /// How many written values one of these takes, all told and all the way down.
+    ///
+    /// An array of arrays is written flat like any other, so this counts through every
+    /// allocation rather than stopping at the top one.
     pub fn count(&self) -> usize {
         match self {
-            Ty::Arr { shape, .. } => shape.iter().product(),
+            Ty::Arr { of, shape } => shape.iter().product::<usize>() * of.count(),
             _ => 1,
         }
     }
@@ -198,6 +209,22 @@ pub enum Value {
 pub use quench_parse::OpKind;
 pub use quench_qir::Stream;
 
+/// How many indices may be given before an allocation ends, counting outside in.
+///
+/// `arr.i64 (2 3)` is one allocation and takes two. `arr.arr.i64 (2 3)` is two, and
+/// takes one — handing back the inner array — or two.
+fn boundaries(ty: &Ty) -> Vec<usize> {
+    let mut stops = Vec::new();
+    let mut at = 0;
+    let mut walking = ty;
+    while let Ty::Arr { of, shape } = walking {
+        at += shape.len();
+        stops.push(at);
+        walking = of;
+    }
+    stops
+}
+
 /// Whether every way out of this body ends in a `give`.
 ///
 /// An `if` counts only when it has an `else` and every arm gives, because otherwise
@@ -307,7 +334,9 @@ pub struct Arm {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Place {
     Local(LocalId),
-    Element { local: LocalId, indices: Vec<Value>, shape: Vec<usize> },
+    /// One element of an array. `array` is what holds it — a variable, or another
+    /// element of an array of arrays, which is the same thing one allocation deeper.
+    Element { array: Value, indices: Vec<Value>, shape: Vec<usize> },
 }
 
 /// What a program means.
@@ -712,16 +741,6 @@ impl<'a> Checker<'a> {
         shape: &[Span],
         shape_span: Option<Span>,
     ) -> Option<Ty> {
-        if arrays.len() > 1 {
-            self.errors.push(
-                Diagnostic::new("E0423", "an array of arrays is not built yet.")
-                    .primary(arrays[1], "this second `arr`")
-                    .rule("one `arr` is one allocation, however many dimensions it has; two would be an array of handles")
-                    .tip("a rectangular array does most of what nesting is wanted for: `arr.i64 (2 3)` is two rows of three.")
-                    .fix("use one `arr` with more than one size"),
-            );
-            return None;
-        }
         let Some(arr) = arrays.first() else {
             if let Some(span) = shape_span {
                 self.errors.push(
@@ -735,17 +754,37 @@ impl<'a> Checker<'a> {
             return element;
         };
         let element = element?;
-        if matches!(element, Ty::Arr { .. }) {
+        let sizes = self.sizes(shape, shape_span, *arr)?;
+
+        // One size per `arr` link, and the innermost takes whatever is left — so
+        // `arr.i64 (2 3)` is one allocation of six and `arr.arr.i64 (2 3)` is two
+        // allocations of three with an array of two handles over them. Every `arr` is
+        // one allocation; how many of them there are is how many links were written.
+        if sizes.len() < arrays.len() {
             self.errors.push(
-                Diagnostic::new("E0424", "an array of arrays is not built yet.")
-                    .primary(element_span, "here")
-                    .rule("one `arr` is one allocation; an array of them would hold handles instead of values")
-                    .fix("use one `arr` with more than one size"),
+                Diagnostic::new("E0423", format!(
+                    "this says `arr` {} and gives {}.",
+                    counted(arrays.len(), "time"),
+                    counted(sizes.len(), "size")
+                ))
+                .primary(shape_span.unwrap_or(element_span), format!("{} here", counted(sizes.len(), "size")))
+                .secondary(arrays[0].to(*arrays.last().expect("one at least")), format!("`arr` {}", counted(arrays.len(), "time")))
+                .rule("every `arr` link is one allocation, and every allocation says how big it is")
+                .tip("the innermost takes whatever sizes are left over, which is what makes `arr.i64 (2 3)` a rectangle.")
+                .fix(format!("give at least {}", counted(arrays.len(), "size"))),
             );
             return None;
         }
-        let sizes = self.sizes(shape, shape_span, *arr)?;
-        Some(Ty::Arr { of: Box::new(element), shape: sizes })
+
+        // Built inside out: the innermost allocation takes the sizes nothing else
+        // claimed, and each link outside it wraps what is under it in one more.
+        let inner = sizes.len() - (arrays.len() - 1);
+        let mut ty = Ty::Arr { of: Box::new(element), shape: sizes[arrays.len() - 1..].to_vec() };
+        debug_assert_eq!(sizes[arrays.len() - 1..].len(), inner);
+        for size in sizes[..arrays.len() - 1].iter().rev() {
+            ty = Ty::Arr { of: Box::new(ty), shape: vec![*size] };
+        }
+        Some(ty)
     }
 
     /// One type link, understood or honestly refused.
@@ -1313,7 +1352,19 @@ impl<'a> Checker<'a> {
         shape: &[usize],
         ty_span: Span,
     ) -> Option<Value> {
-        let [ast::Term::Elements { of: written, open, close }] = value.terms.as_slice() else {
+        // A group cut out of a longer run is already the elements; only the whole
+        // value wears the brackets that say so.
+        let cut: Vec<ast::Term>;
+        let (written, open, close) = match value.terms.as_slice() {
+            [ast::Term::Elements { of, open, close }] => (of.as_slice(), *open, *close),
+            terms if terms.len() > 1 || matches!(terms.first(), Some(ast::Term::Piece(_))) => {
+                cut = terms.to_vec();
+                (cut.as_slice(), value.span, value.span)
+            }
+            _ => (&[][..], value.span, value.span),
+        };
+        let (open, close) = (&open, &close);
+        if written.is_empty() && !matches!(value.terms.as_slice(), [ast::Term::Elements { .. }]) {
             self.errors.push(
                 Diagnostic::new("E0430", "an array is written between brackets.")
                     .primary(value.span, "here")
@@ -1321,9 +1372,12 @@ impl<'a> Checker<'a> {
                     .fix("`[[*1* *2* *3*]]`"),
             );
             return None;
-        };
+        }
 
-        let wanted: usize = shape.iter().product();
+        // Flat, however many allocations deep it is, since the type already gave the
+        // shape. `arr.arr.i64 (2 3)` is six numbers, grouped three and three.
+        let each = of.count();
+        let wanted: usize = shape.iter().product::<usize>() * each;
         if written.len() != wanted {
             let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
             self.errors.push(
@@ -1338,6 +1392,25 @@ impl<'a> Checker<'a> {
                 .fix(if written.len() < wanted { "write the missing ones" } else { "remove the extra ones" }),
             );
             return None;
+        }
+
+        // An array of arrays is built out of arrays, so the flat run is cut into
+        // groups of what one inner allocation holds and each group becomes one.
+        if let Ty::Arr { of: inner, shape: inner_shape } = of {
+            let mut rows = Vec::with_capacity(written.len() / each);
+            for group in written.chunks(each) {
+                let piece = ast::Value {
+                    terms: group.to_vec(),
+                    between: vec![None; group.len().saturating_sub(1)],
+                    span: group
+                        .first()
+                        .map(|t| t.span().to(group.last().expect("not empty").span()))
+                        .unwrap_or(ty_span),
+                };
+                let built = self.array(&piece, inner, inner_shape, ty_span)?;
+                rows.push(built);
+            }
+            return Some(Value::Array(rows));
         }
 
         let mut elements = Vec::with_capacity(written.len());
@@ -1374,7 +1447,7 @@ impl<'a> Checker<'a> {
     fn at(&mut self, name: Span, indices: &[ast::Term], close: Span) -> Option<Value> {
         let local = self.lookup(name)?;
         let held = self.locals[local.0 as usize].ty.clone();
-        let Ty::Arr { of: _, shape } = held else {
+        if !matches!(held, Ty::Arr { .. }) {
             self.errors.push(
                 Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
                     .primary(name, format!("a `{}`", held.name()))
@@ -1382,20 +1455,37 @@ impl<'a> Checker<'a> {
                     .fix("index an array, or use the value on its own"),
             );
             return None;
-        };
+        }
 
-        if indices.len() != shape.len() {
-            let sizes: Vec<String> = shape.iter().map(usize::to_string).collect();
+        // Every `arr` link is one allocation, so the indices are spent on them in
+        // order: the outer link takes its dimensions, then whatever is left goes to
+        // what it holds. Stopping at an allocation boundary hands back the array
+        // that lives there, which is the whole reason to write two links.
+        let mut levels = Vec::new();
+        let mut walking = held.clone();
+        let mut spent = 0;
+        while let Ty::Arr { of, shape } = walking {
+            if spent == indices.len() {
+                break;
+            }
+            levels.push(shape.clone());
+            spent += shape.len();
+            walking = *of;
+        }
+
+        if spent != indices.len() {
+            let stops: Vec<String> = boundaries(&held).iter().map(usize::to_string).collect();
             self.errors.push(
                 Diagnostic::new("E0434", format!(
-                    "this array has {} dimension(s), and {} index(es) were given.",
-                    shape.len(),
+                    "this takes {} index(es), and {} were given.",
+                    stops.join(" or "),
                     indices.len()
                 ))
                 .primary(name.to(close), format!("{} here", indices.len()))
-                .secondary(self.locals[local.0 as usize].at, format!("declared ({})", sizes.join(" ")))
-                .rule("an index gives one number for each dimension, in the order the shape wrote them")
-                .fix(format!("give {} of them", shape.len())),
+                .secondary(self.locals[local.0 as usize].at, format!("declared `{}`", held.name()))
+                .rule("an index gives one number for each dimension, and may stop where one allocation ends")
+                .tip("stopping early hands back the array that lives there, rather than an element of it.")
+                .fix(format!("give {} of them", stops.join(" or "))),
             );
             return None;
         }
@@ -1416,7 +1506,20 @@ impl<'a> Checker<'a> {
             built.push(value);
         }
 
-        Some(Value::At { array: Box::new(Value::Copy(local)), indices: built, shape })
+        // One `At` per allocation walked through, which is one `array-get` each. The
+        // lowering needs nothing new: it already follows a handle and indexes it.
+        let mut reached = Value::Copy(local);
+        let mut taken = 0;
+        for shape in levels {
+            let how_many = shape.len();
+            reached = Value::At {
+                array: Box::new(reached),
+                indices: built[taken..taken + how_many].to_vec(),
+                shape,
+            };
+            taken += how_many;
+        }
+        Some(reached)
     }
 
     /// Fold a flat run into a tree, or refuse and say why.
@@ -1705,14 +1808,10 @@ impl<'a> Checker<'a> {
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
-            Value::At { shape, array, .. } => {
-                let Value::Copy(local) = **array else { return None };
-                let _ = shape;
-                match self.locals[local.0 as usize].ty.clone() {
-                    Ty::Arr { of, .. } => Some(*of),
-                    other => Some(other),
-                }
-            }
+            Value::At { array, .. } => match self.type_of(array, span)? {
+                Ty::Arr { of, .. } => Some(*of),
+                other => Some(other),
+            },
             Value::Binary { op, lhs, rhs } => {
                 let (l, r) = (self.type_of(lhs, span)?, self.type_of(rhs, span)?);
 
@@ -2257,7 +2356,7 @@ impl<'a> Checker<'a> {
                     self.body.push(Stmt::Assign { to: Place::Local(local), value: built });
                 }
                 ast::Place::At { name, indices, close } => {
-                    let Ty::Arr { of, shape } = held else {
+                    if !matches!(held, Ty::Arr { .. }) {
                         self.errors.push(
                             Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
                                 .primary(*name, format!("a `{}`", held.name()))
@@ -2265,15 +2364,18 @@ impl<'a> Checker<'a> {
                                 .fix("change the whole thing, or index an array"),
                         );
                         continue;
-                    };
-                    let Some(Value::At { indices: built, .. }) =
-                        self.at(*name, indices, *close)
-                    else {
+                    }
+                    // Read the same way it would be read, then written to instead. The
+                    // outermost step is the one that changes something; everything
+                    // under it is the walk to get there.
+                    let Some(reached) = self.at(*name, indices, *close) else { continue };
+                    let Some(of) = self.type_of(&reached, name.to(*close)) else { continue };
+                    let Value::At { array, indices: built, shape } = reached else {
                         continue;
                     };
                     let Some(value) = self.value(value, &of, *name) else { continue };
                     self.body.push(Stmt::Assign {
-                        to: Place::Element { local, indices: built, shape },
+                        to: Place::Element { array: *array, indices: built, shape },
                         value,
                     });
                 }

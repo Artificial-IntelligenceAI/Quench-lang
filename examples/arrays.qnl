@@ -27,4 +27,15 @@ START {
     # the other question with.
     var.immut.bool ['alike'] = ['counts' == 'same'];
     print.stdout[str:*counts == same: * 'alike' \n];
+
+    # Two `arr` links are two allocations: two rows of three, and something
+    # pointing at both. Written flat like any other, since the type gave the shape.
+    var.mut.arr.arr.i64 (2 3) ['rows'] = [[*1* *2* *3* *4* *5* *6*]];
+    print.stdout[str:*rows = * 'rows' \n];
+
+    # An index may stop where an allocation ends, and what it hands back is the
+    # array that lives there -- which is the whole reason to write two links.
+    var.mut.arr.i64 (3) ['second'] = [share 'rows'[*2*]];
+    set ['second'[*1*]] = [*99*];
+    print.stdout[str:*rows = * 'rows' \n];
 }

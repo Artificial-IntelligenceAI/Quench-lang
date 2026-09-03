@@ -224,7 +224,8 @@ pub struct Var {
     /// `var`, then everything dotted after it — `mut`, the type, whatever else arrives.
     /// Kept as written so a diagnostic can point at one link rather than the whole line.
     pub chain: Vec<Span>,
-    /// `(5 2)` — one size per `arr` link, outside in. Empty when none was written.
+    /// `(5 2)` — one size per `arr` link, outside in, and the innermost link takes
+    /// whatever is left over. Empty when none was written.
     pub shape: Vec<Span>,
     /// Where the shape was written, for pointing at when it does not match the chain.
     pub shape_span: Option<Span>,

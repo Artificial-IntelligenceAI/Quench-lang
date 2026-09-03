@@ -176,8 +176,10 @@ fn lower_body(
                 let value = emit(b, module, value, held, w);
                 match to {
                     Place::Local(local) => held[local.0 as usize] = Some(value),
-                    Place::Element { local, indices, shape } => {
-                        let handle = held[local.0 as usize].expect("declared before used");
+                    Place::Element { array, indices, shape } => {
+                        // Whatever holds it, which for an array of arrays is another
+                        // `array-get` away and needs nothing new to say so.
+                        let handle = emit(b, module, array, held, w);
                         let at = flat_index(b, module, indices, shape, held, w);
                         b.call_host(qir::Host::ArraySet, &[handle, at, value]);
                     }
@@ -239,11 +241,13 @@ fn lower_body(
                                 // third argument, because a slot is an `i64` whatever
                                 // is in it and the runtime has to be told which.
                                 Ty::Arr { of, .. } => {
-                                    let kind = b.const_i64(elements(of) as i64);
+                                    let (leaf, depth) = elements(of);
+                                    let kind = b.const_i64(leaf as i64);
+                                    let deep = b.const_i64(depth);
                                     let stream = b.const_i64(*to as i64);
                                     b.call_host(
                                         qir::Host::PrintArray,
-                                        &[stream, value, kind],
+                                        &[stream, value, kind, deep],
                                     );
                                     continue;
                                 }
@@ -483,47 +487,52 @@ fn lower_if(
     !reached
 }
 
-/// What an array holds, as a checker type.
-fn element_type(array: &Value, w: &Where<'_>) -> Option<Ty> {
-    let ty = match array {
+/// What a value already checked is, for the few places lowering has to ask.
+///
+/// Only the ones that can be an array, because that is the only type whose shape the
+/// lowering has to know: everything else already says what it is in the IR.
+fn ty_of(value: &Value, w: &Where<'_>) -> Option<Ty> {
+    Some(match value {
         Value::Copy(local) => w.locals[local.0 as usize].ty.clone(),
-        Value::Copied(of) => return element_type(of, w),
+        Value::Copied(of) => ty_of(of, w)?,
         Value::Const(which) => w.checked.constants[*which as usize].ty.clone(),
         Value::Call { func, .. } => w.checked.funcs[*func as usize].returns.clone()?,
+        // One allocation down from whatever holds it, which is the whole of what an
+        // array of arrays adds.
+        Value::At { array, .. } => match ty_of(array, w)? {
+            Ty::Arr { of, .. } => *of,
+            _ => return None,
+        },
         _ => return None,
-    };
-    match ty {
+    })
+}
+
+/// What an array holds, as a checker type.
+fn element_type(array: &Value, w: &Where<'_>) -> Option<Ty> {
+    match ty_of(array, w)? {
         Ty::Arr { of, .. } => Some(*of),
         _ => None,
     }
 }
 
-/// What an array holds, as the runtime is told it.
-fn elements(of: &Ty) -> qir::Elements {
+/// What an array holds at the bottom, and how many allocations lie under the top one.
+fn elements(of: &Ty) -> (qir::Elements, i64) {
     match of {
-        Ty::I64 => qir::Elements::I64,
-        Ty::Bool => qir::Elements::Bool,
-        Ty::Str => qir::Elements::Text,
-        Ty::Exact => qir::Elements::Exact,
-        Ty::Arr { .. } => unreachable!("refused by the checker: an array of arrays"),
+        Ty::I64 => (qir::Elements::I64, 0),
+        Ty::Bool => (qir::Elements::Bool, 0),
+        Ty::Str => (qir::Elements::Text, 0),
+        Ty::Exact => (qir::Elements::Exact, 0),
+        Ty::Arr { of, .. } => {
+            let (kind, depth) = elements(of);
+            (kind, depth + 1)
+        }
     }
 }
 
 /// The same, worked out from a value the checker already typed.
-fn elements_of(value: &Value, w: &Where<'_>) -> qir::Elements {
-    let ty = match value {
-        Value::Copy(local) => w.locals[local.0 as usize].ty.clone(),
-        Value::Copied(of) => return elements_of(of, w),
-        Value::Const(which) => w.checked.constants[*which as usize].ty.clone(),
-        Value::Call { func, .. } => w.checked.funcs[*func as usize]
-            .returns
-            .clone()
-            .expect("an array came back, so something did"),
-        Value::Array(_) => unreachable!("an array written out is not compared yet"),
-        _ => unreachable!("refused by the checker: not an array"),
-    };
-    match ty {
-        Ty::Arr { of, .. } => elements(&of),
+fn elements_of(value: &Value, w: &Where<'_>) -> (qir::Elements, i64) {
+    match ty_of(value, w) {
+        Some(Ty::Arr { of, .. }) => elements(&of),
         _ => unreachable!("refused by the checker: not an array"),
     }
 }
@@ -718,8 +727,10 @@ fn emit(
             // and so a call. Not whether they are the same array — `share` is what makes
             // two names for one, and this is the other question.
             if b.ty_of(l) == qir::Ty::Handle {
-                let kind = b.const_i64(elements_of(lhs, w) as i64);
-                let same = b.call_host(qir::Host::ArrayEqual, &[l, r, kind]);
+                let (leaf, depth) = elements_of(lhs, w);
+                let kind = b.const_i64(leaf as i64);
+                let deep = b.const_i64(depth);
+                let same = b.call_host(qir::Host::ArrayEqual, &[l, r, kind, deep]);
                 return match op {
                     OpKind::Eq => same,
                     OpKind::Ne => b.not(same),

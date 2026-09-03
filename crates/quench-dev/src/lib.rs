@@ -567,42 +567,67 @@ fn piece_of(rt: *mut Runtime, index: i64) -> &'static [u8] {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_equal(rt: *mut Runtime, a: i64, b: i64, kind: i64) -> i64 {
+extern "C" fn array_equal(rt: *mut Runtime, a: i64, b: i64, kind: i64, depth: i64) -> i64 {
     let kind = qir::Elements::from_code(kind).expect("the lowering wrote this constant");
+    i64::from(alike(rt, a, b, kind, depth))
+}
+
+/// Whether two arrays hold the same things, following handles as far down as they go.
+fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> bool {
     let (left, right) = HEAP.with(|heap| {
         let heap = heap.borrow();
         (heap[a as usize].clone(), heap[b as usize].clone())
     });
     if left.len() != right.len() {
-        return 0;
+        return false;
     }
-    let same = left.iter().zip(&right).all(|(x, y)| match kind {
-        qir::Elements::Exact => {
-            EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
+    left.iter().zip(&right).all(|(x, y)| {
+        if depth > 0 {
+            return alike(rt, *x, *y, kind, depth - 1);
         }
-        qir::Elements::Text => piece_of(rt, *x) == piece_of(rt, *y),
-        _ => x == y,
-    });
-    i64::from(same)
+        match kind {
+            qir::Elements::Exact => {
+                EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
+            }
+            qir::Elements::Text => piece_of(rt, *x) == piece_of(rt, *y),
+            _ => x == y,
+        }
+    })
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_array(rt: *mut Runtime, stream: i64, handle: i64, kind: i64) -> i64 {
+extern "C" fn print_array(
+    rt: *mut Runtime,
+    stream: i64,
+    handle: i64,
+    kind: i64,
+    depth: i64,
+) -> i64 {
     let kind = qir::Elements::from_code(kind).expect("the lowering wrote this constant");
+    write_out(stream, shown(rt, handle, kind, depth).as_bytes());
+    0
+}
+
+/// What one array says, following handles as far down as it goes.
+fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> String {
     let elements = HEAP.with(|heap| heap.borrow()[handle as usize].clone());
     let parts: Vec<String> = elements
         .iter()
-        .map(|value| match kind {
-            qir::Elements::I64 => value.to_string(),
-            qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
-            qir::Elements::Text => {
-                format!("*{}*", String::from_utf8_lossy(piece_of(rt, *value)))
+        .map(|value| {
+            if depth > 0 {
+                return shown(rt, *value, kind, depth - 1);
             }
-            qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
+            match kind {
+                qir::Elements::I64 => value.to_string(),
+                qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
+                qir::Elements::Text => {
+                    format!("*{}*", String::from_utf8_lossy(piece_of(rt, *value)))
+                }
+                qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
+            }
         })
         .collect();
-    write_out(stream, qir::show_array(&parts).as_bytes());
-    0
+    qir::show_array(&parts)
 }
 
 /// Called by compiled code. Not called by anything else.
