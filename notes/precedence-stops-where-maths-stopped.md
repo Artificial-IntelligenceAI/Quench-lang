@@ -206,7 +206,7 @@ assigned.
 
 The first fix was `</==` — `<` less than, `/` or, `==` equal to — which composes
 properly and cost division its symbol, since `/` cannot mean *or* and *divide* in one
-expression. Division became `div` for about an hour.
+expression. Division became `div`, and was `div` for one commit.
 
 `</==` was answering the right question with the wrong separator. `/` was never *or*
 anywhere else in the language, and taking it for that cost division its symbol.

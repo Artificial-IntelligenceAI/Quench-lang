@@ -125,8 +125,8 @@ joining a name to something else builds a new value, and building one needs the
 collector
 ```
 
-It needs **allocation**, which exists — arrays and `e` have been allocating for
-weeks — not **collection**, which does not. A built piece of text leaks exactly like
+It needs **allocation**, which exists — arrays and `e` allocate already — not
+**collection**, which does not. A built piece of text leaks exactly like
 every array already does, which is stage one of the collector and the stage we are
 at. Same shape of mistake as the constant array that was "not built yet": an error
 promising a blocker that was not one.

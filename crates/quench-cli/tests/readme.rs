@@ -126,8 +126,8 @@ fn a_text_block_after_a_quench_one_is_what_that_program_says() {
 
 #[test]
 fn an_inline_snippet_that_is_a_whole_statement_is_one() {
-    // `var.mut.b16 ['x'] = [*1000*];` sat in the README for weeks after `b16` stopped
-    // being something the checker would take. This is the rule that catches that.
+    // `var.mut.b16 ['x'] = [*1000*];` sat in the README after `b16` stopped being
+    // something the checker would take. This is the rule that catches that.
     let mut checked = 0;
     for snippet in inline(&readme()) {
         let trimmed = snippet.trim();
