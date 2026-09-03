@@ -20,7 +20,7 @@ fn something() -> qir::Module {
     let called = b.call(twice, &[one], qir::Ty::I64);
     let text = b.const_text(hello);
     b.print(qir::Host::PrintText, qir::Stream::Out, text);
-    let half = b.const_float(0.5);
+    let half = b.const_float(0.5f64.to_bits(), qir::Ty::F64);
     let sum = b.bin(qir::BinOp::FAdd, half, half);
     let same = b.fcmp(qir::CmpOp::Eq, sum, half);
     let held = b.const_handle(0);
@@ -124,7 +124,7 @@ fn every_type_and_every_operation_makes_the_round_trip() {
     for op in [qir::CmpOp::Eq, qir::CmpOp::Ne, qir::CmpOp::Lt, qir::CmpOp::Le, qir::CmpOp::Gt, qir::CmpOp::Ge] {
         b.cmp(op, l, r);
     }
-    let f = b.const_float(1.5);
+    let f = b.const_float(1.5f64.to_bits(), qir::Ty::F64);
     for op in [
         qir::BinOp::FAdd, qir::BinOp::FSub, qir::BinOp::FMul, qir::BinOp::FDiv,
         qir::BinOp::FAddChecked, qir::BinOp::FSubChecked, qir::BinOp::FMulChecked, qir::BinOp::FDivChecked,

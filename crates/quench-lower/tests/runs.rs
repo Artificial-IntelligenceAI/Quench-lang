@@ -96,7 +96,7 @@ fn a_file_with_no_start_is_not_a_program() {
 fn the_parts_that_are_not_built_say_so_rather_than_failing_oddly() {
     let cases = [
         // A type Quench means to have and does not have yet.
-        ("START { print.stdout[b16:*1*]; }", "`b16` is not built yet"),
+        ("START { print.stdout[u8:*1*]; }", "`u8` is not built yet"),
         // A number is not text, and nothing converts on its own.
         ("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['b'] = [*x* 'n']; }", "text is made of text"),
     ];
@@ -1578,4 +1578,48 @@ START {
     assert_eq!(printed.out, "[[1 2]]", "the rows survived in the compiled engine too");
     let difference = arrays.abs_diff(kept.live.0);
     assert!(difference < 50, "interpreter {} against dev jit {arrays}", kept.live.0);
+}
+
+#[test]
+fn all_three_binary_widths_round_the_way_they_should() {
+    // The same source under three types, and the differences are the formats' own.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['d'] = [*0.1*];
+    var.immut.b32 ['s'] = [*0.1*];
+    var.immut.b16 ['h'] = [*0.1*];
+    print.stdout['d' str:* * 's' str:* * 'h'];
+}
+"),
+        "0.1 0.1 0.099975586",
+        "binary16 cannot hold a tenth and says which one it holds instead",
+    );
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['d'] = [*0.1* + *0.2*];
+    var.immut.b32 ['s'] = [*0.1* + *0.2*];
+    var.immut.b16 ['h'] = [*0.1* + *0.2*];
+    print.stdout['d' str:* * 's' str:* * 'h'];
+}
+"),
+        "0.30000000000000004 0.3 0.2998047",
+    );
+}
+
+#[test]
+fn a_b16_reaches_its_own_edges() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.b16 ['big'] = [*65504*];
+    var.immut.b16 ['over'] = [*65504* + *65504*];
+    var.immut.b16 ['tiny'] = [*0.00000006*];
+    print.stdout['big' str:* * 'over' str:* * 'tiny'];
+}
+"),
+        "65504.0 infinity 0.000000059604645",
+        "the largest binary16, what is past it, and the smallest subnormal",
+    );
 }

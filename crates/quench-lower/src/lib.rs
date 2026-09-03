@@ -158,7 +158,9 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
         Ty::Bool => qir::Ty::Bool,
         Ty::Str => qir::Ty::Text,
         Ty::Exact => qir::Ty::Exact,
-        Ty::Float => qir::Ty::Float,
+        Ty::F64 => qir::Ty::F64,
+        Ty::F32 => qir::Ty::F32,
+        Ty::F16 => qir::Ty::F16,
         Ty::Arr { .. } => qir::Ty::Handle,
     }
 }
@@ -277,7 +279,21 @@ fn lower_body(
                                 Ty::I64 => qir::Host::PrintI64,
                                 Ty::Bool => qir::Host::PrintBool,
                                 Ty::Exact => qir::Host::PrintExact,
-                                Ty::Float => qir::Host::PrintFloat,
+                                // All three arrive in the same register, so the
+                                // runtime is told which it is holding.
+                                Ty::F64 | Ty::F32 | Ty::F16 => {
+                                    let width = b.const_i64(match ty {
+                                        Ty::F16 => 16,
+                                        Ty::F32 => 32,
+                                        _ => 64,
+                                    });
+                                    let stream = b.const_i64(*to as i64);
+                                    b.call_host(
+                                        qir::Host::PrintFloat,
+                                        &[stream, value, width],
+                                    );
+                                    continue;
+                                }
                                 // An array is the one thing whose printing takes a
                                 // third argument, because a slot is an `i64` whatever
                                 // is in it and the runtime has to be told which.
@@ -563,7 +579,7 @@ fn elements(of: &Ty) -> (qir::Elements, i64) {
         Ty::Bool => (qir::Elements::Bool, 0),
         Ty::Str => (qir::Elements::Text, 0),
         Ty::Exact => (qir::Elements::Exact, 0),
-        Ty::Float => (qir::Elements::Float, 0),
+        Ty::F64 | Ty::F32 | Ty::F16 => (qir::Elements::Float, 0),
         Ty::Arr { of, .. } => {
             let (kind, depth) = elements(of);
             (kind, depth + 1)
@@ -624,7 +640,9 @@ fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qi
         // Never looked at, and so never read. Making one would mean calling into the
         // runtime for a number the checker has already promised nobody wants.
         qir::Ty::Exact => b.const_i64(0),
-        qir::Ty::Float => b.const_float(0.0),
+        qir::Ty::F64 => b.const_float(0f64.to_bits(), qir::Ty::F64),
+        qir::Ty::F32 => b.const_float(u64::from(0f32.to_bits()), qir::Ty::F32),
+        qir::Ty::F16 => b.const_float(u64::from(0f32.to_bits()), qir::Ty::F16),
     }
 }
 
@@ -671,7 +689,14 @@ fn emit(
             b.const_text(at)
         }
         Value::Number(n) => b.const_i64(*n),
-        Value::Float(bits) => b.const_float(f64::from_bits(*bits)),
+        Value::Float { bits, width } => {
+            let ty = match width {
+                16 => qir::Ty::F16,
+                32 => qir::Ty::F32,
+                _ => qir::Ty::F64,
+            };
+            b.const_float(*bits, ty)
+        }
         // Read by the runtime, from the text it was written with -- because what it
         // reads to does not fit in anything the IR can carry.
         Value::Exact(written) => {
@@ -816,17 +841,28 @@ fn emit(
             // IEEE, and nothing else. What a compiler could do to make two engines
             // differ — fuse a multiply into an add, keep extra precision, flush a
             // denormal to nought — it only does when asked, and nothing here asks.
-            if b.ty_of(l) == qir::Ty::Float {
+            if matches!(b.ty_of(l), qir::Ty::F64 | qir::Ty::F32 | qir::Ty::F16) {
+                let half = b.ty_of(l) == qir::Ty::F16;
                 let stops = w.settings.no_number == NoNumber::Stops;
+                // A `b16` is worked out in its carrier and put back afterwards. One
+                // `f32` operation rounded once to binary16 *is* binary16's own answer,
+                // which is why this is a rounding rather than an approximation.
+                let narrow = |b: &mut qir::Builder, v: qir::Value| {
+                    if !half {
+                        return v;
+                    }
+                    let ty = b.ty_of(v);
+                    b.call_host_giving(qir::Host::ToB16, &[v], ty)
+                };
                 return match op {
-                    OpKind::Add if stops => b.bin(qir::BinOp::FAddChecked, l, r),
-                    OpKind::Sub if stops => b.bin(qir::BinOp::FSubChecked, l, r),
-                    OpKind::Mul if stops => b.bin(qir::BinOp::FMulChecked, l, r),
-                    OpKind::Div if stops => b.bin(qir::BinOp::FDivChecked, l, r),
-                    OpKind::Add => b.bin(qir::BinOp::FAdd, l, r),
-                    OpKind::Sub => b.bin(qir::BinOp::FSub, l, r),
-                    OpKind::Mul => b.bin(qir::BinOp::FMul, l, r),
-                    OpKind::Div => b.bin(qir::BinOp::FDiv, l, r),
+                    OpKind::Add if stops => { let v = b.bin(qir::BinOp::FAddChecked, l, r); narrow(b, v) }
+                    OpKind::Sub if stops => { let v = b.bin(qir::BinOp::FSubChecked, l, r); narrow(b, v) }
+                    OpKind::Mul if stops => { let v = b.bin(qir::BinOp::FMulChecked, l, r); narrow(b, v) }
+                    OpKind::Div if stops => { let v = b.bin(qir::BinOp::FDivChecked, l, r); narrow(b, v) }
+                    OpKind::Add => { let v = b.bin(qir::BinOp::FAdd, l, r); narrow(b, v) }
+                    OpKind::Sub => { let v = b.bin(qir::BinOp::FSub, l, r); narrow(b, v) }
+                    OpKind::Mul => { let v = b.bin(qir::BinOp::FMul, l, r); narrow(b, v) }
+                    OpKind::Div => { let v = b.bin(qir::BinOp::FDiv, l, r); narrow(b, v) }
                     OpKind::Lt => b.fcmp(qir::CmpOp::Lt, l, r),
                     OpKind::Gt => b.fcmp(qir::CmpOp::Gt, l, r),
                     OpKind::Le => b.fcmp(qir::CmpOp::Le, l, r),

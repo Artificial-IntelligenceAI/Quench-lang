@@ -202,7 +202,7 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                             | BinOp::FAddChecked
                             | BinOp::FSubChecked
                             | BinOp::FMulChecked
-                            | BinOp::FDivChecked => Ty::Float,
+                            | BinOp::FDivChecked => func.ty_of(*lhs),
                             _ => Ty::I64,
                         };
                         for v in [lhs, rhs] {
@@ -217,9 +217,11 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                     }
                     Inst::FCmp { op, lhs, rhs } => {
                         for v in [lhs, rhs] {
-                            if known(*v, &mut say) && func.ty_of(*v) != Ty::Float {
+                            if known(*v, &mut say)
+                                && !matches!(func.ty_of(*v), Ty::F64 | Ty::F32 | Ty::F16)
+                            {
                                 say(format!(
-                                    "block {i}: {op:?} on floats wants b64 and {v:?} is {}",
+                                    "block {i}: {op:?} on floats wants a binary float and {v:?} is {}",
                                     func.ty_of(*v).name()
                                 ));
                             }
@@ -231,7 +233,10 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                         // because what they hold is not what their value is.
                         for v in [lhs, rhs] {
                             if known(*v, &mut say)
-                                && !matches!(func.ty_of(*v), Ty::I64 | Ty::Bool | Ty::Float)
+                                && !matches!(
+                                    func.ty_of(*v),
+                                    Ty::I64 | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16
+                                )
                             {
                                 say(format!(
                                     "block {i}: {op:?} wants i64, bool or b64 and {v:?} is {}",

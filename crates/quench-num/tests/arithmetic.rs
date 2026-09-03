@@ -215,3 +215,41 @@ impl PowForTest for Big {
         out
     }
 }
+
+#[test]
+fn every_binary16_survives_the_carrier() {
+    // A `b16` lives in an `f32` holding a value binary16 can represent. If any of the
+    // 65,536 did not come back as itself, that carrier would be a lie.
+    let mut wrong = 0;
+    for bits in 0u32..=0xffff {
+        let h = bits as u16;
+        let carried = quench_num::from_b16_bits(h);
+        if carried.is_nan() {
+            continue;
+        }
+        if quench_num::to_b16_bits(carried) != h {
+            wrong += 1;
+        }
+    }
+    assert_eq!(wrong, 0, "of 65536");
+}
+
+#[test]
+fn rounding_to_binary16_picks_the_nearest_and_ties_to_even() {
+    // A handful by hand, since the exhaustive check against a search lives in
+    // `cargo run -p quench-num --example rounding`.
+    let cases = [
+        (0.1f32, 0.099975586f32),
+        (65504.0, 65504.0),
+        (65520.0, f32::INFINITY),
+        (65519.0, 65504.0),
+        (1.0 / 3.0, 0.33325195),
+        (5.96046448e-8, 5.9604645e-8),
+        (2.9802322e-8, 0.0),
+        (-2.9802322e-8, -0.0),
+    ];
+    for (x, want) in cases {
+        let got = quench_num::to_b16(x);
+        assert_eq!(got.to_bits(), want.to_bits(), "{x:e} rounded to {got:e}, wanted {want:e}");
+    }
+}

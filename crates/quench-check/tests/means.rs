@@ -43,7 +43,7 @@ START {
 fn a_type_that_is_not_built_does_not_hide_a_name_declared_twice() {
     // Two separate mistakes on one line, and both get said. Reporting only the type
     // would leave the reader to discover the collision on their own after fixing it.
-    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.b16 ['x'] = [*1*]; }";
+    let source = "START { var.immut.str ['x'] = [*a*]; var.immut.u8 ['x'] = [*1*]; }";
     let found = codes(source);
     assert!(found.contains(&"E0405".to_string()), "{}", errors(source));
     assert!(found.contains(&"E0201".to_string()), "{}", errors(source));
@@ -88,10 +88,10 @@ fn a_name_that_is_nothing_like_anything_is_not_guessed_at() {
 
 #[test]
 fn a_type_that_is_meant_to_exist_and_a_type_that_is_not_are_different_errors() {
-    // `b16` is a type Quench means to have. `b17` is a typo. A reader deserves to know
+    // `u8` is a type Quench means to have. `b17` is a typo. A reader deserves to know
     // which of those happened.
-    let not_built = errors("START { var.immut.b16 ['x'] = [*1*]; }");
-    assert!(not_built.contains("`b16` is not built yet"), "{not_built}");
+    let not_built = errors("START { var.immut.u8 ['x'] = [*1*]; }");
+    assert!(not_built.contains("`u8` is not built yet"), "{not_built}");
     assert!(not_built.contains("Error code: E0405"), "{not_built}");
 
     let nonsense = errors("START { var.immut.b17 ['x'] = [*1*]; }");

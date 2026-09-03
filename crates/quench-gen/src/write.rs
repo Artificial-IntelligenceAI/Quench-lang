@@ -98,9 +98,31 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
     ];
     let mut flags: Vec<Value> = Vec::new();
 
+    // One binary width per program, so a seed sweeps all three rather than mixing them
+    // in a way no source could. Floats compare by their *bits* in the oracle, which is
+    // a sharper check than the rest of it gets: a fused multiply-add or a flushed
+    // denormal is a different bit pattern, not a different-looking number.
+    let (float_ty, half) = match rng.upto(3) {
+        0 => (Ty::F64, false),
+        1 => (Ty::F32, false),
+        _ => (Ty::F16, true),
+    };
+    let carrier = |x: f64| -> u64 {
+        match float_ty {
+            Ty::F64 => x.to_bits(),
+            _ => u64::from(quench_num::to_b16_or_f32(x as f32, half).to_bits()),
+        }
+    };
+    let mut floats: Vec<Value> = vec![
+        b.const_float(carrier(0.5), float_ty),
+        b.const_float(carrier(rng.upto(1000) as f64 - 500.0), float_ty),
+        b.const_float(carrier(0.0), float_ty),
+        b.const_float(carrier(-1.0), float_ty),
+    ];
+
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(10) {
+        match rng.upto(11) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -193,6 +215,39 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                     _ => CmpOp::Ge,
                 };
                 flags.push(b.cmp(op, lhs, rhs));
+            }
+            9 => {
+                // Plain IEEE, and the narrow one put back in its own set afterwards.
+                let (lhs, rhs) = (rng.pick(&floats), rng.pick(&floats));
+                let stops = settings.no_number == quench_conf::NoNumber::Stops;
+                let op = match (rng.upto(4), stops) {
+                    (0, false) => BinOp::FAdd,
+                    (1, false) => BinOp::FSub,
+                    (2, false) => BinOp::FMul,
+                    (_, false) => BinOp::FDiv,
+                    (0, true) => BinOp::FAddChecked,
+                    (1, true) => BinOp::FSubChecked,
+                    (2, true) => BinOp::FMulChecked,
+                    (_, true) => BinOp::FDivChecked,
+                };
+                let mut value = b.bin(op, lhs, rhs);
+                if half {
+                    value = b.call_host_giving(Host::ToB16, &[value], float_ty);
+                }
+                floats.push(value);
+                // And a comparison, so a float can reach the answer: a program hands
+                // back an `i64`, and a flag is how the two meet.
+                if rng.upto(3) == 0 {
+                    let how = match rng.upto(6) {
+                        0 => CmpOp::Eq,
+                        1 => CmpOp::Ne,
+                        2 => CmpOp::Lt,
+                        3 => CmpOp::Le,
+                        4 => CmpOp::Gt,
+                        _ => CmpOp::Ge,
+                    };
+                    flags.push(b.fcmp(how, lhs, rhs));
+                }
             }
             7 => {
                 let Some(&flag) = flags.last() else { continue };

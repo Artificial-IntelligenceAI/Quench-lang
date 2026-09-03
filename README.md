@@ -178,13 +178,16 @@ Both print the same thing, which is not a coincidence — it is
   may not be known until the program runs. Nothing converts on its own, so a number
   among them is an error: `print` shows any type because showing is not joining, and
   writes one piece after another rather than making one.
-- **`b64` is IEEE 754 and nothing else.** `+ − x /` and the comparisons, which the
+- **`b64`, `b32` and `b16` are IEEE 754 and nothing else.** `+ − x /` and the comparisons, which the
   standard fully specifies — so every engine gives the same bits. What would break that
   is what a compiler does only when asked: fusing a multiply into an add, keeping extra
   precision, flushing denormals. **Fast-math is not a setting and will not become one.**
   `^` and `mod` are refused, because no standard requires a `pow` to round the same way
   twice. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
-  or stops. See
+  or stops. A `b16` is **carried in a `b32`** — no machine Quench targets has a half —
+  and gives binary16's own answers anyway, because one wider operation rounded once to
+  binary16 *is* the correctly-rounded binary16 answer when the carrier has `2p + 2`
+  bits, and `f32` has exactly the 24 that binary16's 11 asks for. See
   [notes/what-a-float-is-allowed-to-do.md](notes/what-a-float-is-allowed-to-do.md).
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
@@ -277,7 +280,7 @@ Both print the same thing, which is not a coincidence — it is
 
 | | |
 | --- | --- |
-| `b16` `b32` `b64` | IEEE 754 binary. `b64` is the widest for now — no `b128`, no `b256` |
+| `b16` `b32` `b64` | IEEE 754 binary, all three built. `b64` is the widest — no `b128`, no `b256` |
 | `d32` `d64` | IEEE 754 decimal |
 | `u8` `u16` `u32` `u64` | unsigned integers, two's complement |
 | `i8` `i16` `i32` `i64` | signed integers, two's complement |

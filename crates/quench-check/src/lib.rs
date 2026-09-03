@@ -23,8 +23,12 @@ pub enum Ty {
     I64,
     Str,
     Bool,
-    /// `b64` — IEEE 754 binary64.
-    Float,
+    /// IEEE 754 binary64, binary32 and binary16.
+    F64,
+    F32,
+    /// Carried in a `b32` holding a value binary16 can represent, and put back in that
+    /// set after every operation. See `notes/what-a-float-is-allowed-to-do.md`.
+    F16,
     /// `e` — a number held exactly, however large it grows.
     ///
     /// Not a size. Every other number type in Quench says how many bits it has, and
@@ -52,7 +56,9 @@ impl Ty {
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
             Ty::Exact => "e".to_string(),
-            Ty::Float => "b64".to_string(),
+            Ty::F64 => "b64".to_string(),
+            Ty::F32 => "b32".to_string(),
+            Ty::F16 => "b16".to_string(),
             // Named the way it was written: every `arr` link, then every size in one
             // pair of brackets, outside in. Which is also the order they were read in.
             Ty::Arr { .. } => {
@@ -78,7 +84,7 @@ impl Ty {
     pub fn article(&self) -> &'static str {
         match self {
             Ty::I64 | Ty::Arr { .. } | Ty::Exact => "an",
-            Ty::Str | Ty::Bool | Ty::Float => "a",
+            Ty::Str | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16 => "a",
         }
     }
 
@@ -113,7 +119,9 @@ impl Ty {
             "str" => Some(Ty::Str),
             "bool" => Some(Ty::Bool),
             "e" => Some(Ty::Exact),
-            "b64" => Some(Ty::Float),
+            "b64" => Some(Ty::F64),
+            "b32" => Some(Ty::F32),
+            "b16" => Some(Ty::F16),
             _ => None,
         }
     }
@@ -218,8 +226,10 @@ pub enum Value {
     Text(String),
     Number(i64),
     Bool(bool),
-    /// A `b64`, kept as its bits so that a checked tree compares like everything else.
-    Float(u64),
+    /// A binary float, kept as its bits so that a checked tree compares like everything
+    /// else in it — a float does not — and carrying which of the three it is, since all
+    /// three arrive here written the same way.
+    Float { bits: u64, width: u8 },
     /// An `e`, kept as the text it was written with. Reading it is the runtime's job,
     /// because the answer does not fit in anything the IR can carry.
     Exact(String),
@@ -890,6 +900,45 @@ impl<'a> Checker<'a> {
         Some(Ty::Arr { of: Box::new(of), shape: fixed, grows })
     }
 
+    /// A written value read as one of the three binary floats.
+    ///
+    /// `b16` is rounded to the nearest binary16 here as well as after every operation:
+    /// a literal that binary16 cannot hold is the nearest one it can, which is what
+    /// writing it in that type asked for.
+    fn a_float(&mut self, written: &str, ty: &Ty, at: Span) -> Option<Value> {
+        let width = match ty {
+            Ty::F16 => 16u8,
+            Ty::F32 => 32,
+            _ => 64,
+        };
+        let read = match width {
+            64 => written.parse::<f64>().ok().filter(|x| x.is_finite()).map(f64::to_bits),
+            32 => written
+                .parse::<f32>()
+                .ok()
+                .filter(|x| x.is_finite())
+                .map(|x| u64::from(x.to_bits())),
+            _ => written
+                .parse::<f32>()
+                .ok()
+                .filter(|x| x.is_finite())
+                .map(|x| u64::from(quench_num::to_b16(x).to_bits())),
+        };
+        match read {
+            Some(bits) => Some(Value::Float { bits, width }),
+            None => {
+                self.errors.push(
+                    Diagnostic::new("E0486", format!("`{written}` is not a `{}`.", ty.name()))
+                        .primary(at, "here")
+                        .rule("a binary float is written as a number with or without a point: `*1.5*`, `*-0.25*`, `*3*`")
+                        .tip("`infinity` and `not-a-number` are answers a program can reach, and not things it can write.")
+                        .fix("write a number"),
+                );
+                None
+            }
+        }
+    }
+
     /// One type link, understood or honestly refused.
     fn a_type(&mut self, link: Span) -> Option<Ty> {
         let word = self.text(link);
@@ -1261,7 +1310,9 @@ impl<'a> Checker<'a> {
         // `*1000*` a number under `i64` and four characters under `str`.
         let outer = std::mem::replace(&mut self.reading, match ty {
             Ty::Exact => Ty::Exact,
-            Ty::Float => Ty::Float,
+            Ty::F64 => Ty::F64,
+            Ty::F32 => Ty::F32,
+            Ty::F16 => Ty::F16,
             _ => Ty::I64,
         });
         let built = self.tree(value);
@@ -1327,30 +1378,18 @@ impl<'a> Checker<'a> {
 
         match ty {
             Ty::Arr { .. } => unreachable!("handled above"),
-            // `*1.5*`, `*-0.25*`, `*3*`. A decimal point here is the nearest `b64` to
-            // what was written, which is what a binary float is and why `e` exists.
-            Ty::Float => match value.terms.as_slice() {
+            // `*1.5*`, `*-0.25*`, `*3*`. A decimal point here is the nearest value of
+            // this width to what was written, which is what a binary float is and why
+            // `e` exists.
+            Ty::F64 | Ty::F32 | Ty::F16 => match value.terms.as_slice() {
                 [ast::Term::Piece(ast::Piece::Written { ty: None, mark })] => {
-                    let written = unmarked(self.text(*mark));
-                    match written.parse::<f64>() {
-                        Ok(x) if x.is_finite() => Some(Value::Float(x.to_bits())),
-                        _ => {
-                            self.errors.push(
-                                Diagnostic::new("E0486", format!("`{written}` is not a `b64`."))
-                                    .primary(*mark, "here")
-                                    .rule("a `b64` is written as a number with or without a point: `*1.5*`, `*-0.25*`, `*3*`")
-                                    .tip("`infinity` and `not-a-number` are answers a program can reach, and not things it can write.")
-                                    .fix("write a number"),
-                            );
-                            None
-                        }
-                    }
+                    self.a_float(&unmarked(self.text(*mark)), ty, *mark)
                 }
                 _ => {
                     self.errors.push(
-                        Diagnostic::new("E0487", "a `b64` is one written value, not several.")
+                        Diagnostic::new("E0487", format!("a `{}` is one written value, not several.", ty.name()))
                             .primary(value.span, "here")
-                            .secondary(ty_span, "declared `b64` here")
+                            .secondary(ty_span, format!("declared `{}` here", ty.name()))
                             .rule("pieces side by side build text; a number is written once")
                             .fix("write it as one value, or put an operator between them"),
                     );
@@ -1935,19 +1974,9 @@ impl<'a> Checker<'a> {
             }
             ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
                 let digits = unmarked(self.text(*mark));
-                if self.reading == Ty::Float {
-                    return match digits.parse::<f64>() {
-                        Ok(x) if x.is_finite() => Some(Value::Float(x.to_bits())),
-                        _ => {
-                            self.errors.push(
-                                Diagnostic::new("E0486", format!("`{digits}` is not a `b64`."))
-                                    .primary(*mark, "here")
-                                    .rule("a `b64` is written as a number with or without a point: `*1.5*`, `*-0.25*`, `*3*`")
-                                    .fix("write a number"),
-                            );
-                            None
-                        }
-                    };
+                if matches!(self.reading, Ty::F64 | Ty::F32 | Ty::F16) {
+                    let reading = self.reading.clone();
+                    return self.a_float(&digits, &reading, *mark);
                 }
                 if self.reading == Ty::Exact {
                     return match quench_num::Exact::parse(&digits) {
@@ -2011,18 +2040,9 @@ impl<'a> Checker<'a> {
                             None
                         }
                     },
-                    Some(Ty::Float) => match digits.parse::<f64>() {
-                        Ok(x) if x.is_finite() => Some(Value::Float(x.to_bits())),
-                        _ => {
-                            self.errors.push(
-                                Diagnostic::new("E0486", format!("`{digits}` is not a `b64`."))
-                                    .primary(*mark, "here")
-                                    .rule("a `b64` is written as a number with or without a point")
-                                    .fix("write a number"),
-                            );
-                            None
-                        }
-                    },
+                    Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
+                        self.a_float(&digits, &ty, *mark)
+                    }
                     Some(Ty::Str) => Some(Value::Text(digits)),
                     Some(Ty::Bool) => match digits.as_str() {
                         "true" => Some(Value::Bool(true)),
@@ -2086,7 +2106,11 @@ impl<'a> Checker<'a> {
             Value::Text(_) => Some(Ty::Str),
             Value::Number(_) => Some(Ty::I64),
             Value::Exact(_) => Some(Ty::Exact),
-            Value::Float(_) => Some(Ty::Float),
+            Value::Float { width, .. } => Some(match width {
+                16 => Ty::F16,
+                32 => Ty::F32,
+                _ => Ty::F64,
+            }),
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array { .. } => None,
@@ -2134,7 +2158,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
-                if l != r || !matches!(l, Ty::I64 | Ty::Exact | Ty::Float) {
+                if l != r || !matches!(l, Ty::I64 | Ty::Exact | Ty::F64 | Ty::F32 | Ty::F16) {
                     self.errors.push(
                         Diagnostic::new("E0420", format!("`{}` works on numbers.", op.written()))
                             .primary(span, format!("{} `{}` and {} `{}`", l.article(), l.name(), r.article(), r.name()))
@@ -2148,9 +2172,9 @@ impl<'a> Checker<'a> {
                 // `^` on a float is `pow`, which no standard requires to be rounded
                 // the same way twice — so it is one of the two things a differential
                 // oracle actually has to worry about, and it waits for the answer.
-                if l == Ty::Float && matches!(op, OpKind::Pow | OpKind::Mod) {
+                if matches!(l, Ty::F64 | Ty::F32 | Ty::F16) && matches!(op, OpKind::Pow | OpKind::Mod) {
                     self.errors.push(
-                        Diagnostic::new("E0488", format!("`{}` on a `b64` is not built yet.", op.written()))
+                        Diagnostic::new("E0488", format!("`{}` on a `{}` is not built yet.", op.written(), l.name()))
                             .primary(span, "here")
                             .rule("`+`, `-`, `x`, `/` and the comparisons are settled by IEEE 754 and give the same bits everywhere; nothing else about floats is")
                             .tip("that is why they are what `b64` has: an answer every engine must agree on has to be one somebody specified.")
@@ -2777,19 +2801,10 @@ impl<'a> Checker<'a> {
                     let word = self.text(*span);
                     match Ty::simple(word) {
                         Some(Ty::Arr { .. }) => unreachable!("`arr` is not a simple type"),
-                        Some(Ty::Float) => {
+                        Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
                             let written = unmarked(self.text(*mark));
-                            match written.parse::<f64>() {
-                                Ok(x) if x.is_finite() => pieces.push(Printed::Value {
-                                    value: Value::Float(x.to_bits()),
-                                    ty: Ty::Float,
-                                }),
-                                _ => self.errors.push(
-                                    Diagnostic::new("E0486", format!("`{written}` is not a `b64`."))
-                                        .primary(*mark, "here")
-                                        .rule("a `b64` is written as a number with or without a point")
-                                        .fix("write a number"),
-                                ),
+                            if let Some(value) = self.a_float(&written, &ty, *mark) {
+                                pieces.push(Printed::Value { value, ty });
                             }
                         }
                         Some(Ty::Exact) => {

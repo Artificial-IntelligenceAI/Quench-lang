@@ -365,6 +365,7 @@ dependencies = [
  "quench-conf",
  "quench-dev",
  "quench-interp",
+ "quench-num",
  "quench-qir",
 ]
 

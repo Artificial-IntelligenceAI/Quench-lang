@@ -323,7 +323,10 @@ fn clif_ty(ty: qir::Ty) -> types::Type {
         // A handle into the heap, which is an index and so an integer as well. The
         // generated code never dereferences one; it hands it back to the runtime.
         qir::Ty::Handle | qir::Ty::Exact => types::I64,
-        qir::Ty::Float => types::F64,
+        qir::Ty::F64 => types::F64,
+        // A `b16` is carried in an `f32`, because there is no half to put in a
+        // register and the carrier gives binary16's own answers anyway.
+        qir::Ty::F32 | qir::Ty::F16 => types::F32,
     }
 }
 
@@ -574,9 +577,18 @@ extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_float(_rt: *mut Runtime, stream: i64, bits: i64) -> i64 {
-    write_out(stream, quench_num::show_f64(f64::from_bits(bits as u64)).as_bytes());
+extern "C" fn print_float(_rt: *mut Runtime, stream: i64, bits: i64, width: i64) -> i64 {
+    let shown = match width {
+        64 => quench_num::show_f64(f64::from_bits(bits as u64)),
+        _ => quench_num::show_f32(f32::from_bits(bits as u32)),
+    };
+    write_out(stream, shown.as_bytes());
     0
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn to_b16(_rt: *mut Runtime, bits: i64) -> i64 {
+    i64::from(quench_num::to_b16(f32::from_bits(bits as u32)).to_bits())
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -856,6 +868,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_exact_compare", exact_compare as *const u8);
     builder.symbol("quench_print_exact", print_exact as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
+    builder.symbol("quench_to_b16", to_b16 as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
     builder.symbol("quench_text_join", text_join as *const u8);
     builder.symbol("quench_exact_pow", exact_pow as *const u8);
@@ -918,6 +931,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::ExactCompare, "quench_exact_compare"),
         (qir::Host::PrintExact, "quench_print_exact"),
         (qir::Host::PrintFloat, "quench_print_float"),
+        (qir::Host::ToB16, "quench_to_b16"),
         (qir::Host::TextCompare, "quench_text_compare"),
         (qir::Host::TextJoin, "quench_text_join"),
         (qir::Host::ExactPow, "quench_exact_pow"),
@@ -1071,7 +1085,13 @@ fn lower(
                 qir::Inst::ConstText(at) | qir::Inst::ConstHandle(at) => {
                     b.ins().iconst(types::I64, i64::from(*at))
                 }
-                qir::Inst::ConstFloat(bits) => b.ins().f64const(f64::from_bits(*bits)),
+                qir::Inst::ConstFloat(bits) => {
+                    if func.ty_of(*result) == qir::Ty::F64 {
+                        b.ins().f64const(f64::from_bits(*bits))
+                    } else {
+                        b.ins().f32const(f32::from_bits(*bits as u32))
+                    }
+                }
                 qir::Inst::CallHost { host, args } => {
                     let which = hosts
                         .iter()
@@ -1094,11 +1114,19 @@ fn lower(
                             // The bits, not the value — the runtime takes an integer
                             // and a `b64` lives in a float register. Native order,
                             // because both ends of this call are the same machine.
-                            qir::Ty::Float => b.ins().bitcast(
-                                types::I64,
-                                MemFlagsData::new().with_endianness(native_order()),
-                                value,
-                            ),
+                            // A float's bits move into an integer register, and the
+                            // narrow ones are widened after the cast rather than during
+                            // it: a bitcast is a reinterpretation and not a resize.
+                            ty @ (qir::Ty::F64 | qir::Ty::F32 | qir::Ty::F16) => {
+                                let order =
+                                    MemFlagsData::new().with_endianness(native_order());
+                                if ty == qir::Ty::F64 {
+                                    b.ins().bitcast(types::I64, order, value)
+                                } else {
+                                    let narrow = b.ins().bitcast(types::I32, order, value);
+                                    b.ins().uextend(types::I64, narrow)
+                                }
+                            }
                             _ => value,
                         });
                     }
@@ -1106,8 +1134,23 @@ fn lower(
                     let mut answer = b.inst_results(call)[0];
                     // And narrowed on the way back, for the same reason: the runtime
                     // answers in an i64 and a bool lives in an i8 here.
-                    if func.ty_of(*result) == qir::Ty::Bool {
-                        answer = b.ins().ireduce(types::I8, answer);
+                    match func.ty_of(*result) {
+                        qir::Ty::Bool => answer = b.ins().ireduce(types::I8, answer),
+                        // A float comes back in an integer register too, and goes back
+                        // into a float one the same way it left.
+                        ty @ (qir::Ty::F64 | qir::Ty::F32 | qir::Ty::F16) => {
+                            let narrow = if ty == qir::Ty::F64 {
+                                answer
+                            } else {
+                                b.ins().ireduce(types::I32, answer)
+                            };
+                            answer = b.ins().bitcast(
+                                clif_ty(ty),
+                                MemFlagsData::new().with_endianness(native_order()),
+                                narrow,
+                            );
+                        }
+                        _ => {}
                     }
                     if host.can_stop() {
                         // A load and a branch, which is what a baked-in runtime address
@@ -1143,7 +1186,14 @@ fn lower(
                             // but the plain way is to ask whether it is finite.
                             let fits = b.create_block();
                             let does_not = b.create_block();
-                            let big = b.ins().f64const(f64::INFINITY);
+                            // The comparison has to be in the answer's own width; an
+                            // `f32` against an `f64` infinity is not a wrong answer,
+                            // it is not a program.
+                            let big = if func.ty_of(*result) == qir::Ty::F64 {
+                                b.ins().f64const(f64::INFINITY)
+                            } else {
+                                b.ins().f32const(f32::INFINITY)
+                            };
                             let magnitude = b.ins().fabs(answer);
                             let finite = b.ins().fcmp(FloatCC::LessThan, magnitude, big);
                             b.ins().brif(finite, fits, &[], does_not, &[]);

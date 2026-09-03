@@ -122,8 +122,12 @@ impl Builder {
         self.push(Inst::ConstHandle(at), Ty::Handle)
     }
 
-    pub fn const_float(&mut self, x: f64) -> Value {
-        self.push(Inst::ConstFloat(x.to_bits()), Ty::Float)
+    /// A binary float of the width given, carried as its bits.
+    ///
+    /// A `b16`'s bits are its carrier's — an `f32` holding a value binary16 can
+    /// represent — because there is no half to put in a register.
+    pub fn const_float(&mut self, bits: u64, ty: Ty) -> Value {
+        self.push(Inst::ConstFloat(bits), ty)
     }
 
     pub fn fcmp(&mut self, op: CmpOp, lhs: Value, rhs: Value) -> Value {
@@ -152,6 +156,8 @@ impl Builder {
         // in QIR where one instruction wears two types.
         let ty = match op {
             BinOp::And | BinOp::Or => Ty::Bool,
+            // A float operation answers with whatever it was given, which is what
+            // lets one set of operations serve all three widths.
             BinOp::FAdd
             | BinOp::FSub
             | BinOp::FMul
@@ -159,7 +165,7 @@ impl Builder {
             | BinOp::FAddChecked
             | BinOp::FSubChecked
             | BinOp::FMulChecked
-            | BinOp::FDivChecked => Ty::Float,
+            | BinOp::FDivChecked => self.ty_of(lhs),
             _ => Ty::I64,
         };
         self.push(Inst::Bin { op, lhs, rhs }, ty)

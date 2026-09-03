@@ -138,14 +138,23 @@ pub enum Ty {
     /// A handle, not a pointer — the same reason [`Ty::Text`] is an index. What a handle
     /// *is* belongs to whichever runtime is holding the heap.
     Handle,
-    /// IEEE 754 binary64. A `b64`.
+    /// IEEE 754 binary64, binary32 and binary16 — `b64`, `b32` and `b16`.
     ///
-    /// The only type here whose arithmetic is a *standard* rather than a decision:
+    /// The only types here whose arithmetic is a *standard* rather than a decision:
     /// `+ - x /` and the comparisons are fully specified under round-to-nearest-even,
     /// so every conforming machine gives the same bits. What is not specified — fusing
     /// a multiply into an add, keeping extra precision, flushing denormals — is what a
     /// compiler does only when asked, and nothing here asks.
-    Float,
+    ///
+    /// A `b16` is *carried* in an `F32` register holding a value binary16 can represent
+    /// exactly, because neither Rust nor every Cranelift backend has a half. What makes
+    /// that give binary16's own answers rather than an approximation of them is that a
+    /// single `f32` operation rounded once to binary16 **is** the correctly-rounded
+    /// binary16 answer — which needs the wider format to carry at least `2p + 2` bits,
+    /// and binary16 has `p = 11` while `f32` has exactly 24.
+    F64,
+    F32,
+    F16,
     /// A number held exactly, however large it grows. An `e`.
     ///
     /// A handle like [`Ty::Handle`] is, and for the same reason: what an exact number
@@ -171,7 +180,9 @@ impl Ty {
             Ty::Text => "text",
             Ty::Handle => "handle",
             Ty::Exact => "exact",
-            Ty::Float => "b64",
+            Ty::F64 => "b64",
+            Ty::F32 => "b32",
+            Ty::F16 => "b16",
         }
     }
 }
@@ -364,9 +375,15 @@ pub enum Host {
     TextCompare,
     /// `(stream, exact)` — a whole number wears no denominator.
     PrintExact,
-    /// `(stream, b64)` — the shortest text that reads back as the same bits, always
-    /// with a point in it.
+    /// `(stream, float, width)` — the shortest text that reads back as the same bits,
+    /// always with a point in it. The width says which binary format it is, since all
+    /// three arrive here in the same register.
     PrintFloat,
+    /// `(b32)` — the nearest binary16 to it, back in a `F32`.
+    ///
+    /// One implementation for every engine, because this is the whole of what makes a
+    /// `b16` a `b16` rather than a narrow-ish `b32`.
+    ToB16,
     /// `(base, exponent)` — exactly. A negative exponent is fine and gives a ratio.
     /// Can stop, on a fractional exponent or one too large to finish.
     ExactPow,
@@ -402,6 +419,7 @@ impl Host {
             Host::TextCompare => "text-compare",
             Host::PrintExact => "print-exact",
             Host::PrintFloat => "print-float",
+            Host::ToB16 => "to-b16",
             Host::ExactPow => "exact-pow",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
@@ -432,22 +450,27 @@ impl Host {
             Host::TextJoin => &[Ty::Text, Ty::Text],
             Host::TextCompare => &[Ty::Text, Ty::Text],
             Host::PrintExact => &[Ty::I64, Ty::Exact],
-            Host::PrintFloat => &[Ty::I64, Ty::Float],
+            Host::PrintFloat => &[Ty::I64, Ty::F64, Ty::I64],
+            Host::ToB16 => &[Ty::F32],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
     }
 
-    /// Which parameter is *whatever the array holds*, rather than a type fixed here.
+    /// Which parameter is *whatever it was handed*, rather than a type fixed here.
     ///
-    /// A slot is an `i64` however wide the thing in it is, so no runtime ever needs
-    /// telling. The IR does, because a value coming back out of one has to have a type
-    /// before anything can use it — which is why [`Host::ArrayGet`] is asked for its
-    /// answer's type at the point it is called.
+    /// Two kinds of thing are polymorphic. An array's slot is an `i64` however wide
+    /// what is in it, so no runtime needs telling — but the IR does, because a value
+    /// coming out of one needs a type before anything can use it, which is why
+    /// [`Host::ArrayGet`] is asked for its answer's type where it is called. And a
+    /// binary float arrives in the same register whichever of the three it is, so the
+    /// ones that take a float take any of them.
     pub fn takes_an_element(self) -> Option<usize> {
         match self {
             Host::ArraySet => Some(2),
             Host::ArrayPush => Some(1),
+            Host::PrintFloat => Some(1),
+            Host::ToB16 => Some(0),
             _ => None,
         }
     }
@@ -474,6 +497,7 @@ impl Host {
             Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
             Host::ArrayEqual => Ty::Bool,
             Host::TextJoin => Ty::Text,
+            Host::ToB16 => Ty::F32,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub

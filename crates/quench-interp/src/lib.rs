@@ -323,7 +323,7 @@ fn walk_with(
                 calling = Some((*callee, given));
                 break;
             }
-            let value = evaluate(inst, &stack[top].slots, module, writing, heap)?;
+            let value = evaluate(inst, &stack[top].slots, module, module.func(stack[top].func), writing, heap)?;
             stack[top].slots[result.0 as usize] = value;
         }
         stack[top].at = at;
@@ -380,6 +380,7 @@ fn evaluate(
     inst: &qir::Inst,
     slots: &[i64],
     _module: &qir::Module,
+    func: &qir::Function,
     writing: &mut Writing<'_>,
     heap: &mut Heap,
 ) -> Result<i64, Trap> {
@@ -529,9 +530,16 @@ fn evaluate(
                     });
                 }
                 qir::Host::PrintFloat => {
-                    let value = f64::from_bits(slots[args[1].0 as usize] as u64);
-                    let shown = quench_num::show_f64(value);
+                    let bits = slots[args[1].0 as usize];
+                    let shown = match slots[args[2].0 as usize] {
+                        64 => quench_num::show_f64(f64::from_bits(bits as u64)),
+                        _ => quench_num::show_f32(f32::from_bits(bits as u32)),
+                    };
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
+                }
+                qir::Host::ToB16 => {
+                    let x = f32::from_bits(slots[args[0].0 as usize] as u32);
+                    return Ok(i64::from(quench_num::to_b16(x).to_bits()));
                 }
                 qir::Host::PrintExact => {
                     let value = heap.exactly(slots[args[1].0 as usize]);
@@ -575,17 +583,35 @@ fn evaluate(
                 | qir::BinOp::FSubChecked
                 | qir::BinOp::FMulChecked
                 | qir::BinOp::FDivChecked => {
-                    let (a, b) = (f64::from_bits(l as u64), f64::from_bits(r as u64));
-                    let answer = match op {
-                        qir::BinOp::FAdd | qir::BinOp::FAddChecked => a + b,
-                        qir::BinOp::FSub | qir::BinOp::FSubChecked => a - b,
-                        qir::BinOp::FMul | qir::BinOp::FMulChecked => a * b,
-                        _ => a / b,
-                    };
-                    if op.checks_the_answer() && !answer.is_finite() {
-                        return Err(Trap::NoNumber);
+                    // Which width it is comes from QIR, which says what every value in
+                    // a function is. A `b32` and a `b64` are otherwise the same bits in
+                    // the same slot, and reading one as the other is nonsense rather
+                    // than an approximation.
+                    if func.ty_of(*lhs) == qir::Ty::F64 {
+                        let (a, b) = (f64::from_bits(l as u64), f64::from_bits(r as u64));
+                        let answer = match op {
+                            qir::BinOp::FAdd | qir::BinOp::FAddChecked => a + b,
+                            qir::BinOp::FSub | qir::BinOp::FSubChecked => a - b,
+                            qir::BinOp::FMul | qir::BinOp::FMulChecked => a * b,
+                            _ => a / b,
+                        };
+                        if op.checks_the_answer() && !answer.is_finite() {
+                            return Err(Trap::NoNumber);
+                        }
+                        answer.to_bits() as i64
+                    } else {
+                        let (a, b) = (f32::from_bits(l as u32), f32::from_bits(r as u32));
+                        let answer = match op {
+                            qir::BinOp::FAdd | qir::BinOp::FAddChecked => a + b,
+                            qir::BinOp::FSub | qir::BinOp::FSubChecked => a - b,
+                            qir::BinOp::FMul | qir::BinOp::FMulChecked => a * b,
+                            _ => a / b,
+                        };
+                        if op.checks_the_answer() && !answer.is_finite() {
+                            return Err(Trap::NoNumber);
+                        }
+                        i64::from(answer.to_bits())
                     }
-                    answer.to_bits() as i64
                 }
                 qir::BinOp::And => i64::from(l != 0 && r != 0),
                 qir::BinOp::Or => i64::from(l != 0 || r != 0),
@@ -629,10 +655,18 @@ fn evaluate(
         // Rust's own `f64` comparisons are IEEE's, including a not-a-number being
         // false against everything and itself.
         qir::Inst::FCmp { op, lhs, rhs } => {
-            let (l, r) = (
-                f64::from_bits(slots[lhs.0 as usize] as u64),
-                f64::from_bits(slots[rhs.0 as usize] as u64),
-            );
+            let wide = func.ty_of(*lhs) == qir::Ty::F64;
+            let (l, r) = if wide {
+                (
+                    f64::from_bits(slots[lhs.0 as usize] as u64),
+                    f64::from_bits(slots[rhs.0 as usize] as u64),
+                )
+            } else {
+                (
+                    f64::from(f32::from_bits(slots[lhs.0 as usize] as u32)),
+                    f64::from(f32::from_bits(slots[rhs.0 as usize] as u32)),
+                )
+            };
             i64::from(match op {
                 qir::CmpOp::Eq => l == r,
                 qir::CmpOp::Ne => l != r,
