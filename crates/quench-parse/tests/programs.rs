@@ -116,7 +116,10 @@ var.immut.str ['c'] = [str:*twice*];
 ";
     let out = parse(source);
     let codes: Vec<&str> = out.errors.iter().map(|e| e.code.as_str()).collect();
-    assert_eq!(codes, ["E0105", "E0106", "E0104", "E0107"], "{:#?}", out.errors);
+    // `wobble ['x'];` is not among them: a bare word before a bracket is a call, so the
+    // parser understands it perfectly and the checker is what says nothing is called
+    // that -- which is a better sentence than the parser could have written.
+    assert_eq!(codes, ["E0105", "E0106", "E0107"], "{:#?}", out.errors);
 }
 
 #[test]
@@ -138,11 +141,14 @@ fn a_file_with_nothing_in_it_is_not_an_error_yet() {
 }
 
 #[test]
-fn things_before_start_are_not_built_yet_and_say_so() {
+fn a_variable_at_the_top_of_a_file_is_pointed_at_const() {
+    // The rule is constants outside and variables inside, and this is the one place a
+    // reader can meet it. So the error says which of the two they wanted.
     let source = "var.immut.str ['a'] = [*x*];\nSTART {\nprint.stdout[str:*a*];\n}\n";
     let rendered = report(source);
-    assert!(rendered.contains("only `START` can be at the top of a file so far"), "{rendered}");
-    assert!(rendered.contains("not built yet"), "{rendered}");
+    assert!(rendered.contains("a variable cannot be at the top of a file."), "{rendered}");
+    assert!(rendered.contains("constants live outside a function and variables live inside one"), "{rendered}");
+    assert!(rendered.contains("`const.<visibility>.<type>`"), "{rendered}");
 }
 
 #[test]
@@ -200,7 +206,7 @@ fn a_block_ends_where_its_brace_does() {
 
 #[test]
 fn a_mistake_inside_a_block_does_not_eat_the_brace() {
-    let source = "START {\nwobble ['x'];\n}\n";
+    let source = "START {\nwobble = *3*;\n}\n";
     let out = parse(source);
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert_eq!(out.errors[0].code, "E0104", "just the one, and the block still closed");
@@ -240,7 +246,57 @@ fn a_bare_word_before_a_bracket_is_a_call() {
     let out = parse(source);
     assert!(out.ok(), "{}", report(source));
     let Stmt::Var(var) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
-    let quench_parse::Term::Call { name, args, .. } = &var.values[0].terms[0] else { panic!() };
-    assert_eq!(&source[name.start..name.end], "count");
-    assert_eq!(args.len(), 1);
+    let quench_parse::Term::Call(call) = &var.values[0].terms[0] else { panic!() };
+    assert_eq!(&source[call.name.start..call.name.end], "count");
+    assert_eq!(call.args.len(), 1);
+}
+
+#[test]
+fn a_function_keeps_its_chain_its_parameters_and_its_body() {
+    let source = "fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] {\ngive ['a' + 'b'];\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let quench_parse::Item::Func(func) = &out.program.items[0] else { panic!() };
+    let links: Vec<&str> = func.chain.iter().map(|s| &source[s.start..s.end]).collect();
+    assert_eq!(links, ["fn", "export", "i64"], "so a diagnostic can point at one of them");
+    assert_eq!(&source[func.name.start..func.name.end], "'add'");
+    assert_eq!(func.params.len(), 2);
+    let first: Vec<&str> = func.params[0].chain.iter().map(|s| &source[s.start..s.end]).collect();
+    assert_eq!(first, ["immut", "i64"], "a declaration's chain with `var` taken off");
+    assert!(matches!(func.body[0], Stmt::Give(_)));
+}
+
+#[test]
+fn a_function_that_takes_nothing_still_writes_the_brackets() {
+    let source = "fn.file.nothing ['tick'] [] {\nprint.stdout[\\n];\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let quench_parse::Item::Func(func) = &out.program.items[0] else { panic!() };
+    assert!(func.params.is_empty(), "`[]` says it out loud rather than by omission");
+}
+
+#[test]
+fn a_constant_is_a_declaration_written_somewhere_else() {
+    // Same syntax, same code, same errors -- only the keyword and the place differ.
+    let source = "const.export.i64 ['LIMIT'] = [*100*];\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let quench_parse::Item::Const(declaration) = &out.program.items[0] else { panic!() };
+    let links: Vec<&str> = declaration.chain.iter().map(|s| &source[s.start..s.end]).collect();
+    assert_eq!(links, ["const", "export", "i64"]);
+    assert_eq!(declaration.names.len(), 1);
+}
+
+#[test]
+fn a_call_separates_its_arguments_with_commas() {
+    // Juxtaposition builds one value out of pieces, which is why it cannot also
+    // separate two of them.
+    let source = "START {\nprint.stdout[add[*1* + *2*, *3*]];\n}\n";
+    let out = parse(source);
+    assert!(out.ok(), "{}", report(source));
+    let Stmt::Print(print) = &out.program.start.as_ref().unwrap().body[0] else { panic!() };
+    let quench_parse::Piece::Call(call) = &print.pieces[0] else { panic!() };
+    assert_eq!(call.args.len(), 2);
+    assert_eq!(call.args[0].terms.len(), 2, "`*1*` and `*2*`");
+    assert!(call.args[0].has_operators());
 }

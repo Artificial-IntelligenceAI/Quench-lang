@@ -1,0 +1,42 @@
+# Constants outside, variables inside, and functions in between.
+
+const.export.i64 ['LIMIT']   = [*10*];
+const.file.str   ['GREETING'] = [*Hello, *];
+
+# `export` because something outside the program might want it. The chain says who
+# can see it and what it answers with, in that order.
+fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] {
+    give ['a' + 'b'];
+}
+
+# `nothing` is a real link, not an omission. A reader should not have to read the
+# body to find out whether there is an answer.
+fn.file.nothing ['greet'] [immut.str 'name'] {
+    print.stdout['GREETING'];
+    print.stdout['name' str:*!* \n];
+}
+
+fn.program.bool ['past'] [immut.i64 'n'] {
+    give ['n' > 'LIMIT'];
+}
+
+# A function may call itself, and two may call each other: every signature is read
+# before any body is.
+fn.file.i64 ['factorial'] [immut.i64 'n'] {
+    if 'n' </= *1* {
+        give [*1*];
+    } else {
+        give ['n' × factorial['n' - *1*]];
+    }
+}
+
+START {
+    greet[*Tankun*];
+
+    print.stdout[str:*1 + 2 = * add[*1*, *2*] \n];
+    print.stdout[str:*10! = * factorial[*10*] \n];
+
+    if past[*42*] {
+        print.stdout[str:*42 is past * 'LIMIT' \n];
+    }
+}

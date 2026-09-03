@@ -5,7 +5,7 @@
 //! what is left is a transliteration, and that is the point of doing the checking first.
 //! Anything in this file that started to look like a judgement would belong further up.
 
-use quench_check::{Arm, Checked, Flow, OpKind, Place, Printed, Stmt, Ty, Value};
+use quench_check::{Arm, Checked, Flow, Func, Local, OpKind, Place, Printed, Stmt, Ty, Value};
 use quench_conf::{Division, Overflow, Settings};
 use quench_diag::{Diagnostic, Span};
 use quench_qir as qir;
@@ -39,7 +39,7 @@ pub fn lower(source: &str) -> Lowered {
 pub fn lower_under(source: &str, settings: Settings) -> Lowered {
     let mut checked = quench_check::check(source);
 
-    if !checked.has_start {
+    if !checked.has_start() {
         // Not something the parser could report: a file of declarations is a fine thing
         // to parse and a useless thing to run, and only something trying to run it knows
         // which was wanted.
@@ -62,22 +62,61 @@ pub fn lower_under(source: &str, settings: Settings) -> Lowered {
 
 fn build(checked: &Checked, settings: Settings) -> qir::Module {
     let mut module = qir::Module::new();
-    let mut b = qir::Builder::new(qir::ENTRY, &[], qir::Ty::I64);
+
+    // Functions are added in the order they were checked, so a function's place in
+    // `checked.funcs` is its id here -- which is what lets a body call something
+    // written underneath it, and lets one call itself.
+    for (n, func) in checked.funcs.iter().enumerate() {
+        let built = lower_func(&mut module, func, checked, settings);
+        let id = module.add(built);
+        debug_assert_eq!(id.0 as usize, n, "a function's place is its id");
+    }
+
+    if let Some(start) = checked.start {
+        module.set_entry(qir::FuncId(start as u32));
+    }
+    module
+}
+
+fn lower_func(
+    module: &mut qir::Module,
+    func: &Func,
+    checked: &Checked,
+    settings: Settings,
+) -> qir::Function {
+    let params: Vec<qir::Ty> =
+        func.locals[..func.takes].iter().map(|local| qir_ty(&local.ty)).collect();
+    // A function that gives `nothing` back still answers with something, because QIR
+    // has one shape of call and this is where that is paid for. The checker refused
+    // every use of the answer, so what it is cannot be observed.
+    let ret = func.returns.as_ref().map_or(qir::Ty::I64, qir_ty);
+
+    let name = if Some(func) == checked.start.map(|n| &checked.funcs[n]) {
+        qir::ENTRY.to_string()
+    } else {
+        func.name.clone()
+    };
+    let mut b = qir::Builder::new(name, &params, ret);
 
     // Where each variable's value ended up. A declaration fills one in; a use reads it;
-    // a join replaces the ones that could have come from either side.
-    let mut held: Vec<Option<qir::Value>> = vec![None; checked.locals.len()];
+    // a join replaces the ones that could have come from either side. The parameters
+    // are already filled, being the entry block's own.
+    let mut held: Vec<Option<qir::Value>> = vec![None; func.locals.len()];
+    for n in 0..func.takes {
+        held[n] = Some(b.param(n));
+    }
 
+    let w = Where { locals: &func.locals, checked, ret, settings };
     let mut loops = Vec::new();
-    lower_body(&mut b, &mut module, &checked.body, &mut held, checked, &mut loops, settings);
+    let answered = lower_body(&mut b, module, &func.body, &mut held, &w, &mut loops);
 
-    // A program that says nothing about how it ended, ended fine.
-    let nothing = b.const_i64(0);
-    b.ret(nothing);
-
-    let id = module.add(b.finish());
-    module.set_entry(id);
-    module
+    // A function that says nothing about how it ended, ended fine. Which is only ever
+    // reached by one that gives `nothing` back -- the checker made sure of the rest.
+    if !answered {
+        let nothing = b.const_i64(0);
+        b.ret(nothing);
+    }
+    b.finish()
 }
 
 /// What a QIR value of this type looks like.
@@ -88,6 +127,18 @@ fn qir_ty(ty: &Ty) -> qir::Ty {
         Ty::Str => qir::Ty::Text,
         Ty::Arr { .. } => qir::Ty::Handle,
     }
+}
+
+/// Everything the lowering of one function needs to look up, gathered so that passing
+/// it down does not cost a parameter for each thing.
+struct Where<'a> {
+    /// The locals of the function being lowered — not of any other.
+    locals: &'a [Local],
+    checked: &'a Checked,
+    /// What the function being lowered answers with, for ending a block that nothing
+    /// ever reaches.
+    ret: qir::Ty,
+    settings: Settings,
 }
 
 /// A loop being lowered, so that a `break` somewhere inside it knows where to go and
@@ -108,40 +159,55 @@ fn lower_body(
     module: &mut qir::Module,
     body: &[Stmt],
     held: &mut Vec<Option<qir::Value>>,
-    checked: &Checked,
+    w: &Where<'_>,
     loops: &mut Vec<Frame>,
-    settings: Settings,
 ) -> bool {
     for stmt in body {
         match stmt {
             Stmt::Declare { local, value } => {
-                let value = emit(b, module, value, held, settings);
+                let value = emit(b, module, value, held, w);
                 held[local.0 as usize] = Some(value);
             }
             // Changing a variable is naming a new value for it. Inside an arm that is
             // still just a write here -- what makes it correct is that the join below
             // takes whichever value the branch that ran left behind.
             Stmt::Assign { to, value } => {
-                let value = emit(b, module, value, held, settings);
+                let value = emit(b, module, value, held, w);
                 match to {
                     Place::Local(local) => held[local.0 as usize] = Some(value),
                     Place::Element { local, indices, shape } => {
                         let handle = held[local.0 as usize].expect("declared before used");
-                        let at = flat_index(b, module, indices, shape, held, settings);
+                        let at = flat_index(b, module, indices, shape, held, w);
                         b.call_host(qir::Host::ArraySet, &[handle, at, value]);
                     }
                 }
             }
             Stmt::If { arms, otherwise, live } => {
                 let left = lower_if(
-                    b, module, arms, otherwise.as_deref(), *live, held, checked, loops, settings,
+                    b, module, arms, otherwise.as_deref(), *live, held, w, loops,
                 );
                 if left {
                     return true;
                 }
             }
             Stmt::Loop { flow, body, live } => {
-                lower_loop(b, module, flow, body, *live, held, checked, loops, settings);
+                lower_loop(b, module, flow, body, *live, held, w, loops);
+            }
+            Stmt::Give(value) => {
+                let answer = match value {
+                    Some(value) => emit(b, module, value, held, w),
+                    None => b.const_i64(0),
+                };
+                b.ret(answer);
+                return true;
+            }
+            Stmt::Do { func, args } => {
+                let given: Vec<qir::Value> = args
+                    .iter()
+                    .map(|arg| emit(b, module, arg, held, w))
+                    .collect();
+                let ret = w.checked.funcs[*func as usize].returns.as_ref().map_or(qir::Ty::I64, qir_ty);
+                b.call(qir::FuncId(*func), &given, ret);
             }
             Stmt::Break => {
                 let frame = loops.last().expect("refused by the checker: `break` outside a loop");
@@ -162,7 +228,7 @@ fn lower_body(
                             b.print(qir::Host::PrintText, *to, value);
                         }
                         Printed::Value { value, ty } => {
-                            let value = emit(b, module, value, held, settings);
+                            let value = emit(b, module, value, held, w);
                             let host = match ty {
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::I64 => qir::Host::PrintI64,
@@ -198,14 +264,13 @@ fn lower_loop(
     body: &[Stmt],
     live: u32,
     held: &mut Vec<Option<qir::Value>>,
-    checked: &Checked,
+    w: &Where<'_>,
     loops: &mut Vec<Frame>,
-    settings: Settings,
 ) {
     let live = live as usize;
     let carried: Vec<usize> = (0..live).filter(|i| held[*i].is_some()).collect();
     let carried_types: Vec<qir::Ty> =
-        carried.iter().map(|i| qir_ty(&checked.locals[*i].ty)).collect();
+        carried.iter().map(|i| qir_ty(&w.locals[*i].ty)).collect();
 
     let (counting, keeps) = match flow {
         Flow::Range { keeps, .. } => (true, *keeps),
@@ -232,8 +297,8 @@ fn lower_loop(
     // nobody could read, so the checker made them values and this works them out once.
     let bounds = match flow {
         Flow::Range { from, to, .. } => {
-            let from = emit(b, module, from, held, settings);
-            let to = emit(b, module, to, held, settings);
+            let from = emit(b, module, from, held, w);
+            let to = emit(b, module, to, held, w);
             Some((from, to))
         }
         Flow::While(_) => None,
@@ -268,7 +333,7 @@ fn lower_loop(
             let (_, to) = bounds.expect("a range worked its bounds out above");
             b.cmp(qir::CmpOp::Le, counter.expect("a range counts"), to)
         }
-        Flow::While(condition) => emit(b, module, condition, held, settings),
+        Flow::While(condition) => emit(b, module, condition, held, w),
     };
 
     let mut onward: Vec<qir::Value> = carried.iter().map(|i| held[*i].expect("carried")).collect();
@@ -292,7 +357,7 @@ fn lower_loop(
     }
 
     loops.push(Frame { done, carried: carried.clone(), keep: keeps.then_some(live) });
-    let broke = lower_body(b, module, body, held, checked, loops, settings);
+    let broke = lower_body(b, module, body, held, w, loops);
     loops.pop();
 
     if !broke {
@@ -342,13 +407,12 @@ fn lower_if(
     otherwise: Option<&[Stmt]>,
     live: u32,
     held: &mut Vec<Option<qir::Value>>,
-    checked: &Checked,
+    w: &Where<'_>,
     loops: &mut Vec<Frame>,
-    settings: Settings,
 ) -> bool {
     let carried: Vec<usize> = (0..live as usize).filter(|i| held[*i].is_some()).collect();
     let types: Vec<qir::Ty> =
-        carried.iter().map(|i| qir_ty(&checked.locals[*i].ty)).collect();
+        carried.iter().map(|i| qir_ty(&w.locals[*i].ty)).collect();
     let join = b.block(&types);
 
     // What each path hands the join: everything it is holding by then.
@@ -359,7 +423,7 @@ fn lower_if(
     let before = held.clone();
     let mut reached = false;
     for arm in arms {
-        let condition = emit(b, module, &arm.condition, held, settings);
+        let condition = emit(b, module, &arm.condition, held, w);
         let taken = b.block(&[]);
         let next = b.block(&[]);
         b.br_if(condition, (taken, &[]), (next, &[]));
@@ -368,7 +432,7 @@ fn lower_if(
         // Each arm starts from what was true before the `if`, not from what the arm
         // before it did -- only one of them ever runs.
         *held = before.clone();
-        if !lower_body(b, module, &arm.body, held, checked, loops, settings) {
+        if !lower_body(b, module, &arm.body, held, w, loops) {
             let leaving = handed(held);
             b.jump(join, &leaving);
             reached = true;
@@ -380,7 +444,7 @@ fn lower_if(
     // Nothing held. Whatever the `else` says, or nothing at all.
     *held = before.clone();
     let left = match otherwise {
-        Some(body) => lower_body(b, module, body, held, checked, loops, settings),
+        Some(body) => lower_body(b, module, body, held, w, loops),
         None => false,
     };
     if !left {
@@ -398,18 +462,26 @@ fn lower_if(
     }
 
     if !reached {
-        // Every arm left the loop, so nothing arrives here. The block still needs an end
-        // on it, and it takes one that uses only its own parameters — which is what makes
-        // it well formed while still being unreachable, and so removable.
-        let frame = loops.last().expect("every path broke, so there is a loop to break out of");
-        let mut leaving: Vec<qir::Value> =
-            frame.carried.iter().map(|i| held[*i].expect("carried")).collect();
-        if let Some(i) = frame.keep {
-            leaving.push(held[i].expect("the counter"));
-        }
-        b.jump(frame.done, &leaving);
+        // Every arm gave an answer or left the loop, so nothing arrives here. The block
+        // still needs an end on it before anything will delete it, and the end that is
+        // always available is the one that needs nothing from anywhere: an answer made
+        // on the spot, of the type this function was going to give back anyway.
+        let made_up = nothing_of(b, module, w.ret);
+        b.ret(made_up);
     }
     !reached
+}
+
+/// A value of this type, standing for one that is never looked at.
+fn nothing_of(b: &mut qir::Builder, module: &mut qir::Module, ty: qir::Ty) -> qir::Value {
+    match ty {
+        qir::Ty::Bool => b.const_bool(false),
+        qir::Ty::Text => {
+            let at = module.intern("");
+            b.const_text(at)
+        }
+        qir::Ty::I64 | qir::Ty::Handle => b.const_i64(0),
+    }
 }
 
 /// Where element (i, j, …) sits in a block laid out row by row.
@@ -422,11 +494,11 @@ fn flat_index(
     indices: &[Value],
     shape: &[usize],
     held: &[Option<qir::Value>],
-    settings: Settings,
+    w: &Where<'_>,
 ) -> qir::Value {
     let mut flat = None;
     for (n, index) in indices.iter().enumerate() {
-        let this = emit(b, module, index, held, settings);
+        let this = emit(b, module, index, held, w);
         flat = Some(match flat {
             None => this,
             Some(so_far) => {
@@ -447,7 +519,7 @@ fn emit(
     module: &mut qir::Module,
     value: &Value,
     held: &[Option<qir::Value>],
-    settings: Settings,
+    w: &Where<'_>,
 ) -> qir::Value {
     match value {
         Value::Text(text) => {
@@ -467,7 +539,7 @@ fn emit(
             let handle = b.call_host(qir::Host::ArrayNew, &[len]);
             for (n, element) in elements.iter().enumerate() {
                 let at = b.const_i64(n as i64 + 1); // counted from one
-                let value = emit(b, module, element, held, settings);
+                let value = emit(b, module, element, held, w);
                 b.call_host(qir::Host::ArraySet, &[handle, at, value]);
             }
             handle
@@ -476,20 +548,33 @@ fn emit(
         // Which is why one `arr` link is one allocation -- the whole address is
         // arithmetic, and no handle is followed on the way.
         Value::At { array, indices, shape } => {
-            let handle = emit(b, module, array, held, settings);
-            let at = flat_index(b, module, indices, shape, held, settings);
+            let handle = emit(b, module, array, held, w);
+            let at = flat_index(b, module, indices, shape, held, w);
             b.call_host(qir::Host::ArrayGet, &[handle, at])
         }
+        // A constant has no storage: its value is written in here, wherever it was
+        // named. Which is the whole of what the word means.
+        Value::Const(which) => {
+            let constant = w.checked.constants[*which as usize].value.clone();
+            emit(b, module, &constant, held, w)
+        }
+        Value::Call { func, args } => {
+            let given: Vec<qir::Value> =
+                args.iter().map(|arg| emit(b, module, arg, held, w)).collect();
+            let ret =
+                w.checked.funcs[*func as usize].returns.as_ref().map_or(qir::Ty::I64, qir_ty);
+            b.call(qir::FuncId(*func), &given, ret)
+        }
         Value::Binary { op, lhs, rhs } => {
-            let l = emit(b, module, lhs, held, settings);
-            let r = emit(b, module, rhs, held, settings);
-            let floored = settings.division == Division::Floored;
+            let l = emit(b, module, lhs, held, w);
+            let r = emit(b, module, rhs, held, w);
+            let floored = w.settings.division == Division::Floored;
             match op {
                 // Whether a sum that does not fit rounds or stops is the project's
                 // decision, written down here as an instruction.
-                OpKind::Add if settings.overflow == Overflow::Trap => b.add_trapping(l, r),
-                OpKind::Sub if settings.overflow == Overflow::Trap => b.sub_trapping(l, r),
-                OpKind::Mul if settings.overflow == Overflow::Trap => b.mul_trapping(l, r),
+                OpKind::Add if w.settings.overflow == Overflow::Trap => b.add_trapping(l, r),
+                OpKind::Sub if w.settings.overflow == Overflow::Trap => b.sub_trapping(l, r),
+                OpKind::Mul if w.settings.overflow == Overflow::Trap => b.mul_trapping(l, r),
                 OpKind::Add => b.add(l, r),
                 OpKind::Sub => b.sub(l, r),
                 OpKind::Mul => b.mul(l, r),

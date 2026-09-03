@@ -638,3 +638,123 @@ START {
         "34",
     );
 }
+
+#[test]
+fn a_function_gives_an_answer_back() {
+    assert_eq!(
+        said("\
+fn.file.i64 ['add'] [immut.i64 'a', immut.i64 'b'] {
+    give ['a' + 'b'];
+}
+START {
+    print.stdout[add[*1*, *2*]];
+}
+"),
+        "3",
+    );
+}
+
+#[test]
+fn a_function_may_call_itself() {
+    assert_eq!(
+        said("\
+fn.file.i64 ['factorial'] [immut.i64 'n'] {
+    if 'n' </= *1* { give [*1*]; } else { give ['n' \u{d7} factorial['n' - *1*]]; }
+}
+START {
+    print.stdout[factorial[*10*]];
+}
+"),
+        "3628800",
+    );
+}
+
+#[test]
+fn two_functions_may_call_each_other() {
+    // Which needs every signature read before any body is, and is why they are.
+    assert_eq!(
+        said("\
+fn.file.bool ['even'] [immut.i64 'n'] {
+    if 'n' == *0* { give [*true*]; } else { give [odd['n' - *1*]]; }
+}
+fn.file.bool ['odd'] [immut.i64 'n'] {
+    if 'n' == *0* { give [*false*]; } else { give [even['n' - *1*]]; }
+}
+START {
+    print.stdout[even[*10*] str:* * odd[*10*]];
+}
+"),
+        "true false",
+    );
+}
+
+#[test]
+fn a_function_that_gives_nothing_is_called_on_its_own() {
+    assert_eq!(
+        said("\
+fn.file.nothing ['greet'] [immut.str 'name'] {
+    print.stdout[str:*Hello, * 'name' str:*!*];
+}
+START {
+    greet[*Tankun*];
+}
+"),
+        "Hello, Tankun!",
+    );
+}
+
+#[test]
+fn give_leaves_a_function_early() {
+    assert_eq!(
+        said("\
+fn.file.nothing ['upto'] [immut.i64 'stop'] {
+    loop.temp.range.i64 ['i'] = [*1*, *9*] {
+        if 'i' > 'stop' { give; }
+        print.stdout['i'];
+    }
+}
+START {
+    upto[*3*];
+    give;
+}
+"),
+        "123",
+    );
+}
+
+#[test]
+fn a_constant_is_written_in_where_it_is_named() {
+    assert_eq!(
+        said("\
+const.export.i64 ['LIMIT'] = [*10*];
+const.file.str ['NAME'] = [*Quench*];
+
+fn.file.bool ['past'] [immut.i64 'n'] {
+    give ['n' > 'LIMIT'];
+}
+START {
+    print.stdout['NAME' str:* * 'LIMIT' str:* * past[*42*]];
+}
+"),
+        "Quench 10 true",
+    );
+}
+
+#[test]
+fn a_parameter_may_be_changed_without_the_caller_seeing_it() {
+    // Nothing here is a reference yet, so `mut` on a parameter changes this function's
+    // copy and stops there.
+    assert_eq!(
+        said("\
+fn.file.i64 ['doubled'] [mut.i64 'n'] {
+    set ['n'] = ['n' \u{d7} *2*];
+    give ['n'];
+}
+START {
+    var.immut.i64 ['mine'] = [*21*];
+    print.stdout[doubled['mine'] str:* * 'mine'];
+}
+"),
+        "42 21",
+    );
+}

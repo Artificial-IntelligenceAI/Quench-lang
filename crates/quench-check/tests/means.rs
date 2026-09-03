@@ -16,10 +16,10 @@ fn codes(source: &str) -> Vec<String> {
 fn a_declaration_is_understood() {
     let out = check("START { var.mut.i64 ['count'] = [*7*]; }");
     assert!(out.ok(), "{}", errors("START { var.mut.i64 ['count'] = [*7*]; }"));
-    assert_eq!(out.locals.len(), 1);
-    assert_eq!(out.locals[0].name, "count");
-    assert_eq!(out.locals[0].ty, quench_check::Ty::I64);
-    assert!(out.locals[0].mutable);
+    assert_eq!(out.locals().len(), 1);
+    assert_eq!(out.locals()[0].name, "count");
+    assert_eq!(out.locals()[0].ty, quench_check::Ty::I64);
+    assert!(out.locals()[0].mutable);
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn the_operators_that_are_not_built_say_so() {
 fn an_array_says_its_size_in_its_type() {
     let out = check("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }");
     assert!(out.ok(), "{}", errors("START { var.immut.arr.i64 (5) ['xs'] = [[*1* *2* *3* *4* *5*]]; }"));
-    assert_eq!(out.locals[0].ty.name(), "arr.i64 (5)");
+    assert_eq!(out.locals()[0].ty.name(), "arr.i64 (5)");
 }
 
 #[test]
@@ -527,9 +527,97 @@ fn count_is_answered_where_the_shape_was_written() {
     // why a loop bounded by `count` costs nothing at all.
     let out = check("START { var.immut.arr.i64 (2 3) ['m'] = [[*1* *2* *3* *4* *5* *6*]]; var.immut.i64 ['n'] = [count['m']]; }");
     assert!(out.ok());
-    let quench_check::Stmt::Declare { value, .. } = &out.body[1] else { panic!() };
+    let quench_check::Stmt::Declare { value, .. } = &out.body()[1] else { panic!() };
     assert_eq!(*value, quench_check::Value::Number(6), "every element, however many dimensions");
 
     assert_eq!(codes("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [count['n']]; }"), ["E0457"]);
     assert_eq!(codes("START { var.immut.i64 ['c'] = [size['n']]; }"), ["E0455"]);
+}
+
+#[test]
+fn a_function_says_what_it_gives_back_and_who_can_see_it() {
+    assert_eq!(codes("fn.file ['a'] [] { give [*1*]; }\nSTART { }"), ["E0464"]);
+    assert_eq!(codes("fn.i64 ['a'] [] { give [*1*]; }\nSTART { }"), ["E0459"]);
+    assert_eq!(codes("const.i64 ['A'] = [*1*];\nSTART { }"), ["E0459"]);
+    // `nothing` is a real link rather than an omission, so this is fine.
+    assert!(check("fn.file.nothing ['a'] [] { print.stdout[\\n]; }\nSTART { }").ok());
+}
+
+#[test]
+fn a_function_that_answers_answers_on_every_way_out() {
+    let source = "\
+fn.file.i64 ['bigger'] [immut.i64 'n'] {
+    if 'n' > *0* {
+        give ['n'];
+    }
+}
+START { }
+";
+    let rendered = errors(source);
+    assert!(rendered.contains("this function says it gives back an `i64`, and does not always."), "{rendered}");
+    assert!(rendered.contains("Error code: E0466"), "{rendered}");
+
+    // With an `else`, every way out ends in a `give`, and it checks out.
+    assert!(check("\
+fn.file.i64 ['bigger'] [immut.i64 'n'] {
+    if 'n' > *0* { give ['n']; } else { give [*0*]; }
+}
+START { }
+").ok());
+}
+
+#[test]
+fn a_call_is_checked_against_what_was_declared() {
+    let one = "fn.file.i64 ['twice'] [immut.i64 'n'] { give ['n' + 'n']; }\n";
+    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = [twice[*1*, *2*]]; }}")), ["E0470"]);
+    assert_eq!(codes(&format!("{one}START {{ var.immut.i64 ['x'] = [twice[*a*]]; }}")), ["E0407"]);
+    assert_eq!(codes(&format!("{one}START {{ var.immut.str ['x'] = [twice[*1*]]; }}")), ["E0406"]);
+    assert!(check(&format!("{one}START {{ var.immut.i64 ['x'] = [twice[*21*]]; }}")).ok());
+}
+
+#[test]
+fn a_function_written_underneath_can_still_be_called() {
+    // Signatures are collected before any body is read, which is what lets two
+    // functions call each other and one call itself.
+    assert!(check("\
+fn.file.bool ['even'] [immut.i64 'n'] {
+    if 'n' == *0* { give [*true*]; } else { give [odd['n' - *1*]]; }
+}
+fn.file.bool ['odd'] [immut.i64 'n'] {
+    if 'n' == *0* { give [*false*]; } else { give [even['n' - *1*]]; }
+}
+START { }
+").ok());
+}
+
+#[test]
+fn a_constant_has_nowhere_to_live() {
+    // Which is what makes it a constant: it is written in wherever it is named, so
+    // there is no storage to change or to index.
+    let source = "const.file.i64 ['A'] = [*1*];\nSTART { set ['A'] = [*2*]; }";
+    let rendered = errors(source);
+    assert!(rendered.contains("`'A'` is a constant."), "{rendered}");
+    assert!(rendered.contains("and wanted somewhere it lives, here"), "{rendered}");
+    assert!(rendered.contains("Error code: E0472"), "{rendered}");
+
+    assert_eq!(codes("const.file.mut.i64 ['A'] = [*1*];\nSTART { }"), ["E0473"]);
+    assert_eq!(codes("const.file.arr.i64 (2) ['A'] = [[*1* *2*]];\nSTART { }"), ["E0460"]);
+
+    // Named as a value, it is that value -- and it needs no storage to be one.
+    assert!(check("const.file.i64 ['A'] = [*1*];\nSTART { print.stdout['A' \\n]; }").ok());
+}
+
+#[test]
+fn a_parameter_is_a_variable_and_says_so() {
+    assert_eq!(codes("fn.file.i64 ['a'] [i64 'n'] { give ['n']; }\nSTART { }"), ["E0465"]);
+    assert!(check("fn.file.i64 ['a'] [immut.i64 'n'] { give ['n']; }\nSTART { }").ok());
+}
+
+#[test]
+fn start_has_nobody_to_answer() {
+    let rendered = errors("START { give [*1*]; }");
+    assert!(rendered.contains("`START` has nobody to give an answer to."), "{rendered}");
+    assert!(rendered.contains("`START` is where the program begins"), "{rendered}");
+    // But leaving early is a thing you do on purpose, and works.
+    assert!(check("START { give; }").ok());
 }

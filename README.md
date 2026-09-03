@@ -104,6 +104,22 @@ Both print the same thing, which is not a coincidence — it is
   so chaining and nesting are different syntax rather than the same syntax read two
   ways — the dangling-else problem does not arise. Nothing is truthy: a condition is
   a `bool` and there is no second way to be one.
+- **Functions.** `fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] { give ['a' + 'b']; }`.
+  The chain reads like a declaration's because it is one: who can see it, then what it
+  gives back. **`nothing` is a word**, not a missing arrow — a reader should never have
+  to read a body to find out whether there is an answer in it. A function that answers
+  with something must answer on **every way out**, and an `if` counts only when it has
+  an `else`: there is nothing honest to invent for the path that falls off the bottom.
+  Parameters are declarations with `var` taken off, and `[]` is written even when empty.
+  Calls cost no new syntax — `add[*1*, *2*]` is a call and `'xs'[*2*]` is an index,
+  because names wear quotes. See
+  [notes/what-a-function-has-to-say.md](notes/what-a-function-has-to-say.md).
+- **Constants outside, functions at the top, variables inside.**
+  `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is
+  written in wherever it is named — so `set` on one is refused and so is indexing one.
+  No `mut`/`immut` link either: `const` is already that answer, which is the whole
+  reason it is a different word from `var`. This is where `file` / `program` / `export`
+  finally mean something, and they are required.
 - **Looping.** `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` counts, both ends
   included; `loop.while 'delta' > *0* { … }` asks again before every pass. The rule
   between them is flat — **`range` always has a counter, `while` never has one** — and

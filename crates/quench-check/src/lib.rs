@@ -11,7 +11,7 @@
 //! gave it text" is this, and so is "you have declared that twice".
 
 use quench_diag::{Diagnostic, Span};
-use quench_parse::{ast, Parsed};
+use quench_parse::{ast, counted, Parsed};
 use std::collections::HashMap;
 
 /// A type, as far as the checker is concerned.
@@ -82,6 +82,61 @@ const INTENDED: [&str; 17] = [
     "bool", "str", "text",
 ];
 
+/// Who can name a thing. Required on everything at the top of a file, because a
+/// missing one would be a fourth answer given by silence.
+///
+/// With one file and no linking these are not yet told apart by anything that runs —
+/// there is nowhere for `file` and `program` to differ. They are checked and recorded
+/// now so that the answer is written down before it matters, rather than defaulted
+/// into existence later.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Visibility {
+    File,
+    Program,
+    Export,
+}
+
+impl Visibility {
+    fn from_word(word: &str) -> Option<Visibility> {
+        match word {
+            "file" => Some(Visibility::File),
+            "program" => Some(Visibility::Program),
+            "export" => Some(Visibility::Export),
+            _ => None,
+        }
+    }
+}
+
+/// One function.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Func {
+    pub name: String,
+    /// `None` for `START`, which nothing may call and so has nobody to be visible to.
+    pub visibility: Option<Visibility>,
+    /// `None` is `nothing` — the function gives no answer back.
+    pub returns: Option<Ty>,
+    /// How many of `locals` are parameters. They are the first ones, in order.
+    pub takes: usize,
+    pub locals: Vec<Local>,
+    pub body: Vec<Stmt>,
+    /// The name, for pointing at.
+    pub at: Span,
+}
+
+/// One top-level constant.
+///
+/// A constant has no storage: its value is worked out here and written in wherever it
+/// is named. Which is what the word means — anything needing code to run to produce it
+/// would need that code to run before `START`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Constant {
+    pub name: String,
+    pub visibility: Visibility,
+    pub ty: Ty,
+    pub value: Value,
+    pub at: Span,
+}
+
 /// One variable.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Local {
@@ -117,10 +172,30 @@ pub enum Value {
     /// One element. The shape is carried so the lowering can work out where it is
     /// without going back to the type.
     At { array: Box<Value>, indices: Vec<Value>, shape: Vec<usize> },
+    /// A top-level constant, written in where it was named.
+    Const(u32),
+    /// `add[*1*, *2*]` — the answer a function gave back.
+    Call { func: u32, args: Vec<Value> },
 }
 
 pub use quench_parse::OpKind;
 pub use quench_qir::Stream;
+
+/// Whether every way out of this body ends in a `give`.
+///
+/// An `if` counts only when it has an `else` and every arm gives, because otherwise
+/// there is a way through it that reaches the bottom with no answer. A loop never
+/// counts: nothing here knows it runs.
+fn gives(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::Give(_) => true,
+        Stmt::If { arms, otherwise, .. } => match otherwise {
+            Some(body) => arms.iter().all(|arm| gives(&arm.body)) && gives(body),
+            None => false,
+        },
+        _ => false,
+    })
+}
 
 /// How tightly an operator binds — but only where mathematics settled it.
 ///
@@ -178,6 +253,11 @@ pub enum Stmt {
     },
     /// `break;` — leave the innermost loop now.
     Break,
+    /// `give [ … ];`. `None` from a function that gives `nothing` back, which is an
+    /// early way out rather than an answer.
+    Give(Option<Value>),
+    /// A call written for what it does. The answer, if there is one, is dropped.
+    Do { func: u32, args: Vec<Value> },
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
     Print { to: Stream, pieces: Vec<Printed> },
@@ -215,45 +295,110 @@ pub enum Place {
 
 /// What a program means.
 pub struct Checked {
-    pub locals: Vec<Local>,
-    pub body: Vec<Stmt>,
+    /// Every function, in the order written. `START` is one of them.
+    pub funcs: Vec<Func>,
+    pub constants: Vec<Constant>,
+    /// Which of `funcs` is `START`, if the file has one.
+    pub start: Option<usize>,
     pub errors: Vec<Diagnostic>,
-    /// False when there was no `START` at all.
-    pub has_start: bool,
 }
 
 impl Checked {
     pub fn ok(&self) -> bool {
         self.errors.is_empty()
     }
+
+    pub fn has_start(&self) -> bool {
+        self.start.is_some()
+    }
+
+    /// `START`'s locals. Most of what there is to look at, in a file that is one.
+    pub fn locals(&self) -> &[Local] {
+        self.start.map_or(&[], |n| &self.funcs[n].locals)
+    }
+
+    /// What `START` does.
+    pub fn body(&self) -> &[Stmt] {
+        self.start.map_or(&[], |n| &self.funcs[n].body)
+    }
+}
+
+/// What a function looks like from the outside. Collected before any body is read, so
+/// that two functions may call each other and one may call itself without the order
+/// they were written in deciding whether that works.
+struct Signature {
+    name: String,
+    visibility: Option<Visibility>,
+    returns: Option<Ty>,
+    /// One per parameter, in order.
+    takes: Vec<Ty>,
+    /// The name, for pointing at.
+    at: Span,
+    /// The parameter list, for pointing at when a call brings the wrong number.
+    list: Span,
 }
 
 /// Read a whole file, parse it, and work out what it means.
 pub fn check(source: &str) -> Checked {
     let Parsed { program, errors } = quench_parse::parse(source);
-    let mut checker =
-        Checker {
-            source,
-            locals: Vec::new(),
-            scope: vec![HashMap::new()],
-            depth: 0,
-            body: Vec::new(),
-            errors,
-        };
+    let mut checker = Checker {
+        source,
+        locals: Vec::new(),
+        scope: vec![HashMap::new()],
+        depth: 0,
+        returns: None,
+        signatures: Vec::new(),
+        named: HashMap::new(),
+        constants: Vec::new(),
+        known: HashMap::new(),
+        at_top: false,
+        in_start: false,
+        body: Vec::new(),
+        errors,
+    };
 
-    let has_start = program.start.is_some();
-    if let Some(start) = &program.start {
-        for stmt in &start.body {
-            checker.statement(stmt);
+    // Constants first, in the order written: one may be built out of those above it,
+    // and out of nothing else, because there is nothing else yet worked out.
+    for item in &program.items {
+        if let ast::Item::Const(declaration) = item {
+            checker.constant(declaration);
         }
     }
 
-    Checked {
-        locals: checker.locals,
-        body: checker.body,
-        errors: checker.errors,
-        has_start,
+    // Then every signature, before any body. Which is what lets `even` call `odd` when
+    // `odd` is written underneath it.
+    for item in &program.items {
+        if let ast::Item::Func(func) = item {
+            checker.signature(func);
+        }
     }
+
+    let mut funcs = Vec::new();
+    for item in &program.items {
+        if let ast::Item::Func(func) = item {
+            if let Some(checked) = checker.function(func) {
+                funcs.push(checked);
+            }
+        }
+    }
+
+    let start = program.start.as_ref().map(|start| {
+        checker.in_start = true;
+        let body = checker.in_a_function(None, &[], &start.body);
+        checker.in_start = false;
+        funcs.push(Func {
+            name: quench_qir::ENTRY.to_string(),
+            visibility: None,
+            returns: None,
+            takes: 0,
+            locals: std::mem::take(&mut checker.locals),
+            body,
+            at: start.word,
+        });
+        funcs.len() - 1
+    });
+
+    Checked { funcs, constants: checker.constants, start, errors: checker.errors }
 }
 
 struct Checker<'a> {
@@ -268,6 +413,20 @@ struct Checker<'a> {
     /// How many loops enclose what is being checked. Nothing but `break` cares, and
     /// what it cares about is whether the number is zero.
     depth: u32,
+    /// What the function being checked gives back. `None` is `nothing`.
+    returns: Option<Ty>,
+    signatures: Vec<Signature>,
+    /// Function name to its place in `signatures`.
+    named: HashMap<String, u32>,
+    constants: Vec<Constant>,
+    /// Constant name to its place in `constants`.
+    known: HashMap<String, u32>,
+    /// True while a top-level constant is being read, where the chain carries a
+    /// visibility and carries no answer about changing.
+    at_top: bool,
+    /// True while `START` is being read. It answers with `nothing` like any other
+    /// function that does, but for a different reason, and so gets a different sentence.
+    in_start: bool,
     body: Vec<Stmt>,
     errors: Vec<Diagnostic>,
 }
@@ -291,7 +450,318 @@ impl<'a> Checker<'a> {
             ast::Stmt::If(conditional) => self.conditional(conditional),
             ast::Stmt::Loop(repeat) => self.repeat(repeat),
             ast::Stmt::Break(span) => self.leave(*span),
+            ast::Stmt::Give(give) => self.answer(give),
+            ast::Stmt::Do(call) => self.perform(call),
         }
+    }
+
+    // --- the top of a file ------------------------------------------------------------
+
+    /// Read a chain's visibility link, and complain when there is none or two.
+    fn seen_by(&mut self, chain: &[Span], word: Span, what: &str) -> Option<Visibility> {
+        let mut found: Option<(Visibility, Span)> = None;
+        for link in chain.iter().skip(1) {
+            let Some(visibility) = Visibility::from_word(self.text(*link)) else { continue };
+            match found {
+                None => found = Some((visibility, *link)),
+                Some((_, first)) => self.errors.push(
+                    Diagnostic::new("E0458", "this says twice who can see it.")
+                        .secondary(first, format!("`{}` here", self.text(first)))
+                        .primary(*link, format!("and `{}` here", self.text(*link)))
+                        .rule("a top-level declaration says `file`, `program` or `export`, once")
+                        .fix("keep the one that was meant"),
+                ),
+            }
+        }
+        match found {
+            Some((visibility, _)) => Some(visibility),
+            None => {
+                self.errors.push(
+                    Diagnostic::new("E0459", format!("this {what} does not say who can see it."))
+                        .primary(word, "here")
+                        .rule("everything at the top of a file says `file`, `program` or `export`, and silence is not one of them")
+                        .tip("`file` is the careful answer: nothing outside this file can name it.")
+                        .fix("`file` here, `program` across the program, `export` for anything outside it"),
+                );
+                None
+            }
+        }
+    }
+
+    /// `const.export.i64 ['LIMIT'] = [*100*];`
+    fn constant(&mut self, declaration: &ast::Var) {
+        let word = declaration.chain[0];
+        let visibility = self.seen_by(&declaration.chain, word, "constant");
+
+        // Checked as a declaration, because it is one -- which means the chain, the
+        // shape and the count of names against values all get the errors they already
+        // had. The visibility link is skipped over on the way past.
+        let before = self.locals.len();
+        let outer = std::mem::take(&mut self.body);
+        self.at_top = true;
+        self.declare(declaration);
+        self.at_top = false;
+        let statements = std::mem::replace(&mut self.body, outer);
+
+        for statement in statements {
+            let Stmt::Declare { local, value } = statement else { continue };
+            let local = &self.locals[local.0 as usize];
+            let (name, ty, at) = (local.name.clone(), local.ty.clone(), local.at);
+
+            if matches!(ty, Ty::Arr { .. }) {
+                self.errors.push(
+                    Diagnostic::new("E0460", "a constant array is not built yet.")
+                        .primary(at, "here")
+                        .rule("a constant is written in wherever it is named, and an array is a thing rather than a value")
+                        .tip("an array wants somewhere to live, and a constant has nowhere.")
+                        .fix("declare it inside `START` with `var` for now"),
+                );
+                continue;
+            }
+
+            let at_index = self.constants.len() as u32;
+            self.known.insert(name.clone(), at_index);
+            self.constants.push(Constant {
+                name,
+                visibility: visibility.unwrap_or(Visibility::File),
+                ty,
+                value,
+                at,
+            });
+        }
+
+        // A constant has no storage, so it leaves no local behind. The scope entry the
+        // declaration made goes with it -- `known` is what names it from here on.
+        self.locals.truncate(before);
+        for scope in &mut self.scope {
+            scope.retain(|_, id| (id.0 as usize) < before);
+        }
+    }
+
+    /// What a function looks like from the outside, read before any body is.
+    fn signature(&mut self, func: &ast::Func) {
+        let name = self.named(func.name);
+        let word = func.chain[0];
+        let visibility = self.seen_by(&func.chain, word, "function");
+
+        if let Some(&first) = self.named.get(&name) {
+            let at = self.signatures[first as usize].at;
+            self.errors.push(
+                Diagnostic::new("E0461", format!("`'{name}'` is declared twice."))
+                    .secondary(at, "declared here first")
+                    .primary(func.name, "and declared again here")
+                    .rule("one name means one thing, and two functions of a name means neither does")
+                    .fix("rename one of them"),
+            );
+            return;
+        }
+        if name == "count" {
+            self.errors.push(
+                Diagnostic::new("E0462", "`count` is already something.")
+                    .primary(func.name, "here")
+                    .rule("`count` answers how many elements an array holds, and is not yours to redefine")
+                    .fix("pick another name"),
+            );
+            return;
+        }
+
+        // The type is whatever the chain says that is not `fn` and not a visibility.
+        let mut returns = None;
+        let mut said = false;
+        for link in func.chain.iter().skip(1) {
+            let word = self.text(*link);
+            if Visibility::from_word(word).is_some() {
+                continue;
+            }
+            if said {
+                self.errors.push(
+                    Diagnostic::new("E0463", format!("`{word}` comes after what the function gives back."))
+                        .primary(*link, "here")
+                        .rule("the last link of a function's chain is what it answers with")
+                        .fix("move it before, or remove it"),
+                );
+                continue;
+            }
+            said = true;
+            if word == "nothing" {
+                continue;
+            }
+            match self.a_type(*link) {
+                Some(ty) => returns = Some(ty),
+                None => return,
+            }
+        }
+        if !said {
+            self.errors.push(
+                Diagnostic::new("E0464", "this function does not say what it gives back.")
+                    .primary(*func.chain.last().unwrap_or(&word), "the chain ends here")
+                    .rule("a function always says what it answers with, and `nothing` is one of the answers")
+                    .tip("`nothing` is a real link, not an omission -- a reader should not have to read the body to find out.")
+                    .fix("`fn.<visibility>.nothing [...]` if it gives nothing back"),
+            );
+            return;
+        }
+
+        let mut takes = Vec::new();
+        let mut ok = true;
+        for param in &func.params {
+            match self.parameter_ty(param) {
+                Some(ty) => takes.push(ty),
+                None => ok = false,
+            }
+        }
+        if !ok {
+            return;
+        }
+
+        self.named.insert(name.clone(), self.signatures.len() as u32);
+        self.signatures.push(Signature {
+            name,
+            visibility,
+            returns,
+            takes,
+            at: func.name,
+            list: func.takes,
+        });
+    }
+
+    /// A parameter's chain: the same links `var` would carry, said the same way.
+    fn parameter_ty(&mut self, param: &ast::Param) -> Option<Ty> {
+        let mut mutable = None;
+        let mut ty_span = None;
+        for link in &param.chain {
+            match self.text(*link) {
+                word @ ("mut" | "immut") if ty_span.is_none() => mutable = Some(word == "mut"),
+                word => {
+                    if ty_span.is_some() {
+                        self.errors.push(
+                            Diagnostic::new("E0403", format!("`{word}` comes after the type."))
+                                .primary(*link, "here")
+                                .rule("the type is the last link of a parameter's chain")
+                                .fix("move it before the type, or remove it"),
+                        );
+                        return None;
+                    }
+                    ty_span = Some(*link);
+                }
+            }
+        }
+        if mutable.is_none() {
+            self.errors.push(
+                Diagnostic::new("E0465", "this parameter does not say whether it can change.")
+                    .primary(param.span, "here")
+                    .rule("a parameter is a variable, and a variable says `mut` or `immut`")
+                    .tip("`immut` is nearly always the one, and saying so is the point.")
+                    .fix(format!("`immut.{}`", self.text(*param.chain.last().unwrap_or(&param.span)))),
+            );
+            return None;
+        }
+        let ty_span = ty_span?;
+        self.a_type(ty_span)
+    }
+
+    /// One type link, understood or honestly refused.
+    fn a_type(&mut self, link: Span) -> Option<Ty> {
+        let word = self.text(link);
+        if let Some(ty) = Ty::simple(word) {
+            return Some(ty);
+        }
+        if INTENDED.contains(&word) {
+            self.errors.push(
+                Diagnostic::new("E0405", format!("`{word}` is not built yet."))
+                    .primary(link, "here")
+                    .rule("Quench means to have this type, and does not have it today")
+                    .tip("`i64`, `str` and `bool` are the ones that work all the way down.")
+                    .fix("one of those for now"),
+            );
+        } else {
+            self.errors.push(
+                Diagnostic::new("E0402", format!("`{word}` is not a type."))
+                    .primary(link, "here")
+                    .rule("a chain says the type of what it is describing")
+                    .tip("the types are the numbers, `e`, `bool` and `str`, and `nothing` where a function gives none back.")
+                    .fix("check the spelling"),
+            );
+        }
+        None
+    }
+
+    /// A whole function: its parameters put in scope, then its body.
+    fn function(&mut self, func: &ast::Func) -> Option<Func> {
+        let name = self.named(func.name);
+        let which = *self.named.get(&name)?;
+        let signature = &self.signatures[which as usize];
+        let (visibility, returns) = (signature.visibility, signature.returns.clone());
+        let takes: Vec<Ty> = signature.takes.clone();
+
+        let params: Vec<(Span, Span, Ty)> = func
+            .params
+            .iter()
+            .zip(&takes)
+            .map(|(p, ty)| (p.name, p.span, ty.clone()))
+            .collect();
+        let body = self.in_a_function(returns.clone(), &params, &func.body);
+
+        // A function that answers with something has to answer on every way out. There
+        // is no value to hand back otherwise, and no honest thing to invent.
+        if returns.is_some() && !gives(&body) {
+            let ty = returns.clone().expect("just checked");
+            self.errors.push(
+                Diagnostic::new("E0466", format!("this function says it gives back {} `{}`, and does not always.", ty.article(), ty.name()))
+                    .primary(func.name, "here")
+                    .rule("every way out of a function that answers with something ends in a `give`")
+                    .tip("an `if` counts only when it has an `else` and every arm gives -- otherwise there is a way through with no answer.")
+                    .fix("`give [ … ];` at the end"),
+            );
+        }
+
+        Some(Func {
+            name,
+            visibility,
+            returns,
+            takes: takes.len(),
+            locals: std::mem::take(&mut self.locals),
+            body,
+            at: func.name,
+        })
+    }
+
+    /// Check a body with a scope, a set of parameters and a return type of its own.
+    fn in_a_function(
+        &mut self,
+        returns: Option<Ty>,
+        params: &[(Span, Span, Ty)],
+        body: &[ast::Stmt],
+    ) -> Vec<Stmt> {
+        self.locals = Vec::new();
+        self.scope = vec![HashMap::new()];
+        self.depth = 0;
+        self.returns = returns;
+
+        for (name, chain, ty) in params {
+            let text = self.named(*name);
+            let id = LocalId(self.locals.len() as u32);
+            self.locals.push(Local {
+                counter: false,
+                name: text.clone(),
+                ty: ty.clone(),
+                // Every parameter is written to say so, and `mut` on one changes only
+                // this function's copy -- nothing here is a reference yet.
+                mutable: self.text(*chain).starts_with("mut."),
+                at: *name,
+                chain: *chain,
+            });
+            if self.scope[0].insert(text.clone(), id).is_some() {
+                self.errors.push(
+                    Diagnostic::new("E0201", format!("`'{text}'` is declared twice."))
+                        .primary(*name, "and declared again here")
+                        .rule("one name means one thing")
+                        .fix("rename one of them"),
+                );
+            }
+        }
+
+        self.statements(body)
     }
 
     // --- declarations ---------------------------------------------------------------
@@ -352,6 +822,16 @@ impl<'a> Checker<'a> {
 
         for link in var.chain.iter().skip(1) {
             match self.text(*link) {
+                // Who can see it was read before this, by whoever is at the top of the
+                // file. Here it is simply not the type.
+                word if self.at_top && Visibility::from_word(word).is_some() => {}
+                word @ ("mut" | "immut") if self.at_top => self.errors.push(
+                    Diagnostic::new("E0473", format!("a constant never changes, so `{word}` says nothing."))
+                        .primary(*link, "here")
+                        .rule("`const` is the answer to whether it changes, which is why it is a different word from `var`")
+                        .tip("a variable that never changes is `var.immut`, inside a function.")
+                        .fix("remove it"),
+                ),
                 word @ ("mut" | "immut") if mutable.is_none() && ty_span.is_none() => {
                     mutable = Some((word == "mut", *link));
                 }
@@ -398,6 +878,10 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // A constant is never mutable, and does not have to say so.
+        if self.at_top {
+            mutable = mutable.or(Some((false, var.chain[0])));
+        }
         let Some((mutable, _)) = mutable else {
             self.errors.push(
                 Diagnostic::new("E0444", "this declaration does not say whether it can change.")
@@ -519,6 +1003,27 @@ impl<'a> Checker<'a> {
     // --- values ---------------------------------------------------------------------
 
     fn value(&mut self, value: &ast::Value, ty: &Ty, ty_span: Span) -> Option<Value> {
+        // A value that is one call is that call's answer, whatever the type -- the same
+        // way a value that is one name is that variable's. Neither is a list of pieces,
+        // and reading either as one would ask the wrong question about it.
+        if let [term @ (ast::Term::Call(_) | ast::Term::Piece(ast::Piece::Call(_)))] =
+            value.terms.as_slice()
+        {
+            let built = self.term(term)?;
+            let found = self.type_of(&built, value.span)?;
+            if &found != ty {
+                self.errors.push(
+                    Diagnostic::new("E0406", format!("this answers with {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                        .primary(value.span, format!("{} `{}`", found.article(), found.name()))
+                        .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                        .rule("nothing converts on its own — two types meet only where something says they should")
+                        .fix("declare it the same type"),
+                );
+                return None;
+            }
+            return Some(built);
+        }
+
         // No operators written: the pieces sit side by side, which builds text.
         if !value.has_operators() {
             return self.juxtaposed(value, ty, ty_span);
@@ -556,8 +1061,7 @@ impl<'a> Checker<'a> {
     fn juxtaposed(&mut self, value: &ast::Value, ty: &Ty, ty_span: Span) -> Option<Value> {
         // A value that is one name is that variable's value, whatever the type.
         if let [ast::Term::Piece(ast::Piece::Name(span))] = value.terms.as_slice() {
-            let local = self.lookup(*span)?;
-            let held = self.locals[local.0 as usize].ty.clone();
+            let (built, held) = self.named_value(*span)?;
             if &held != ty {
                 self.errors.push(
                     Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", held.article(), held.name(), ty.article(), ty.name()))
@@ -568,7 +1072,7 @@ impl<'a> Checker<'a> {
                 );
                 return None;
             }
-            return Some(Value::Copy(local));
+            return Some(built);
         }
         // A single bracketed value is just that value.
         if let [ast::Term::Group { value: inner, .. }] = value.terms.as_slice() {
@@ -838,23 +1342,37 @@ impl<'a> Checker<'a> {
     /// The answer is known here, because a shape is written down in the declaration and
     /// never changes. So this is a number by the time anything runs, and a loop bounded
     /// by it costs nothing at all.
-    fn call(&mut self, name: Span, args: &[ast::Term], close: Span) -> Option<Value> {
-        let word = self.text(name);
-        if word != "count" {
-            self.errors.push(
-                Diagnostic::new("E0455", format!("there is nothing called `{word}`."))
-                    .primary(name, "here")
-                    .rule("a bare word before a bracket is a call, and `count` is the only one so far")
-                    .tip("functions of your own are not built yet.")
-                    .fix("did you mean `count`?"),
-            );
-            return None;
+    fn call(&mut self, call: &ast::Call) -> Option<Value> {
+        if self.text(call.name) != "count" {
+            let (which, args) = self.invocation(call)?;
+            if self.signatures[which as usize].returns.is_none() {
+                let name = self.signatures[which as usize].name.clone();
+                let at = self.signatures[which as usize].at;
+                self.errors.push(
+                    Diagnostic::new("E0471", format!("`'{name}'` gives `nothing` back, and this wants a value."))
+                        .secondary(at, "declared `nothing` here")
+                        .primary(call.name.to(call.close), "and its answer is wanted here")
+                        .rule("`nothing` means there is no answer, and there is no value to stand in for one")
+                        .fix("call it on its own line, or have it give something back"),
+                );
+                return None;
+            }
+            return Some(Value::Call { func: which, args });
         }
 
-        let [ast::Term::Piece(ast::Piece::Name(of))] = args else {
+        let [one] = call.args.as_slice() else {
             self.errors.push(
                 Diagnostic::new("E0456", "`count` counts one array.")
-                    .primary(name.to(close), "here")
+                    .primary(call.name.to(call.close), "here")
+                    .rule("`count` takes the name of an array, and nothing else")
+                    .fix("`count['xs']`"),
+            );
+            return None;
+        };
+        let [ast::Term::Piece(ast::Piece::Name(of))] = one.terms.as_slice() else {
+            self.errors.push(
+                Diagnostic::new("E0456", "`count` counts one array.")
+                    .primary(one.span, "here")
                     .rule("`count` takes the name of an array, and nothing else")
                     .fix("`count['xs']`"),
             );
@@ -890,10 +1408,7 @@ impl<'a> Checker<'a> {
                 None
             }
             ast::Term::At { name, indices, close } => self.at(*name, indices, *close),
-            ast::Term::Call { name, args, close }
-            | ast::Term::Piece(ast::Piece::Call { name, args, close }) => {
-                self.call(*name, args, *close)
-            }
+            ast::Term::Call(call) | ast::Term::Piece(ast::Piece::Call(call)) => self.call(call),
             ast::Term::Elements { open, close, .. } => {
                 self.errors.push(
                     Diagnostic::new("E0437", "this is a list of elements, and nothing here wants one.")
@@ -914,8 +1429,7 @@ impl<'a> Checker<'a> {
                 None
             }
             ast::Term::Piece(ast::Piece::Name(span)) => {
-                let local = self.lookup(*span)?;
-                Some(Value::Copy(local))
+                self.named_value(*span).map(|(value, _)| value)
             }
             ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
                 let digits = unmarked(self.text(*mark));
@@ -984,6 +1498,8 @@ impl<'a> Checker<'a> {
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array(_) => None,
+            Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
+            Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
             Value::At { shape, array, .. } => {
                 let Value::Copy(local) = **array else { return None };
                 let _ = shape;
@@ -1081,7 +1597,8 @@ impl<'a> Checker<'a> {
                 );
                 None
             }),
-            ast::Piece::Call { name, close, .. } | ast::Piece::At { name, close, .. } => {
+            ast::Piece::Call(ast::Call { name, close, .. })
+            | ast::Piece::At { name, close, .. } => {
                 self.errors.push(
                     Diagnostic::new("E0411", "an element cannot be one piece of a longer value yet.")
                         .primary(name.to(*close), "here")
@@ -1172,21 +1689,118 @@ impl<'a> Checker<'a> {
     fn statements(&mut self, body: &[ast::Stmt]) -> Vec<Stmt> {
         let outer = std::mem::take(&mut self.body);
         for (n, stmt) in body.iter().enumerate() {
-            // `break` ends the block it is in, so anything under it never runs. Quench
-            // says so rather than quietly dropping it.
-            if let Some(ast::Stmt::Break(word)) = body.get(n.wrapping_sub(1)) {
+            // `break` and `give` both end the block they are in, so anything under one
+            // never runs. Quench says so rather than quietly dropping it.
+            let ended = match body.get(n.wrapping_sub(1)) {
+                Some(ast::Stmt::Break(word)) => Some((*word, "break", "the loop is left here")),
+                Some(ast::Stmt::Give(give)) => {
+                    Some((give.word, "give", "the answer is given here"))
+                }
+                _ => None,
+            };
+            if let Some((word, which, said)) = ended {
                 self.errors.push(
                     Diagnostic::new("E0445", "nothing here can run.")
-                        .secondary(*word, "the loop is left here")
+                        .secondary(word, said)
                         .primary(stmt.span(), "and this is under it")
-                        .rule("`break` ends the block it is written in")
-                        .fix("move it above the `break`, or into the `if` that guards it"),
+                        .rule(format!("`{which}` ends the block it is written in"))
+                        .fix(format!("move it above the `{which}`, or into the `if` that guards it")),
                 );
                 break;
             }
             self.statement(stmt);
         }
         std::mem::replace(&mut self.body, outer)
+    }
+
+    // --- answering --------------------------------------------------------------------
+
+    /// `give [ … ];`, checked against what the chain promised.
+    fn answer(&mut self, give: &ast::Give) {
+        match (self.returns.clone(), &give.value) {
+            (Some(ty), Some(value)) => {
+                let Some(built) = self.value(value, &ty, give.word) else { return };
+                self.body.push(Stmt::Give(Some(built)));
+            }
+            (Some(ty), None) => self.errors.push(
+                Diagnostic::new("E0467", format!("this gives nothing back, and the function said {} `{}`.", ty.article(), ty.name()))
+                    .primary(give.span, "here")
+                    .rule("a `give` with no value is for a function that answers with `nothing`")
+                    .fix(format!("`give [ … ];` with {} `{}` in it", ty.article(), ty.name())),
+            ),
+            (None, Some(value)) if self.in_start => self.errors.push(
+                Diagnostic::new("E0468", "`START` has nobody to give an answer to.")
+                    .primary(value.span, "here")
+                    .rule("`START` is where the program begins, not something anything calls")
+                    .tip("`give;` on its own works here, and stops the program early.")
+                    .fix("`give;`, or print it instead"),
+            ),
+            (None, Some(value)) => self.errors.push(
+                Diagnostic::new("E0468", "this gives something back, and the function said `nothing`.")
+                    .primary(value.span, "here")
+                    .rule("`nothing` means there is no answer, so there is nowhere for this to go")
+                    .tip("`give;` on its own is how you leave early.")
+                    .fix("`give;`, or say what the function answers with"),
+            ),
+            (None, None) => self.body.push(Stmt::Give(None)),
+        }
+    }
+
+    /// A call written for what it does rather than for its answer.
+    fn perform(&mut self, call: &ast::Call) {
+        let name = self.text(call.name);
+        if name == "count" {
+            self.errors.push(
+                Diagnostic::new("E0469", "`count` answers a question and does nothing else.")
+                    .primary(call.name.to(call.close), "here")
+                    .rule("a call written on its own is written for what it does, and this does nothing")
+                    .fix("use the answer, or remove the line"),
+            );
+            return;
+        }
+        let Some((which, args)) = self.invocation(call) else { return };
+        self.body.push(Stmt::Do { func: which, args });
+    }
+
+    /// Look a call up, and check what it was given against what it takes.
+    fn invocation(&mut self, call: &ast::Call) -> Option<(u32, Vec<Value>)> {
+        let name = self.text(call.name).to_string();
+        let Some(&which) = self.named.get(&name) else {
+            self.errors.push(
+                Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
+                    .primary(call.name, "here")
+                    .rule("a bare word before a bracket is a call, and this names no function")
+                    .tip("`count` is the one that comes with the language.")
+                    .fix("check the spelling, or declare it with `fn`"),
+            );
+            return None;
+        };
+
+        let signature = &self.signatures[which as usize];
+        let (wanted, at, list) = (signature.takes.clone(), signature.at, signature.list);
+        if call.args.len() != wanted.len() {
+            self.errors.push(
+                Diagnostic::new(
+                    "E0470",
+                    format!(
+                        "`'{name}'` takes {}, and was given {}.",
+                        counted(wanted.len(), "thing"),
+                        counted(call.args.len(), "thing")
+                    ),
+                )
+                .secondary(list, format!("takes {}", counted(wanted.len(), "thing")))
+                .primary(call.name.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                .rule("a call brings one value for each parameter, in the same order")
+                .fix("add what is missing, or take away what is spare"),
+            );
+            return None;
+        }
+
+        let mut args = Vec::new();
+        for (given, ty) in call.args.iter().zip(&wanted) {
+            args.push(self.value(given, ty, at)?);
+        }
+        Some((which, args))
     }
 
     // --- looping ----------------------------------------------------------------------
@@ -1467,9 +2081,8 @@ impl<'a> Checker<'a> {
         for piece in &print.pieces {
             match piece {
                 ast::Piece::Name(span) => {
-                    let Some(local) = self.lookup(*span) else { continue };
-                    let ty = self.locals[local.0 as usize].ty.clone();
-                    pieces.push(Printed::Value { value: Value::Copy(local), ty });
+                    let Some((value, ty)) = self.named_value(*span) else { continue };
+                    pieces.push(Printed::Value { value, ty });
                 }
                 ast::Piece::Written { ty: None, mark } => {
                     self.errors.push(
@@ -1521,9 +2134,10 @@ impl<'a> Checker<'a> {
                     let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
                     pieces.push(Printed::Value { value, ty });
                 }
-                ast::Piece::Call { name, args, close } => {
-                    let Some(value) = self.call(*name, args, *close) else { continue };
-                    let Some(ty) = self.type_of(&value, name.to(*close)) else { continue };
+                ast::Piece::Call(call) => {
+                    let Some(value) = self.call(call) else { continue };
+                    let at = call.name.to(call.close);
+                    let Some(ty) = self.type_of(&value, at) else { continue };
                     pieces.push(Printed::Value { value, ty });
                 }
                 ast::Piece::Escape(span) => match escape(self.text(*span)) {
@@ -1544,8 +2158,34 @@ impl<'a> Checker<'a> {
         self.scope.iter().rev().find_map(|scope| scope.get(name)).copied()
     }
 
+    /// A name used as a value: what a variable holds, or a constant written in.
+    fn named_value(&mut self, span: Span) -> Option<(Value, Ty)> {
+        let name = self.named(span);
+        if let Some(local) = self.seen(&name) {
+            return Some((Value::Copy(local), self.locals[local.0 as usize].ty.clone()));
+        }
+        if let Some(&which) = self.known.get(&name) {
+            return Some((Value::Const(which), self.constants[which as usize].ty.clone()));
+        }
+        self.lookup(span)
+            .map(|local| (Value::Copy(local), self.locals[local.0 as usize].ty.clone()))
+    }
+
+    /// A name that has to be somewhere a value *lives* — indexed, counted or changed.
     fn lookup(&mut self, span: Span) -> Option<LocalId> {
         let name = self.named(span);
+        if let Some(&which) = self.known.get(&name) {
+            let at = self.constants[which as usize].at;
+            self.errors.push(
+                Diagnostic::new("E0472", format!("`'{name}'` is a constant."))
+                    .secondary(at, "declared here")
+                    .primary(span, "and wanted somewhere it lives, here")
+                    .rule("a constant is written in wherever it is named, so there is no storage to index or change")
+                    .tip("that is what makes it a constant rather than a variable that nobody assigns to.")
+                    .fix("declare a `var` inside the function, from this"),
+            );
+            return None;
+        }
         match self.seen(&name) {
             Some(local) => Some(local),
             None => {
@@ -1569,6 +2209,9 @@ impl<'a> Checker<'a> {
     /// Only ever suggests something within one edit, because a suggestion that is not
     /// the answer is worse than no suggestion: it costs the reader a second look.
     fn nearest(&self, name: &str) -> Option<String> {
+        if let Some(near) = self.known.keys().find(|known| within_one_edit(known, name)) {
+            return Some(near.clone());
+        }
         self.scope
             .iter()
             .rev()

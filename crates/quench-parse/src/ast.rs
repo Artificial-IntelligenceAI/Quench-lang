@@ -14,8 +14,56 @@ use quench_diag::Span;
 /// A whole file.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Program {
+    /// Constants and functions, in the order they were written — which matters, because
+    /// a constant may be built out of the ones above it.
+    pub items: Vec<Item>,
     /// Where the program begins, if it says.
     pub start: Option<Start>,
+}
+
+/// Something at the top of a file. Not `START`, which is neither and is kept apart.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Item {
+    /// `const.export.i64 ['LIMIT'] = [*100*];`
+    ///
+    /// The same syntax as a declaration, because it is one — only the keyword and where
+    /// it is written differ. The chain says who can see it and what it is, and there is
+    /// no link for whether it changes: a constant never does, and a link that only ever
+    /// says one thing is noise rather than explicitness.
+    Const(Var),
+    Func(Func),
+}
+
+impl Item {
+    pub fn span(&self) -> Span {
+        match self {
+            Item::Const(c) => c.span,
+            Item::Func(f) => f.span,
+        }
+    }
+}
+
+/// `fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] { … }`
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Func {
+    /// `fn`, then everything dotted after it — who can see it, and what it gives back.
+    pub chain: Vec<Span>,
+    pub name: Span,
+    /// Where the parameter list was written, empty or not, for pointing at when a call
+    /// gives the wrong number of things.
+    pub takes: Span,
+    pub params: Vec<Param>,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+/// One parameter: a declaration's chain with `var` taken off, and a name.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Param {
+    /// `immut.i64` — the same links `var` would carry, said the same way.
+    pub chain: Vec<Span>,
+    pub name: Span,
+    pub span: Span,
 }
 
 /// `START`, and everything after it.
@@ -35,6 +83,27 @@ pub enum Stmt {
     Loop(Loop),
     /// `break;` — leave the innermost loop.
     Break(Span),
+    /// `give ['a' + 'b'];` — the answer, and the end of the function.
+    Give(Give),
+    /// `greet[*Tankun*];` — a call written for what it does rather than for its answer.
+    Do(Call),
+}
+
+/// `give [ … ];`, or `give;` from a function that gives nothing back.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Give {
+    pub word: Span,
+    pub value: Option<Value>,
+    pub span: Span,
+}
+
+/// `add[*1*, *2*]` — a bare word before a bracket.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Call {
+    pub name: Span,
+    /// One value per argument, separated by commas.
+    pub args: Vec<Value>,
+    pub close: Span,
 }
 
 /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.
@@ -127,6 +196,8 @@ impl Stmt {
             Stmt::If(i) => i.span,
             Stmt::Loop(l) => l.span,
             Stmt::Break(s) => *s,
+            Stmt::Give(g) => g.span,
+            Stmt::Do(c) => c.name.to(c.close),
         }
     }
 }
@@ -194,7 +265,7 @@ pub enum Term {
     Number(Span),
     /// `count['xs']` — a bare word before a bracket is a call, where a quoted name
     /// before one is an index. That distinction was already in the language.
-    Call { name: Span, args: Vec<Term>, close: Span },
+    Call(Call),
     /// `( … )` — which is how anything mathematics did not settle gets said.
     Group { open: Span, value: Box<Value>, close: Span },
     /// `not x`
@@ -208,7 +279,7 @@ impl Term {
             Term::Elements { open, close, .. } => open.to(*close),
             Term::At { name, close, .. } => name.to(*close),
             Term::Number(span) => *span,
-            Term::Call { name, close, .. } => name.to(*close),
+            Term::Call(c) => c.name.to(c.close),
             Term::Group { open, close, .. } => open.to(*close),
             Term::Not { word, of } => word.to(of.span()),
         }
@@ -277,7 +348,7 @@ pub enum Piece {
     /// `'xs'[…]` — one element of an array.
     At { name: Span, indices: Vec<Term>, close: Span },
     /// `count['xs']` — the same call a value can hold, in a list.
-    Call { name: Span, args: Vec<Term>, close: Span },
+    Call(Call),
 }
 
 impl Piece {
@@ -287,7 +358,7 @@ impl Piece {
             Piece::Written { ty: None, mark } => *mark,
             Piece::Name(s) | Piece::Escape(s) => *s,
             Piece::At { name, close, .. } => name.to(*close),
-            Piece::Call { name, close, .. } => name.to(*close),
+            Piece::Call(c) => c.name.to(c.close),
         }
     }
 }

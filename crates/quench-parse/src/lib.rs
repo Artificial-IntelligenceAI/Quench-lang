@@ -14,7 +14,10 @@
 
 pub mod ast;
 
-pub use ast::{Arm, If, Loop, LoopKind, OpKind, Operator, Piece, Place, Print, Program, Set, Start, Stmt, Term, Value, Var};
+pub use ast::{
+    Arm, Call, Func, Give, If, Item, Loop, LoopKind, OpKind, Operator, Param, Piece,
+    Place, Print, Program, Set, Start, Stmt, Term, Value, Var,
+};
 
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
@@ -118,17 +121,89 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            self.errors.push(
-                Diagnostic::new("E0102", "only `START` can be at the top of a file so far.")
-                    .primary(token.span, "this is not `START`")
-                    .rule("a file holds declarations and one `START`, and nothing else runs")
-                    .tip("declaring things outside `START` is not built yet.")
-                    .fix("move this after `START`"),
-            );
+            if token.kind == Kind::Word {
+                match self.text(token.span) {
+                    "fn" => {
+                        match self.function() {
+                            Some(func) => program.items.push(ast::Item::Func(func)),
+                            None => self.recover(),
+                        }
+                        continue;
+                    }
+                    // A constant is a declaration written somewhere else, so it is
+                    // parsed by the same code and gets the same errors.
+                    "const" => {
+                        match self.var() {
+                            Some(item) => program.items.push(ast::Item::Const(item)),
+                            None => self.recover(),
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // `var` at the top of a file is the one worth naming, because it is the
+            // mistake somebody makes on purpose: the rule is that constants live
+            // outside and variables live inside, and this is where they meet.
+            let diag = if token.kind == Kind::Word && self.text(token.span) == "var" {
+                Diagnostic::new("E0102", "a variable cannot be at the top of a file.")
+                    .primary(token.span, "here")
+                    .rule("constants live outside a function and variables live inside one")
+                    .tip("a constant is a value the compiler can work out. Anything needing code to run to produce it would need that code to run before `START`.")
+                    .fix("`const.<visibility>.<type>` here, or move it inside `START`")
+            } else {
+                Diagnostic::new("E0102", "this cannot be at the top of a file.")
+                    .primary(token.span, "here")
+                    .rule("a file holds constants, functions and one `START`")
+                    .tip("statements run, and the only place anything runs is inside a function.")
+                    .fix("did you mean `const`, `fn` or `START`?")
+            };
+            self.errors.push(diag);
             self.recover();
         }
 
         program
+    }
+
+    /// `fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] { … }`
+    fn function(&mut self) -> Option<ast::Func> {
+        let word = self.bump().span;
+        let mut chain = vec![word];
+        while self.eat(Kind::Dot).is_some() {
+            chain.push(self.expect(Kind::Word, "a chain")?);
+        }
+
+        self.expect(Kind::OpenList, "a function")?;
+        let name = self.expect(Kind::Name, "a function")?;
+        self.expect(Kind::CloseList, "a function")?;
+
+        // Written even when empty, because `[]` says *takes nothing* out loud and an
+        // omission would only say it by not being there.
+        let open = self.expect(Kind::OpenList, "a function")?;
+        let mut params = Vec::new();
+        while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            params.push(self.parameter()?);
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let close = self.expect(Kind::CloseList, "a parameter list")?;
+
+        let body = self.block()?;
+        let end = body.last().map(ast::Stmt::span).unwrap_or(close);
+        Some(ast::Func { chain, name, takes: open.to(close), params, body, span: word.to(end) })
+    }
+
+    /// `immut.i64 'a'` — a declaration's chain with `var` taken off.
+    fn parameter(&mut self) -> Option<ast::Param> {
+        let first = self.expect(Kind::Word, "a parameter")?;
+        let mut chain = vec![first];
+        while self.eat(Kind::Dot).is_some() {
+            chain.push(self.expect(Kind::Word, "a chain")?);
+        }
+        let name = self.expect(Kind::Name, "a parameter")?;
+        Some(ast::Param { chain, name, span: first.to(name) })
     }
 
     /// `{ … }` — the statements a block holds.
@@ -196,6 +271,26 @@ impl<'a> Parser<'a> {
             "set" => self.set().map(Stmt::Set),
             "if" => self.conditional().map(Stmt::If),
             "loop" => self.repeat().map(Stmt::Loop),
+            "give" => {
+                let word = self.bump().span;
+                // `give;` from a function that gives nothing back. The word is still
+                // written, because leaving early is a thing you do on purpose.
+                if let Some(end) = self.eat(Kind::Semicolon) {
+                    return Some(Stmt::Give(ast::Give { word, value: None, span: word.to(end) }));
+                }
+                self.expect(Kind::OpenList, "`give`")?;
+                let value = self.value()?;
+                self.expect(Kind::CloseList, "`give`")?;
+                let end = self.expect(Kind::Semicolon, "a statement")?;
+                Some(Stmt::Give(ast::Give { word, value: Some(value), span: word.to(end) }))
+            }
+            word if self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
+                && !matches!(word, "var" | "set" | "print" | "if" | "loop") =>
+            {
+                let call = self.invocation()?;
+                self.expect(Kind::Semicolon, "a statement")?;
+                Some(Stmt::Do(call))
+            }
             "break" => {
                 let word = self.bump().span;
                 let end = self.expect(Kind::Semicolon, "a statement")?;
@@ -237,10 +332,10 @@ impl<'a> Parser<'a> {
             if self.peek().kind == Kind::Word
                 && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
             {
-                let ast::Term::Call { name, args, close } = self.term()? else {
+                let ast::Term::Call(call) = self.term()? else {
                     unreachable!("just matched a call")
                 };
-                pieces.push(ast::Piece::Call { name, args, close });
+                pieces.push(ast::Piece::Call(call));
                 continue;
             }
             pieces.push(self.piece(true)?);
@@ -249,6 +344,22 @@ impl<'a> Parser<'a> {
         self.expect(Kind::CloseList, "`print`")?;
         let end = self.expect(Kind::Semicolon, "a statement")?;
         Some(Print { word, to, pieces, span: word.to(end) })
+    }
+
+    /// `add[*1*, *2*]` — arguments are values, so commas separate them. Juxtaposition
+    /// builds one value out of pieces, which is why it cannot also separate two.
+    fn invocation(&mut self) -> Option<ast::Call> {
+        let name = self.bump().span;
+        self.bump();
+        let mut args = Vec::new();
+        while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
+            args.push(self.value()?);
+            if self.eat(Kind::Comma).is_none() {
+                break;
+            }
+        }
+        let close = self.expect(Kind::CloseList, "a call")?;
+        Some(ast::Call { name, args, close })
     }
 
     /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.
@@ -558,14 +669,7 @@ impl<'a> Parser<'a> {
         if token.kind == Kind::Word
             && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
         {
-            let name = self.bump().span;
-            self.bump();
-            let mut args = Vec::new();
-            while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
-                args.push(self.term()?);
-            }
-            let close = self.expect(Kind::CloseList, "a call")?;
-            return Some(ast::Term::Call { name, args, close });
+            return self.invocation().map(ast::Term::Call);
         }
         // A quoted name followed by a bracket is an index.
         if token.kind == Kind::Name && self.tokens.get(self.at + 1).map(|t| t.kind) == Some(Kind::OpenList)
@@ -645,7 +749,7 @@ impl<'a> Parser<'a> {
 ///
 /// Small counts are spelled out because the message is a sentence and a reader is
 /// reading it, not scanning it. Past twelve, digits are what a person would write.
-fn counted(n: usize, what: &str) -> String {
+pub fn counted(n: usize, what: &str) -> String {
     const WORDS: [&str; 13] = [
         "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
         "ten", "eleven", "twelve",
