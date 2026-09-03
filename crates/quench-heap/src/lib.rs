@@ -24,6 +24,36 @@
 use quench_num::Exact;
 use quench_qir::{self as qir, Elements};
 
+/// Which space a handle is an index into, packed into the top byte of a root.
+///
+/// The interpreter knows a slot's space from QIR, which says what every value in a
+/// function is. Compiled code has no such thing to hand at run time — a root there is
+/// an `i64` in an array — so the space rides along in bits nothing else uses. A handle
+/// is an index into a list, and no list is going to have `2^56` things in it.
+pub const SPACE_SHIFT: u32 = 56;
+
+/// Turn a handle and its space into one number, for compiled code to store.
+pub fn rooted(ty: qir::Ty, handle: i64) -> i64 {
+    let space = match ty {
+        qir::Ty::Handle => 1,
+        qir::Ty::Text => 2,
+        qir::Ty::Exact => 3,
+        _ => 0,
+    };
+    (space << SPACE_SHIFT) | (handle & ((1 << SPACE_SHIFT) - 1))
+}
+
+/// And back again, for the collector to read.
+pub fn unrooted(packed: i64) -> Option<(qir::Ty, i64)> {
+    let handle = packed & ((1 << SPACE_SHIFT) - 1);
+    Some(match packed >> SPACE_SHIFT {
+        1 => (qir::Ty::Handle, handle),
+        2 => (qir::Ty::Text, handle),
+        3 => (qir::Ty::Exact, handle),
+        _ => return None,
+    })
+}
+
 /// One array on the heap, with the header that says what its slots are.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Object {
@@ -47,6 +77,12 @@ struct Space<T> {
     /// How many at the front were laid out before the program ran. Never collected:
     /// they are what the program was written with rather than what it made.
     written: usize,
+}
+
+impl<T> Default for Space<T> {
+    fn default() -> Self {
+        Space { held: Vec::new(), free: Vec::new(), written: 0 }
+    }
 }
 
 impl<T> Space<T> {
@@ -96,6 +132,7 @@ impl<T> Space<T> {
 }
 
 /// Everything a running program has made, and everything it was written with.
+#[derive(Default)]
 pub struct Heap {
     arrays: Space<Object>,
     texts: Space<String>,
@@ -115,19 +152,30 @@ const FIRST: usize = 256;
 impl Heap {
     /// A heap laid out with what the module was written with, before anything runs.
     pub fn new(module: &qir::Module) -> Heap {
-        let tables = module
-            .tables
+        Heap::laid_out(&module.tables, &module.text)
+    }
+
+    /// The same, from the pieces rather than the module — which is what compiled code
+    /// has to hand, the module being long gone by the time it runs.
+    pub fn laid_out(tables: &[Vec<i64>], text: &[String]) -> Heap {
+        let tables = tables
             .iter()
             .map(|values| Object { holds: Elements::I64, depth: 0, values: values.clone() })
             .collect();
         Heap {
             arrays: Space::new(tables),
-            texts: Space::new(module.text.clone()),
+            texts: Space::new(text.to_vec()),
             exacts: Space::new(Vec::new()),
             since: 0,
             allow: FIRST,
             collections: 0,
         }
+    }
+
+    /// Everything a set of packed roots reaches. What compiled code hands over.
+    pub fn collect_packed(&mut self, packed: &[i64]) {
+        let roots: Vec<(qir::Ty, i64)> = packed.iter().filter_map(|p| unrooted(*p)).collect();
+        self.collect(&roots);
     }
 
     pub fn make(&mut self, holds: Elements, depth: i64, values: Vec<i64>) -> i64 {

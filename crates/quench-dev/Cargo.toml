@@ -11,6 +11,7 @@ repository.workspace = true
 quench-conf = { path = "../quench-conf" }
 quench-qir = { path = "../quench-qir" }
 quench-num = { path = "../quench-num" }
+quench-heap = { path = "../quench-heap" }
 cranelift-codegen = "0.135"
 cranelift-frontend = "0.135"
 cranelift-jit = "0.135"

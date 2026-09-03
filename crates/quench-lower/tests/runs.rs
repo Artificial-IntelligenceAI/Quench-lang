@@ -1522,3 +1522,65 @@ START {
         "[2 3 5] written",
     );
 }
+
+#[test]
+fn the_dev_jit_collects_too() {
+    // The engine that has no list of its own to walk. Every reference-typed value in a
+    // function gets a slot in a frame the runtime owns, written where the value is
+    // made -- so wherever compiled code is when a collection happens, it has already
+    // said what it is holding.
+    let source = "\
+START {
+    var.mut.i64 ['total'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.arr.i64 (3) ['scratch'] = [[*1* *2* *3*]];
+        var.immut.str ['junk'] = [*x* *y*];
+        set ['total'] = ['total' + 'scratch'[*2*]];
+    }
+    print.stdout['total'];
+}
+";
+    let out = lower(source);
+    assert!(out.ok(), "{}", report(source));
+    let module = out.module.expect("a program");
+
+    let compiled = quench_dev::compile(&module).expect("it compiles");
+    let (_, printed) = compiled.run_capturing();
+    assert_eq!(printed.out, "40000", "and it still answers");
+
+    let (arrays, texts, _, collections) = compiled.kept();
+    assert!(collections > 10, "it collected: {collections}");
+    assert!(arrays < 1000, "and kept almost nothing: {arrays} arrays");
+    assert!(texts < 1000, "text included: {texts} texts");
+}
+
+#[test]
+fn both_engines_keep_what_the_other_keeps() {
+    // Not something a program can see, and that is the point -- but the two arriving at
+    // nearly the same heap is what says the roots are the same roots. The Dev JIT holds
+    // a little more, because a slot it wrote is not cleared when the value dies: it
+    // keeps a thing alive slightly longer, which is the direction to be wrong in.
+    let source = "\
+START {
+    var.mut.arr.arr.i64 (grow grow) ['kept'] = [[]];
+    var.mut.arr.i64 (grow) ['row'] = [[*1* *2*]];
+    add ['kept'] = [share 'row'];
+    loop.temp.range.i64 ['i'] = [*1*, *20000*] {
+        var.immut.arr.i64 (2) ['junk'] = [[*1* *2*]];
+    }
+    print.stdout['kept'];
+}
+";
+    let out = lower(source);
+    assert!(out.ok(), "{}", report(source));
+    let module = out.module.expect("a program");
+
+    let (_, kept) = quench_interp::run_kept(&module).expect("it runs");
+    let compiled = quench_dev::compile(&module).expect("it compiles");
+    let (_, printed) = compiled.run_capturing();
+    let (arrays, _, _, _) = compiled.kept();
+
+    assert_eq!(printed.out, "[[1 2]]", "the rows survived in the compiled engine too");
+    let difference = arrays.abs_diff(kept.live.0);
+    assert!(difference < 50, "interpreter {} against dev jit {arrays}", kept.live.0);
+}

@@ -20,12 +20,11 @@
 //! here are not the interpreter's own opinion — they are chosen to match what Cranelift's
 //! `sdiv` and `srem` do, because that is what the machine code will do.
 
-pub mod heap;
-
-use heap::Heap;
+use quench_heap::Heap;
 use quench_qir as qir;
 use std::io::Write;
 
+pub use quench_heap::Heap as TheHeap;
 pub use qir::{Outcome, Trap};
 
 /// Why a module could not be run at all, as opposed to a program that ran and stopped.

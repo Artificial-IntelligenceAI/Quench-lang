@@ -54,6 +54,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Parser** (`quench-parse`) | **Working** — `START`, declarations, `print`, and recovery at the semicolon |
 | **Lowering** (`quench-lower`) | **Working** — the tree turned into QIR: `START`, `print`, text and escapes |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check` |
+| **The heap** (`quench-heap`) | **Working** — mark and sweep, shared by both engines, nothing moving |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked, `i64` and `str` all the way down |
 | Collector, stack maps | **Stage 1** — arrays allocate and nothing frees them yet. Written here, in Rust, not borrowed |
@@ -222,12 +223,13 @@ Both print the same thing, which is not a coincidence — it is
   before `START`, which is the model above, smuggled back in. So every variable
   lives inside a function.
 - **Memory is collected.** A garbage collector, not ownership and not refcounting.
-  **The interpreter collects** — mark and sweep, exact roots off its own call stack,
-  nothing moving. The Dev JIT still allocates and never frees, and that is not a
-  disagreement: finalisation is not observable, which is exactly what lets two engines
-  collect at different moments or one of them not at all. Every array carries what its
-  slots hold, because a slot is an `i64` whatever is in it and nothing else could tell
-  a number to leave alone from a handle to follow.
+  **Both engines collect** — mark and sweep, nothing moving, one heap shared between
+  them because an object model is a contract rather than each engine's own idea. Every
+  array carries what its slots hold, since a slot is an `i64` whatever is in it. The
+  interpreter's roots come off its own call stack; the Dev JIT has no such list, so
+  every reference-typed value in a function gets a slot in a frame the runtime owns,
+  written where the value is made — no stack maps, no unwinding, and nothing to keep in
+  step with a code generator. It costs nine per cent of the oracle.
   Ownership makes the shape of your data a tree, and cycles, self-reference, caches
   and interning are not trees; the usual escape — an arena of integer indices —
   keeps the memory safety and loses the guarantee it was bought for. **Finalisation

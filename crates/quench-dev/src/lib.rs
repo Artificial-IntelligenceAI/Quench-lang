@@ -90,6 +90,9 @@ pub struct Compiled {
     /// The module's constant tables. Laid into the heap at the start of every run, so
     /// that table `i` is handle `i` and the compiled code needs no lookup for one.
     _tables: Vec<Vec<i64>>,
+    /// Where compiled code writes the handles it is holding. Boxed and kept here so the
+    /// address baked into the code outlives the code.
+    _roots: Box<[i64]>,
     /// The block whose address the code carries. Boxed for the same reason, and read
     /// afterwards to find out whether the program stopped.
     runtime: Box<Runtime>,
@@ -108,8 +111,10 @@ impl Compiled {
     /// `None` if there is no such function, or if it takes arguments.
     pub fn call(&self, name: &str) -> Option<i64> {
         let (_, code) = self.callable.iter().find(|(known, _)| known == name)?;
-        HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
-        TEXTS.with(|texts| *texts.borrow_mut() = self._text.clone());
+        HEAP.with(|heap| {
+            *heap.borrow_mut() = quench_heap::Heap::laid_out(&self._tables, &self._text)
+        });
+        unsafe { (*(&*self.runtime as *const Runtime as *mut Runtime)).used = 0 };
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
         unsafe { (*rt).stopped = 0 };
         // Safe for the same reasons `run` is: the signature was checked at compile time
@@ -132,6 +137,15 @@ impl Compiled {
         )
     }
 
+    /// What the heap kept, which is the one thing the oracle cannot see.
+    pub fn kept(&self) -> (usize, usize, usize, usize) {
+        HEAP.with(|heap| {
+            let heap = heap.borrow();
+            let (a, t, e) = heap.live();
+            (a, t, e, heap.collections)
+        })
+    }
+
     /// Run the entry, and say whether it finished or stopped.
     pub fn outcome(&self) -> qir::Outcome {
         let answer = self.run();
@@ -146,8 +160,10 @@ impl Compiled {
     /// A program that stopped returns whatever was on hand at the time, which means
     /// nothing — [`Compiled::outcome`] is the one that says so.
     pub fn run(&self) -> i64 {
-        HEAP.with(|heap| *heap.borrow_mut() = self._tables.clone());
-        TEXTS.with(|texts| *texts.borrow_mut() = self._text.clone());
+        HEAP.with(|heap| {
+            *heap.borrow_mut() = quench_heap::Heap::laid_out(&self._tables, &self._text)
+        });
+        unsafe { (*(&*self.runtime as *const Runtime as *mut Runtime)).used = 0 };
         // The flag is per-run, so a program that stopped does not make the next one look
         // as though it did.
         let rt = &*self.runtime as *const Runtime as *mut Runtime;
@@ -331,6 +347,17 @@ struct Piece {
 struct Runtime {
     /// The module's text, for `print-text`.
     pieces: *const Piece,
+    /// Every handle compiled code is holding, and which space each is in.
+    ///
+    /// This is the thing the interpreter never needed: its call stack is a list it owns,
+    /// so its roots are simply there. Compiled code keeps its handles in registers and
+    /// stack slots that only the machine knows about, so it writes them out here as it
+    /// goes — one slot per reference-typed value in the function, filled where the value
+    /// is defined. See `notes/the-collector-earns-its-place.md`.
+    roots: *mut i64,
+    /// How many of `roots` are in use. Every function moves this on the way in and puts
+    /// it back on the way out, which is what makes the frames a stack.
+    used: i64,
     /// Zero while the program is running. A [`qir::Trap`] code once it has stopped.
     ///
     /// This is the answer to the thing compiled code could not do: it has nowhere to
@@ -351,17 +378,25 @@ fn native_order() -> cranelift_codegen::ir::Endianness {
     }
 }
 
-/// Where `stopped` sits inside [`Runtime`], for the load the generated code emits.
-const STOPPED_AT: i32 = std::mem::size_of::<*const Piece>() as i32;
+/// Where each field sits inside [`Runtime`], for the loads and stores generated code
+/// emits. A pointer and an `i64` are both eight bytes on everything Quench targets.
+const ROOTS_AT: i32 = 8;
+const USED_AT: i32 = 16;
+const STOPPED_AT: i32 = 24;
+
+/// How many roots there is room for. A program deeper than this has too many frames to
+/// be doing anything sensible, and stops the same way one that recursed too far does.
+const ROOM: usize = 1 << 18;
 
 thread_local! {
-    /// The heap compiled code allocates from.
+    /// Everything compiled code has made, and everything the module was written with.
     ///
-    /// Allocated and never freed — the first stage of the collector, which needs no
-    /// stack maps and no cooperation from any backend. A handle is an index into this.
-    /// Thread-local for the same reason the sink is, and tolerable for the same reason:
-    /// a worker in the oracle owns its thread.
-    static HEAP: std::cell::RefCell<Vec<Vec<i64>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The same heap the interpreter uses, because the object model is a contract
+    /// between the engines rather than each one's own idea. Thread-local for the same
+    /// reason the sink is, and tolerable for the same reason: a worker in the oracle
+    /// owns its thread.
+    static HEAP: std::cell::RefCell<quench_heap::Heap> =
+        std::cell::RefCell::new(quench_heap::Heap::default());
 
     /// Where a running program's output goes, when something is collecting it.
     ///
@@ -371,77 +406,83 @@ thread_local! {
     static SINK: std::cell::RefCell<Option<(Vec<u8>, Vec<u8>)>> =
         const { std::cell::RefCell::new(None) };
 
-    /// Every exact number the program has made. An `e` value is an index into this.
-    ///
-    /// Allocated and never freed, like the heap above. The arithmetic itself is
-    /// `quench_num`'s, which is the same code the interpreter calls — so the two cannot
-    /// answer differently, however large the numbers get.
-    static EXACTS: std::cell::RefCell<Vec<quench_num::Exact>> =
-        const { std::cell::RefCell::new(Vec::new()) };
 
-    /// Every piece of text there is: the ones the program was written with first, then
-    /// every one it builds while it runs. Laid out at the start of each run, the same
-    /// way the constant tables are.
-    static TEXTS: std::cell::RefCell<Vec<String>> =
-        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// One piece of text, whatever it was made by.
 fn text_of(index: i64) -> String {
-    TEXTS.with(|texts| texts.borrow()[index as usize].clone())
+    HEAP.with(|heap| heap.borrow().said(index).to_string())
+}
+
+/// Collect, if enough has been made to be worth it.
+///
+/// Called at the *top* of every host call that allocates, and nowhere else. Before one
+/// is the moment when everything compiled code holds has already been written to its
+/// slot and the thing about to be made does not exist yet — so nothing is missed and
+/// nothing brand new is swept.
+fn maybe_collect(rt: *mut Runtime) {
+    if !HEAP.with(|heap| heap.borrow().worth_collecting()) {
+        return;
+    }
+    let (roots, used) = unsafe { ((*rt).roots, (*rt).used) };
+    let packed = unsafe { std::slice::from_raw_parts(roots, used.max(0) as usize) };
+    HEAP.with(|heap| heap.borrow_mut().collect_packed(packed));
+}
+
+/// Put an array away, and give back the handle to it.
+fn keep_array(holds: qir::Elements, depth: i64, values: Vec<i64>) -> i64 {
+    HEAP.with(|heap| heap.borrow_mut().make(holds, depth, values))
 }
 
 /// Put an exact number away, and give back the handle to it.
 fn keep(value: quench_num::Exact) -> i64 {
-    EXACTS.with(|exacts| {
-        let mut exacts = exacts.borrow_mut();
-        exacts.push(value);
-        exacts.len() as i64 - 1
-    })
+    HEAP.with(|heap| heap.borrow_mut().exact(value))
 }
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn exact_read(rt: *mut Runtime, index: i64) -> i64 {
-    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
-    let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
-    let text = std::str::from_utf8(bytes).expect("the source was text");
-    let read = quench_num::Exact::parse(text)
+    maybe_collect(rt);
+    let read = quench_num::Exact::parse(&text_of(index))
         .expect("refused by the checker: an `e` that is not a number");
     keep(read)
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn exact_add(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let answer = EXACTS.with(|e| {
-        let e = e.borrow();
-        e[a as usize].add(&e[b as usize])
+extern "C" fn exact_add(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    maybe_collect(rt);
+    let answer = HEAP.with(|h| {
+        let h = h.borrow();
+        h.exactly(a).add(h.exactly(b))
     });
     keep(answer)
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn exact_sub(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let answer = EXACTS.with(|e| {
-        let e = e.borrow();
-        e[a as usize].sub(&e[b as usize])
+extern "C" fn exact_sub(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    maybe_collect(rt);
+    let answer = HEAP.with(|h| {
+        let h = h.borrow();
+        h.exactly(a).sub(h.exactly(b))
     });
     keep(answer)
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn exact_mul(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let answer = EXACTS.with(|e| {
-        let e = e.borrow();
-        e[a as usize].mul(&e[b as usize])
+extern "C" fn exact_mul(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    maybe_collect(rt);
+    let answer = HEAP.with(|h| {
+        let h = h.borrow();
+        h.exactly(a).mul(h.exactly(b))
     });
     keep(answer)
 }
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn exact_div(rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let answer = EXACTS.with(|e| {
-        let e = e.borrow();
-        e[a as usize].div(&e[b as usize])
+    maybe_collect(rt);
+    let answer = HEAP.with(|h| {
+        let h = h.borrow();
+        h.exactly(a).div(h.exactly(b))
     });
     match answer {
         Ok(value) => keep(value),
@@ -465,9 +506,10 @@ fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn exact_pow(rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let answer = EXACTS.with(|e| {
-        let e = e.borrow();
-        e[a as usize].power(&e[b as usize])
+    maybe_collect(rt);
+    let answer = HEAP.with(|h| {
+        let h = h.borrow();
+        h.exactly(a).power(h.exactly(b))
     });
     match answer {
         Ok(value) => keep(value),
@@ -501,13 +543,13 @@ extern "C" fn pow_i64_trapping(rt: *mut Runtime, base: i64, exponent: i64) -> i6
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn text_join(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    TEXTS.with(|texts| {
-        let mut texts = texts.borrow_mut();
-        let joined = format!("{}{}", texts[a as usize], texts[b as usize]);
-        texts.push(joined);
-        texts.len() as i64 - 1
-    })
+extern "C" fn text_join(rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    maybe_collect(rt);
+    let joined = HEAP.with(|h| {
+        let h = h.borrow();
+        format!("{}{}", h.said(a), h.said(b))
+    });
+    HEAP.with(|h| h.borrow_mut().text(joined))
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -521,9 +563,9 @@ extern "C" fn text_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn exact_compare(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    EXACTS.with(|e| {
-        let e = e.borrow();
-        match e[a as usize].cmp(&e[b as usize]) {
+    HEAP.with(|h| {
+        let h = h.borrow();
+        match h.exactly(a).cmp(h.exactly(b)) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
@@ -539,7 +581,7 @@ extern "C" fn print_float(_rt: *mut Runtime, stream: i64, bits: i64) -> i64 {
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn print_exact(_rt: *mut Runtime, stream: i64, value: i64) -> i64 {
-    let shown = EXACTS.with(|e| e.borrow()[value as usize].to_string());
+    let shown = HEAP.with(|h| h.borrow().exactly(value).to_string());
     write_out(stream, shown.as_bytes());
     0
 }
@@ -552,19 +594,17 @@ fn stop(rt: *mut Runtime, trap: qir::Trap) {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_new(_rt: *mut Runtime, len: i64) -> i64 {
-    HEAP.with(|heap| {
-        let mut heap = heap.borrow_mut();
-        heap.push(vec![0; len.max(0) as usize]);
-        heap.len() as i64 - 1
-    })
+extern "C" fn array_new(rt: *mut Runtime, len: i64, holds: i64, depth: i64) -> i64 {
+    maybe_collect(rt);
+    let holds = qir::Elements::from_code(holds).expect("the lowering wrote this constant");
+    keep_array(holds, depth, vec![0; len.max(0) as usize])
 }
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn array_set(rt: *mut Runtime, handle: i64, at: i64, value: i64) -> i64 {
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
-        let array = &mut heap[handle as usize];
+        let array = &mut heap.at_mut(handle).values;
         match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| array.get_mut(i))
         {
             Some(cell) => *cell = value,
@@ -578,7 +618,7 @@ extern "C" fn array_set(rt: *mut Runtime, handle: i64, at: i64, value: i64) -> i
 extern "C" fn array_get(rt: *mut Runtime, handle: i64, at: i64) -> i64 {
     HEAP.with(|heap| {
         let heap = heap.borrow();
-        match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| heap[handle as usize].get(i))
+        match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| heap.at(handle).values.get(i))
         {
             Some(value) => *value,
             // Nothing sensible to hand back, so zero -- and the generated code is about
@@ -593,23 +633,50 @@ extern "C" fn array_get(rt: *mut Runtime, handle: i64, at: i64) -> i64 {
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
-    HEAP.with(|heap| heap.borrow()[handle as usize].len() as i64)
+    HEAP.with(|heap| heap.borrow().at(handle).values.len() as i64)
+}
+
+/// Write a handle to the slot that stands for it, where there is one.
+///
+/// One store, at the point the value is made. What it buys is that a collection can
+/// happen anywhere without a stack to walk: whatever compiled code is holding, it has
+/// already said so.
+fn root_it(
+    b: &mut FunctionBuilder<'_>,
+    frame: ClifValue,
+    slot_of: &[Option<i32>],
+    func: &qir::Function,
+    value: qir::Value,
+    made: ClifValue,
+) {
+    let Some(slot) = slot_of[value.0 as usize] else { return };
+    let space = match func.ty_of(value) {
+        qir::Ty::Handle => 1i64,
+        qir::Ty::Text => 2,
+        qir::Ty::Exact => 3,
+        _ => return,
+    };
+    // Which space it is in rides in the top byte, because a root in compiled code is an
+    // `i64` in an array and nothing else there says what it points at.
+    let packed = b.ins().bor_imm_s(made, space << quench_heap::SPACE_SHIFT);
+    b.ins().store(MemFlagsData::trusted(), packed, frame, slot * 8);
 }
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn array_push(_rt: *mut Runtime, handle: i64, value: i64) -> i64 {
-    HEAP.with(|heap| heap.borrow_mut()[handle as usize].push(value));
+    HEAP.with(|heap| heap.borrow_mut().at_mut(handle).values.push(value));
     0
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_copy(_rt: *mut Runtime, handle: i64) -> i64 {
-    HEAP.with(|heap| {
-        let mut heap = heap.borrow_mut();
-        let of = heap[handle as usize].clone();
-        heap.push(of);
-        heap.len() as i64 - 1
-    })
+extern "C" fn array_copy(rt: *mut Runtime, handle: i64) -> i64 {
+    maybe_collect(rt);
+    let (holds, depth, values) = HEAP.with(|heap| {
+        let heap = heap.borrow();
+        let of = heap.at(handle);
+        (of.holds, of.depth, of.values.clone())
+    });
+    keep_array(holds, depth, values)
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -623,7 +690,7 @@ fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> b
     let _ = rt;
     let (left, right) = HEAP.with(|heap| {
         let heap = heap.borrow();
-        (heap[a as usize].clone(), heap[b as usize].clone())
+        (heap.at(a).values.clone(), heap.at(b).values.clone())
     });
     if left.len() != right.len() {
         return false;
@@ -634,7 +701,7 @@ fn alike(rt: *mut Runtime, a: i64, b: i64, kind: qir::Elements, depth: i64) -> b
         }
         match kind {
             qir::Elements::Exact => {
-                EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
+                HEAP.with(|h| h.borrow().exactly(*x) == h.borrow().exactly(*y))
             }
             qir::Elements::Float => f64::from_bits(*x as u64) == f64::from_bits(*y as u64),
             qir::Elements::Text => text_of(*x) == text_of(*y),
@@ -659,7 +726,7 @@ extern "C" fn print_array(
 /// What one array says, following handles as far down as it goes.
 fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> String {
     let _ = rt;
-    let elements = HEAP.with(|heap| heap.borrow()[handle as usize].clone());
+    let elements = HEAP.with(|heap| heap.borrow().at(handle).values.clone());
     let parts: Vec<String> = elements
         .iter()
         .map(|value| {
@@ -672,7 +739,7 @@ fn shown(rt: *mut Runtime, handle: i64, kind: qir::Elements, depth: i64) -> Stri
                 qir::Elements::Text => {
                     format!("*{}*", text_of(*value))
                 }
-                qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
+                qir::Elements::Exact => HEAP.with(|h| h.borrow().exactly(*value).to_string()),
                 qir::Elements::Float => quench_num::show_f64(f64::from_bits(*value as u64)),
             }
         })
@@ -803,7 +870,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .map(|s| Piece { at: s.as_ptr(), len: s.len() })
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let runtime = Box::new(Runtime { pieces: pieces.as_ptr(), stopped: 0 });
+    let mut roots: Box<[i64]> = vec![0; ROOM].into_boxed_slice();
+    let runtime = Box::new(Runtime {
+        pieces: pieces.as_ptr(),
+        roots: roots.as_mut_ptr(),
+        used: 0,
+        stopped: 0,
+    });
     let table = &*runtime as *const Runtime as i64;
 
     // Declare everything before defining anything, so a call can name a function that has
@@ -894,6 +967,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         _text: text,
         _pieces: pieces,
         _tables: module.tables.clone(),
+        _roots: roots,
         runtime,
         entry,
         callable,
@@ -921,8 +995,12 @@ fn lower(
     // returns whatever the signature needs and means nothing; `Compiled::outcome` reads
     // the reason rather than the value.
     let stopping = b.create_block();
-    b.append_block_params_for_function_params(blocks[0]);
-    for (i, block) in func.blocks.iter().enumerate().skip(1) {
+    // A block in front of the entry, holding the function's parameters, so that the
+    // frame can be taken before anything in the body runs. The entry block cannot do it
+    // itself: it is where the parameters arrive, and they arrive before any instruction.
+    let prologue = b.create_block();
+    b.append_block_params_for_function_params(prologue);
+    for (i, block) in func.blocks.iter().enumerate() {
         for param in &block.params {
             b.append_block_param(blocks[i], clif_ty(func.ty_of(*param)));
         }
@@ -930,12 +1008,60 @@ fn lower(
 
     let mut vals: Vec<Option<ClifValue>> = vec![None; func.value_tys.len()];
 
+    // One shadow slot per reference-typed value, so that wherever compiled code is when
+    // a collection happens, every handle it holds has been written somewhere the runtime
+    // can read. Filled where the value is defined and never cleared, so a slot may hold
+    // a handle whose value is dead — that keeps something alive a little longer than it
+    // has to and cannot free something too early, which is the direction to be wrong in.
+    let mut slot_of: Vec<Option<i32>> = vec![None; func.value_tys.len()];
+    let mut slots = 0i32;
+    for (n, ty) in func.value_tys.iter().enumerate() {
+        if matches!(ty, qir::Ty::Handle | qir::Ty::Text | qir::Ty::Exact) {
+            slot_of[n] = Some(slots);
+            slots += 1;
+        }
+    }
+
+    // The frame: take the slots on the way in, and put them back on every way out.
+    b.switch_to_block(prologue);
+    let table_at = b.ins().iconst(types::I64, table);
+    let base = b.ins().load(types::I64, MemFlagsData::trusted(), table_at, USED_AT);
+    let roots = b.ins().load(types::I64, MemFlagsData::trusted(), table_at, ROOTS_AT);
+    let scaled = b.ins().imul_imm_s(base, 8);
+    let frame = b.ins().iadd(roots, scaled);
+    let carried: Vec<BlockArg> =
+        b.block_params(prologue).iter().map(|v| (*v).into()).collect();
+    if slots > 0 {
+        let taken = b.ins().iadd_imm_s(base, i64::from(slots));
+        b.ins().store(MemFlagsData::trusted(), taken, table_at, USED_AT);
+        // Nothing stale: a slot not yet written must not look like a handle to
+        // something that has since been reused.
+        let zero = b.ins().iconst(types::I64, 0);
+        for k in 0..slots {
+            b.ins().store(MemFlagsData::trusted(), zero, frame, k * 8);
+        }
+        // Deeper than there is room for is the same answer as deeper than an engine
+        // will follow, and it is the same trap.
+        let room = b.ins().iconst(types::I64, ROOM as i64);
+        let fits = b.ins().icmp(IntCC::UnsignedLessThan, taken, room);
+        let carry_on = b.create_block();
+        let too_deep = b.create_block();
+        b.ins().brif(fits, carry_on, &[], too_deep, &[]);
+        b.switch_to_block(too_deep);
+        let code = b.ins().iconst(types::I64, qir::Trap::TooDeep as i64);
+        b.ins().store(MemFlagsData::trusted(), code, table_at, STOPPED_AT);
+        b.ins().jump(stopping, &[]);
+        b.switch_to_block(carry_on);
+    }
+    b.ins().jump(blocks[0], &carried);
+
     for (i, block) in func.blocks.iter().enumerate() {
         b.switch_to_block(blocks[i]);
 
         let incoming = b.block_params(blocks[i]).to_vec();
         for (n, param) in block.params.iter().enumerate() {
             vals[param.0 as usize] = Some(incoming[n]);
+            root_it(&mut b, frame, &slot_of, func, *param, incoming[n]);
         }
 
         for (result, inst) in &block.insts {
@@ -1102,11 +1228,16 @@ fn lower(
                 }
             };
             vals[result.0 as usize] = Some(v);
+            root_it(&mut b, frame, &slot_of, func, *result, v);
         }
 
         match &block.term {
             qir::Term::Ret(v) => {
                 let v = vals[v.0 as usize].unwrap();
+                // The frame goes back the way it came, on every way out.
+                if slots > 0 {
+                    b.ins().store(MemFlagsData::trusted(), base, table_at, USED_AT);
+                }
                 b.ins().return_(&[v]);
             }
             qir::Term::Jump { to, args } => {

@@ -1,6 +1,6 @@
 [package]
-name = "quench-interp"
-description = "Running QIR directly, as the engine that does the least."
+name = "quench-heap"
+description = "Where a running program's values live, and how they stop living."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,3 @@ repository.workspace = true
 [dependencies]
 quench-qir = { path = "../quench-qir" }
 quench-num = { path = "../quench-num" }
-quench-heap = { path = "../quench-heap" }
-
-[dev-dependencies]
-quench-dev = { path = "../quench-dev" }

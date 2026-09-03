@@ -211,27 +211,56 @@ half-built. The threshold is twice what survived the last one, so a program that
 genuinely holds a lot stops collecting on every allocation and one that holds nothing
 keeps its heap small.
 
-### What the Dev JIT does, and what it would take
+### The Dev JIT, which had no list to walk
 
-**It does not collect.** It is still at step one: allocate and never free.
+It collects too, and the same heap does it — `quench-heap`, used by both, because an
+object model is a contract between engines rather than each one's own idea.
 
-That is not a disagreement, and the rule at the top of this note is why —
-finalisation is not observable, so two engines collecting at different moments, or
-one of them not at all, is not something a program can tell. The oracle agrees on
-all 200,000 programs with one engine collecting and one not, which is the claim being
-made rather than an accident.
-
-What it would take is the thing this note always said step two costs, and the
-interpreter got to skip: **roots that are not on a list somebody owns.** A handle in
-the Dev JIT lives in a machine register or a stack slot, and finding it means either
+What made this the expensive half is the thing the interpreter got for free: **roots
+that are not on a list somebody owns.** A handle in compiled code is in a machine
+register or a stack slot, and neither is somewhere a collector can look. Two ways to
+find them:
 
 - **stack maps** — Cranelift can be told which values are live references at a
-  safepoint, and then the runtime has to walk the native stack, find each frame's
-  return address, and look up the map for it; or
-- **a shadow stack** — generated code writes its live handles somewhere the runtime
-  can see, which needs no unwinding and costs a store per live handle per allocation.
-  It also needs a liveness pass over QIR, because a temporary handle held in a
-  register across an allocation is live and is in no local.
+  safepoint, and then the runtime walks the native stack, finds each frame's return
+  address, and looks up the map for it;
+- **shadow slots** — compiled code writes its handles somewhere the runtime can see.
+  No unwinding, no map, and nothing to keep in step with a code generator.
 
-Neither is hard to describe and both are real work. Written down here so that the
-next person to read this knows the interpreter's collector was the cheap half.
+Quench does the second, in the simplest form there is: **every reference-typed value
+in a function gets a slot**, and the slot is written where the value is made.
+
+```
+prologue    base = runtime.used;  runtime.used = base + slots
+            zero the slots we just took
+each value  roots[base + k] = handle | (space << 56)
+every ret   runtime.used = base
+```
+
+Three properties fall out of "one slot per value" rather than "one slot per live
+range", and they are why it is worth being that crude:
+
+- **Nothing is ever missed.** A value that exists has been written, so wherever
+  compiled code is when a collection happens, it has already said what it holds.
+  There is no liveness analysis to get wrong.
+- **Retention is bounded.** A slot belongs to one value and no other, so a loop
+  rewrites it every pass rather than filling new ones. At most one object per
+  reference-typed value per frame is kept a little past its death — which is the
+  direction to be wrong in, and it shows up as the Dev JIT holding forty-one arrays
+  where the interpreter holds forty.
+- **The space rides in the top byte** of a root, because a root here is an `i64` in
+  an array and nothing else says which of the three spaces it indexes. The
+  interpreter reads that from QIR; compiled code has no QIR to hand.
+
+Collection happens at the **top** of every host call that allocates and nowhere
+else — before one is the moment when everything held has been written and the thing
+about to be made does not exist yet, so nothing is missed and nothing brand new is
+swept.
+
+### What it cost
+
+Nine per cent of the oracle: 200,000 programs went from 15.4 to 16.8 seconds, which
+is the root stores plus the collections. Both engines agree on all of them, which is
+the claim rather than an accident — and they now arrive at very nearly the same heap,
+which is a sharper statement than agreeing on output: it says the two are finding the
+same roots.
