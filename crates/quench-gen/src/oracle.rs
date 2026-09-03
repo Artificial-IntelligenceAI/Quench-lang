@@ -135,15 +135,16 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                             "interpreter".to_string(),
                             match quench_interp::run_named(&module, &name) {
                                 Ok(Outcome::Returned(v)) => Told::Answered(v),
-                                Ok(Outcome::Trapped(t)) => Told::Stopped(format!("{t:?}")),
+                                Ok(Outcome::Trapped(t)) => Told::Stopped(t.describe().to_string()),
                                 Err(why) => Told::Refused(why.to_string()),
                             },
                         ));
                         for (way, built) in &compiled {
                             answers.push((
                                 (*way).to_string(),
-                                match built.call(&name) {
-                                    Some(v) => Told::Answered(v),
+                                match built.call_outcome(&name) {
+                                    Some(Outcome::Returned(v)) => Told::Answered(v),
+                                    Some(Outcome::Trapped(t)) => Told::Stopped(t.describe().to_string()),
                                     None => Told::Refused("no such function once compiled".into()),
                                 },
                             ));

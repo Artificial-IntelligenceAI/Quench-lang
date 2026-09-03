@@ -249,8 +249,10 @@ So the methods are not trusted, they are tested against each other:
   built from the types outward, so the interesting case (a program that *runs*, and
   can therefore be answered differently by two engines) is the only case generated;
 - every program is run by **every method, at every optimisation level**, and the
-  answers must match — including the way a program *stops*, since stopping in the
-  same place for the same reason is as much an agreement as printing the same number;
+  answers must match — **including the way a program stops**, since stopping in the
+  same place for the same reason is as much an agreement as printing the same
+  number. About one generated program in sixteen stops, and which stop it was is
+  compared as strictly as any number;
 - the generator is built to **saturate the machine it runs on** rather than testing
   one program at a time. Batching first — compiling a program costs about 352× what
   running it costs, so many programs go in one module and one compilation covers all

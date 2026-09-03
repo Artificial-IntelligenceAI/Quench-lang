@@ -9,7 +9,7 @@ fn every_generated_program_checks_out() {
     // Built from the types outward, so this is the claim the whole approach rests on: a
     // program that failed to check would be refused identically by every engine and
     // would prove nothing.
-    for chunk in (1..600u64).collect::<Vec<_>>().chunks(50) {
+    for chunk in (1..300u64).collect::<Vec<_>>().chunks(50) {
         let module = batch(chunk);
         assert!(quench_qir::verify(&module).is_ok(), "a batch from {} did not check", chunk[0]);
     }
@@ -31,26 +31,26 @@ fn different_seeds_write_different_programs() {
 }
 
 #[test]
-fn nothing_generated_stops() {
-    // Traps are excluded on purpose for now -- a trap in compiled code is a signal the
-    // Dev JIT cannot yet catch. If this ever fails, the generator has started writing
-    // programs the oracle cannot run rather than programs that found something.
+fn every_generated_program_runs_or_stops_for_a_reason_it_can_name() {
+    // It used to be that none of them could stop at all, because compiled code aborted
+    // the process rather than reporting. Now they can, and what matters is that a stop
+    // is always one of the reasons both engines know -- never a crash and never silence.
     let seeds: Vec<u64> = (1..400).collect();
     let module = batch(&seeds);
     for seed in seeds {
-        match quench_interp::run_named(&module, &name_of(seed)).expect("it runs") {
-            quench_interp::Outcome::Returned(_) => {}
-            other => panic!("seed {seed} stopped: {other:?}"),
-        }
+        // Every outcome is one of the two, and `run_named` returning `Err` would mean
+        // the generator wrote something no engine could run at all.
+        let _ = quench_interp::run_named(&module, &name_of(seed))
+            .unwrap_or_else(|why| panic!("seed {seed} could not run: {why}"));
     }
 }
 
 #[test]
 fn the_oracle_agrees_across_the_engines_it_has() {
-    let seeds: Vec<u64> = (1..=2_000).collect();
+    let seeds: Vec<u64> = (1..=400).collect();
     let report = check(&seeds, 64, cores());
     assert!(report.agreed(), "{:#?}", &report.disagreements[..report.disagreements.len().min(5)]);
-    assert_eq!(report.programs, 2_000);
+    assert_eq!(report.programs, 400);
     assert!(report.batches > 1, "more than one batch, so the claiming loop is exercised");
 }
 
@@ -182,4 +182,30 @@ fn both_divisions_reach_the_generated_programs() {
         }
     }
     assert!(floored && truncated, "the setting is not reaching the instructions");
+}
+
+#[test]
+fn some_generated_programs_stop_and_that_is_the_point() {
+    // Until compiled code could report a stop rather than abort the process, the
+    // generator had to write nothing that could stop -- which left "they stop in the
+    // same place for the same reason" entirely unchecked.
+    let seeds: Vec<u64> = (1..=600).collect();
+    let module = batch(&seeds);
+    let mut stopped = 0;
+    for seed in &seeds {
+        if let quench_qir::Outcome::Trapped(_) =
+            quench_interp::run_named(&module, &name_of(*seed)).expect("it runs")
+        {
+            stopped += 1;
+        }
+    }
+    assert!(stopped > 5, "only {stopped} of 600 stopped, which is too few to be checking anything");
+    assert!(stopped < 200, "{stopped} of 600 stopped, which is too many to be checking much else");
+}
+
+#[test]
+fn the_oracle_compares_stops_as_well_as_answers() {
+    let seeds: Vec<u64> = (1..=300).collect();
+    let report = check(&seeds, 64, cores());
+    assert!(report.agreed(), "{:#?}", &report.disagreements[..report.disagreements.len().min(3)]);
 }

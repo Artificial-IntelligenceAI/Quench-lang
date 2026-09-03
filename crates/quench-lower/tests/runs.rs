@@ -257,3 +257,71 @@ fn an_index_outside_the_array_stops_the_interpreter() {
         "and nought is no element at all"
     );
 }
+
+/// What both engines say a program did, insisting they agree.
+fn ended(source: &str) -> quench_qir::Outcome {
+    let module = lower(source).module.expect("a program");
+    let walked = quench_interp::run(&module).expect("it runs");
+    let (compiled, _) = quench_dev::compile(&module).expect("it compiles").run_capturing();
+    assert_eq!(walked, compiled, "the engines ended differently");
+    walked
+}
+
+#[test]
+fn stopping_is_agreed_on_as_much_as_answering() {
+    use quench_qir::{Outcome, Trap};
+
+    // Not merely *that* it stopped -- which stop it was. An engine that said "something
+    // went wrong" could not be compared with one that said what.
+    assert_eq!(
+        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* / 'z']; print['q']; }"),
+        Outcome::Trapped(Trap::DividedByZero)
+    );
+    assert_eq!(
+        ended("START { var.i64 ['z'] = [*0*]; var.i64 ['q'] = [*1* mod 'z']; print['q']; }"),
+        Outcome::Trapped(Trap::DividedByZero)
+    );
+    assert_eq!(
+        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*9*]]; }"),
+        Outcome::Trapped(Trap::OutsideTheArray)
+    );
+    assert_eq!(
+        ended("START { var.arr.i64 (2) ['xs'] = [[*1* *2*]]; print['xs'[*0*]]; }"),
+        Outcome::Trapped(Trap::OutsideTheArray),
+        "counted from one, so nought is no element"
+    );
+}
+
+#[test]
+fn the_one_division_that_does_not_fit() {
+    use quench_qir::{Outcome, Trap};
+    // i64::MIN / -1 is one larger than an i64 holds. It is a different stop from
+    // dividing by zero, and both engines have to know which happened.
+    let source = "START {
+        var.i64 ['least'] = [*-9223372036854775808*];
+        var.i64 ['minus'] = [*0* - *1*];
+        var.i64 ['q'] = ['least' / 'minus'];
+        print['q'];
+    }";
+    assert_eq!(ended(source), Outcome::Trapped(Trap::DivisionOverflowed));
+}
+
+#[test]
+fn a_program_that_stops_stops_where_it_stopped() {
+    // What ran before the stop happened; what came after did not.
+    let source = "START {
+        print[str:*before* \\n];
+        var.i64 ['z'] = [*0*];
+        var.i64 ['q'] = [*1* / 'z'];
+        print[str:*after* \\n];
+    }";
+    let module = lower(source).module.expect("a program");
+    let (outcome, printed) =
+        quench_dev::compile(&module).expect("it compiles").run_capturing();
+    assert_eq!(printed, "before\n", "and nothing after it");
+    assert!(matches!(outcome, quench_qir::Outcome::Trapped(_)));
+
+    let mut walked = Vec::new();
+    quench_interp::run_writing(&module, &mut walked).expect("it runs");
+    assert_eq!(String::from_utf8(walked).expect("text"), "before\n");
+}

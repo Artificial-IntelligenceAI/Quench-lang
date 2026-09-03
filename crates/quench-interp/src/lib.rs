@@ -23,36 +23,7 @@
 use quench_qir as qir;
 use std::io::Write;
 
-/// How a run ended.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Outcome {
-    /// It finished, and this is what `START` gave back.
-    Returned(i64),
-    /// It stopped. Every engine must stop here too, and for this reason.
-    Trapped(Trap),
-}
-
-/// A reason a program stops.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Trap {
-    /// Division or remainder by zero.
-    DividedByZero,
-    /// `i64::MIN / -1`, whose answer is one larger than an `i64` holds. Cranelift traps
-    /// on this rather than wrapping, so this does too.
-    DivisionOverflowed,
-    /// An index outside the array it was given to.
-    ///
-    /// Counted from one, so `0` is no element at all and so is one past the end. Both
-    /// engines have to stop here, in the same place, for the same reason.
-    OutsideTheArray,
-    /// Calls nested deeper than the interpreter will follow.
-    ///
-    /// An admitted mismatch: compiled code has a real machine stack and overflows it
-    /// rather than reporting anything, so two engines cannot be compared on a program
-    /// that gets here. The interpreter reports it instead of crashing, which is the
-    /// difference between an oracle that skips a seed and one that loses a run.
-    TooDeep,
-}
+pub use qir::{Outcome, Trap};
 
 /// Why a module could not be run at all, as opposed to a program that ran and stopped.
 #[derive(Debug)]

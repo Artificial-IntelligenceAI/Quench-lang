@@ -12,6 +12,20 @@ quench — a language that would rather say what it means
     quench --help               this
 ";
 
+/// How a run ended, said the same way whichever engine ran it.
+///
+/// The same words from both is not tidiness — it is the claim the whole project rests
+/// on, made visible at the one place a person actually reads.
+fn report_outcome(outcome: quench_qir::Outcome) -> ExitCode {
+    match outcome {
+        quench_qir::Outcome::Returned(_) => ExitCode::SUCCESS,
+        quench_qir::Outcome::Trapped(trap) => {
+            eprintln!("the program stopped: {}", trap.describe());
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (what, path) = match args.as_slice() {
@@ -60,21 +74,14 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         "walk" => match quench_interp::run(&module) {
-            Ok(quench_interp::Outcome::Returned(_)) => ExitCode::SUCCESS,
-            Ok(quench_interp::Outcome::Trapped(trap)) => {
-                eprintln!("the program stopped: {trap:?}");
-                ExitCode::FAILURE
-            }
+            Ok(outcome) => report_outcome(outcome),
             Err(why) => {
                 eprintln!("{why}");
                 ExitCode::FAILURE
             }
         },
         "run" => match quench_dev::compile(&module) {
-            Ok(compiled) => {
-                compiled.run();
-                ExitCode::SUCCESS
-            }
+            Ok(compiled) => report_outcome(compiled.outcome()),
             Err(why) => {
                 eprintln!("{why}");
                 ExitCode::FAILURE

@@ -7,14 +7,13 @@
 //!
 //! Inherited from Luarust, which worked this out first.
 //!
-//! # What it deliberately never writes
+//! # What it writes, and what it does not
 //!
-//! - **Anything that stops.** Division and remainder are given a divisor that cannot be
-//!   zero and cannot be `-1`, so no program here traps. Not because stopping does not
-//!   matter — stopping in the same place for the same reason is exactly as much an
-//!   agreement as printing the same number — but because a trap in compiled code is a
-//!   signal, and the Dev JIT has no way yet to catch one and report it. The day it does,
-//!   this restriction should be the first thing lifted.
+//! - **Programs that stop.** Division and remainder are sometimes given a divisor that
+//!   can be zero, or `-1` against the smallest `i64`, so a generated program can stop
+//!   rather than answer. Stopping in the same place for the same reason is exactly as
+//!   much an agreement as printing the same number, and until compiled code could
+//!   report a stop rather than abort the process, this could not be checked at all.
 //! - **Large loops.** A fuzzer that takes a minute per program is a fuzzer nobody runs,
 //!   and the whole economics of the oracle rests on programs being small: compiling one
 //!   costs a few hundred times what running it costs.
@@ -115,9 +114,16 @@ pub fn program_under(seed: u64, helper: Option<FuncId>, settings: Settings) -> F
                     _ => remainder,
                 };
                 let value = if op.can_trap() {
-                    // Neither zero nor -1, so neither engine stops. See the module docs.
-                    let safe = b.const_i64(rng.upto(9_999) as i64 + 2);
-                    b.bin(op, lhs, safe)
+                    // Most divisors are safe, because a program that stops on its first
+                    // division exercises one instruction and then nothing. One in eight
+                    // is whatever turned up, which is how zero and -1 get in.
+                    if rng.upto(8) == 0 {
+                        let risky = rng.pick(&numbers);
+                        b.bin(op, lhs, risky)
+                    } else {
+                        let safe = b.const_i64(rng.upto(9_999) as i64 + 2);
+                        b.bin(op, lhs, safe)
+                    }
                 } else {
                     let rhs = rng.pick(&numbers);
                     b.bin(op, lhs, rhs)

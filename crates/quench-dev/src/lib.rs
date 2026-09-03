@@ -13,7 +13,7 @@
 //! to be turned up.
 
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, AbiParam, BlockArg, FuncRef, InstBuilder};
+use cranelift_codegen::ir::{types, AbiParam, BlockArg, FuncRef, InstBuilder, MemFlagsData};
 use cranelift_codegen::ir::{Function as ClifFunction, Value as ClifValue};
 use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_codegen::settings::{self, Configurable as _};
@@ -78,6 +78,9 @@ pub struct Compiled {
     /// What the generated code indexes into. Boxed so its address is fixed, because that
     /// address was compiled into the code.
     _pieces: Box<[Piece]>,
+    /// The block whose address the code carries. Boxed for the same reason, and read
+    /// afterwards to find out whether the program stopped.
+    runtime: Box<Runtime>,
     entry: *const u8,
     /// Every function that takes nothing and returns an i64, by name.
     ///
@@ -93,6 +96,9 @@ impl Compiled {
     /// `None` if there is no such function, or if it takes arguments.
     pub fn call(&self, name: &str) -> Option<i64> {
         let (_, code) = self.callable.iter().find(|(known, _)| known == name)?;
+        HEAP.with(|heap| heap.borrow_mut().clear());
+        let rt = &*self.runtime as *const Runtime as *mut Runtime;
+        unsafe { (*rt).stopped = 0 };
         // Safe for the same reasons `run` is: the signature was checked at compile time
         // and the code is kept alive by `_jit` for as long as `self` exists.
         let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(*code) };
@@ -100,20 +106,46 @@ impl Compiled {
     }
 
     /// Run the entry, keeping whatever it printed rather than letting it out.
-    pub fn run_capturing(&self) -> (i64, String) {
-        HEAP.with(|heap| heap.borrow_mut().clear());
+    pub fn run_capturing(&self) -> (qir::Outcome, String) {
         SINK.with(|sink| *sink.borrow_mut() = Some(Vec::new()));
-        let answer = self.run();
+        let outcome = self.outcome();
         let written = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
-        (answer, String::from_utf8_lossy(&written).into_owned())
+        (outcome, String::from_utf8_lossy(&written).into_owned())
+    }
+
+    /// Run the entry, and say whether it finished or stopped.
+    pub fn outcome(&self) -> qir::Outcome {
+        let answer = self.run();
+        match qir::Trap::from_code(self.runtime.stopped) {
+            Some(trap) => qir::Outcome::Trapped(trap),
+            None => qir::Outcome::Returned(answer),
+        }
     }
 
     /// Run the entry and hand back what it returned.
+    ///
+    /// A program that stopped returns whatever was on hand at the time, which means
+    /// nothing — [`Compiled::outcome`] is the one that says so.
     pub fn run(&self) -> i64 {
+        HEAP.with(|heap| heap.borrow_mut().clear());
+        // The flag is per-run, so a program that stopped does not make the next one look
+        // as though it did.
+        let rt = &*self.runtime as *const Runtime as *mut Runtime;
+        unsafe { (*rt).stopped = 0 };
         // Safe because `compile` checked the entry takes nothing and returns i64, and the
         // code is kept alive by `_jit` for as long as `self` exists.
         let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(self.entry) };
         entry()
+    }
+
+    /// Run one named function that takes nothing and returns an i64, saying whether it
+    /// finished or stopped.
+    pub fn call_outcome(&self, name: &str) -> Option<qir::Outcome> {
+        let answer = self.call(name)?;
+        Some(match qir::Trap::from_code(self.runtime.stopped) {
+            Some(trap) => qir::Outcome::Trapped(trap),
+            None => qir::Outcome::Returned(answer),
+        })
     }
 }
 
@@ -123,6 +155,73 @@ impl std::fmt::Debug for Compiled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Compiled {{ entry: {:p} }}", self.entry)
     }
+}
+
+/// Write down a reason and leave.
+///
+/// The generated code stores the code itself rather than calling anything, so a division
+/// by zero costs a compare and a branch rather than a call into Rust.
+fn stop_now(
+    b: &mut FunctionBuilder<'_>,
+    runtime: i64,
+    stopping: cranelift_codegen::ir::Block,
+    trap: qir::Trap,
+) {
+    let at = b.ins().iconst(types::I64, runtime);
+    let code = b.ins().iconst(types::I64, trap as i64);
+    b.ins().store(MemFlagsData::trusted(), code, at, STOPPED_AT);
+    b.ins().jump(stopping, &[]);
+}
+
+/// Emit a division that cannot fault, by refusing the two cases that would.
+///
+/// Cranelift's `sdiv` traps on a zero divisor and on `i64::MIN / -1`, and a trap in
+/// compiled code is a hardware fault — which aborts the process and loses the whole run
+/// rather than one program. So the two cases are tested for first, and the division that
+/// follows is one the processor cannot object to.
+///
+/// It costs two compares and two branches per division. That is the price of a stop
+/// being *reportable*, and it is worth it: an engine that cannot say why it stopped
+/// cannot be compared with one that can.
+fn guarded_division(
+    b: &mut FunctionBuilder<'_>,
+    runtime: i64,
+    stopping: cranelift_codegen::ir::Block,
+    lhs: ClifValue,
+    rhs: ClifValue,
+) {
+    // A zero divisor.
+    let by_zero = b.create_block();
+    let not_zero = b.create_block();
+    let is_zero = b.ins().icmp_imm_s(IntCC::Equal, rhs, 0);
+    b.ins().brif(is_zero, by_zero, &[], not_zero, &[]);
+    b.switch_to_block(by_zero);
+    stop_now(b, runtime, stopping, qir::Trap::DividedByZero);
+    b.switch_to_block(not_zero);
+
+    // The one division whose answer does not fit: the smallest number over minus one.
+    let overflows = b.create_block();
+    let fits = b.create_block();
+    let smallest = b.ins().iconst(types::I64, i64::MIN);
+    let lhs_smallest = b.ins().icmp(IntCC::Equal, lhs, smallest);
+    let rhs_minus_one = b.ins().icmp_imm_s(IntCC::Equal, rhs, -1);
+    let both = b.ins().band(lhs_smallest, rhs_minus_one);
+    b.ins().brif(both, overflows, &[], fits, &[]);
+    b.switch_to_block(overflows);
+    stop_now(b, runtime, stopping, qir::Trap::DivisionOverflowed);
+    b.switch_to_block(fits);
+}
+
+/// Look at the runtime's stop flag, and leave if it is set.
+///
+/// Splits the block: everything after this carries on in a fresh one, which is what lets
+/// the check sit in the middle of a run of instructions.
+fn stop_if_stopped(b: &mut FunctionBuilder<'_>, runtime: i64, stopping: cranelift_codegen::ir::Block) {
+    let at = b.ins().iconst(types::I64, runtime);
+    let flag = b.ins().load(types::I64, MemFlagsData::trusted(), at, STOPPED_AT);
+    let carry_on = b.create_block();
+    b.ins().brif(flag, stopping, &[], carry_on, &[]);
+    b.switch_to_block(carry_on);
 }
 
 /// Whether a remainder is non-zero and leans the other way from its divisor — which is
@@ -165,6 +264,27 @@ struct Piece {
     len: usize,
 }
 
+/// What compiled code is given a pointer to, and the only address it ever holds.
+///
+/// Its address is baked into the code when the module is compiled, so reading the stop
+/// flag is a plain load rather than a call — which is what makes checking after every
+/// operation that can fail affordable.
+#[repr(C)]
+struct Runtime {
+    /// The module's text, for `print-text`.
+    pieces: *const Piece,
+    /// Zero while the program is running. A [`qir::Trap`] code once it has stopped.
+    ///
+    /// This is the answer to the thing compiled code could not do: it has nowhere to
+    /// put a failure and no way to unwind, so the failure is written down here and the
+    /// generated code checks afterwards. Aborting the process was the previous answer,
+    /// and it lost the whole run rather than one program.
+    stopped: i64,
+}
+
+/// Where `stopped` sits inside [`Runtime`], for the load the generated code emits.
+const STOPPED_AT: i32 = std::mem::size_of::<*const Piece>() as i32;
+
 thread_local! {
     /// The heap compiled code allocates from.
     ///
@@ -182,19 +302,15 @@ thread_local! {
     static SINK: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Compiled code stopping, because there is no answer to give it.
+/// Write down why the program is stopping, for the generated code to notice.
 ///
-/// Aborts rather than returning, since the generated code has nowhere to put a failure
-/// and no way to unwind. Which is exactly why the generator writes no program that can
-/// stop -- see `crates/quench-gen/src/write.rs`. Making this reportable is what has to
-/// happen before it can.
-fn stopped(why: &str) -> ! {
-    eprintln!("the program stopped: {why}");
-    std::process::abort()
+/// Safe because the pointer was baked in from a `Box` that outlives the code holding it.
+fn stop(rt: *mut Runtime, trap: qir::Trap) {
+    unsafe { (*rt).stopped = trap as i64 };
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_new(_table: *const Piece, len: i64) -> i64 {
+extern "C" fn array_new(_rt: *mut Runtime, len: i64) -> i64 {
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         heap.push(vec![0; len.max(0) as usize]);
@@ -203,53 +319,58 @@ extern "C" fn array_new(_table: *const Piece, len: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_set(_table: *const Piece, handle: i64, at: i64, value: i64) -> i64 {
+extern "C" fn array_set(rt: *mut Runtime, handle: i64, at: i64, value: i64) -> i64 {
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         let array = &mut heap[handle as usize];
         match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| array.get_mut(i))
         {
             Some(cell) => *cell = value,
-            None => stopped("an index outside the array"),
+            None => stop(rt, qir::Trap::OutsideTheArray),
         }
         0
     })
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_get(_table: *const Piece, handle: i64, at: i64) -> i64 {
+extern "C" fn array_get(rt: *mut Runtime, handle: i64, at: i64) -> i64 {
     HEAP.with(|heap| {
         let heap = heap.borrow();
         match at.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| heap[handle as usize].get(i))
         {
             Some(value) => *value,
-            None => stopped("an index outside the array"),
+            // Nothing sensible to hand back, so zero -- and the generated code is about
+            // to notice the flag and stop before it can use this.
+            None => {
+                stop(rt, qir::Trap::OutsideTheArray);
+                0
+            }
         }
     })
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn array_len(_table: *const Piece, handle: i64) -> i64 {
+extern "C" fn array_len(_rt: *mut Runtime, handle: i64) -> i64 {
     HEAP.with(|heap| heap.borrow()[handle as usize].len() as i64)
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_bool(_table: *const Piece, value: i64) -> i64 {
+extern "C" fn print_bool(_rt: *mut Runtime, value: i64) -> i64 {
     write_out(if value != 0 { b"true" } else { b"false" });
     0
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_i64(_table: *const Piece, value: i64) -> i64 {
+extern "C" fn print_i64(_rt: *mut Runtime, value: i64) -> i64 {
     write_out(value.to_string().as_bytes());
     0
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_text(table: *const Piece, index: i64) -> i64 {
+extern "C" fn print_text(rt: *mut Runtime, index: i64) -> i64 {
     // Safe because `compile` verified the index against the module's text before any of
     // this existed, and the table outlives the code that names it.
-    let piece = unsafe { &*table.add(index as usize) };
+    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
     let bytes = unsafe { std::slice::from_raw_parts(piece.at, piece.len) };
     write_out(bytes);
     0
@@ -336,7 +457,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .map(|s| Piece { at: s.as_ptr(), len: s.len() })
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let table = pieces.as_ptr() as i64;
+    let runtime = Box::new(Runtime { pieces: pieces.as_ptr(), stopped: 0 });
+    let table = &*runtime as *const Runtime as i64;
 
     // Declare everything before defining anything, so a call can name a function that has
     // not been compiled yet -- including the one making the call.
@@ -403,7 +525,7 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         .filter(|(_, f)| f.params.is_empty() && f.ret == qir::Ty::I64)
         .map(|(i, f)| (f.name.clone(), jit.get_finalized_function(declared[i].0)))
         .collect();
-    Ok(Compiled { _jit: jit, _text: text, _pieces: pieces, entry, callable })
+    Ok(Compiled { _jit: jit, _text: text, _pieces: pieces, runtime, entry, callable })
 }
 
 /// Lower one QIR function into one Cranelift function.
@@ -423,6 +545,10 @@ fn lower(
     let mut b = FunctionBuilder::new(clif, fctx);
 
     let blocks: Vec<_> = func.blocks.iter().map(|_| b.create_block()).collect();
+    // Where the program goes when the runtime has written down a reason to stop. It
+    // returns whatever the signature needs and means nothing; `Compiled::outcome` reads
+    // the reason rather than the value.
+    let stopping = b.create_block();
     b.append_block_params_for_function_params(blocks[0]);
     for (i, block) in func.blocks.iter().enumerate().skip(1) {
         for param in &block.params {
@@ -465,7 +591,13 @@ fn lower(
                         });
                     }
                     let call = b.ins().call(which, &given);
-                    b.inst_results(call)[0]
+                    let answer = b.inst_results(call)[0];
+                    if host.can_stop() {
+                        // A load and a branch, which is what a baked-in runtime address
+                        // buys: asking whether to stop costs no call.
+                        stop_if_stopped(&mut b, table, stopping);
+                    }
+                    answer
                 }
                 qir::Inst::Bin { op, lhs, rhs } => {
                     let (l, r) = (vals[lhs.0 as usize].unwrap(), vals[rhs.0 as usize].unwrap());
@@ -473,9 +605,16 @@ fn lower(
                         qir::BinOp::Add => b.ins().iadd(l, r),
                         qir::BinOp::Sub => b.ins().isub(l, r),
                         qir::BinOp::Mul => b.ins().imul(l, r),
-                        // The processor's own division, which rounds toward zero.
-                        qir::BinOp::DivTruncated => b.ins().sdiv(l, r),
-                        qir::BinOp::RemTruncated => b.ins().srem(l, r),
+                        // The processor's own division, which rounds toward zero --
+                        // after the two cases it would fault on have been refused.
+                        qir::BinOp::DivTruncated => {
+                            guarded_division(&mut b, table, stopping, l, r);
+                            b.ins().sdiv(l, r)
+                        }
+                        qir::BinOp::RemTruncated => {
+                            guarded_division(&mut b, table, stopping, l, r);
+                            b.ins().srem(l, r)
+                        }
                         // No processor floors, so it is built: divide, then correct by
                         // one step when the remainder disagrees in sign with the divisor,
                         // which is exactly when truncation rounded the wrong way.
@@ -483,6 +622,7 @@ fn lower(
                         // `sdiv` and `srem` still carry the traps, so a zero divisor and
                         // `i64::MIN / -1` stop here as they do everywhere else.
                         qir::BinOp::DivFloored => {
+                            guarded_division(&mut b, table, stopping, l, r);
                             let quotient = b.ins().sdiv(l, r);
                             let rest = b.ins().srem(l, r);
                             let wrong_way = signs_disagree(&mut b, rest, r);
@@ -490,6 +630,7 @@ fn lower(
                             b.ins().select(wrong_way, one_less, quotient)
                         }
                         qir::BinOp::RemFloored => {
+                            guarded_division(&mut b, table, stopping, l, r);
                             let rest = b.ins().srem(l, r);
                             let wrong_way = signs_disagree(&mut b, rest, r);
                             let shifted = b.ins().iadd(rest, r);
@@ -507,7 +648,11 @@ fn lower(
                     let args: Vec<ClifValue> =
                         args.iter().map(|a| vals[a.0 as usize].unwrap()).collect();
                     let call = b.ins().call(refs[callee.0 as usize], &args);
-                    b.inst_results(call)[0]
+                    let answer = b.inst_results(call)[0];
+                    // A callee that stopped leaves the flag set, and its caller has to
+                    // stop as well rather than carrying on with what it handed back.
+                    stop_if_stopped(&mut b, table, stopping);
+                    answer
                 }
             };
             vals[result.0 as usize] = Some(v);
@@ -533,6 +678,15 @@ fn lower(
             }
         }
     }
+
+    // Whatever the signature promised, given back so the frame can be left. It is not
+    // an answer and nothing reads it.
+    b.switch_to_block(stopping);
+    let nothing = match clif_ty(func.ret) {
+        types::I8 => b.ins().iconst(types::I8, 0),
+        ty => b.ins().iconst(ty, 0),
+    };
+    b.ins().return_(&[nothing]);
 
     b.seal_all_blocks();
     b.finalize(target);

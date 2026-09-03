@@ -40,6 +40,58 @@
 //! is easy to admit by accident and very hard to remove once files exist that somebody
 //! else compiled.
 
+/// A reason a program stops.
+///
+/// Part of the IR rather than of any engine, because *stopping in the same place for the
+/// same reason* is as much a thing the engines must agree about as printing the same
+/// number. An engine that invented its own list could not be compared with one that did
+/// not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(i64)]
+pub enum Trap {
+    /// Division or remainder by zero.
+    DividedByZero = 1,
+    /// `i64::MIN / -1`, whose answer is one larger than an `i64` holds.
+    DivisionOverflowed = 2,
+    /// An index outside the array it was given to. Counted from one, so `0` is one of
+    /// these and so is one past the end.
+    OutsideTheArray = 3,
+    /// Calls nested deeper than an engine will follow.
+    TooDeep = 4,
+}
+
+impl Trap {
+    /// What to call this when telling somebody.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Trap::DividedByZero => "divided by zero",
+            Trap::DivisionOverflowed => "a division too large to hold",
+            Trap::OutsideTheArray => "an index outside the array",
+            Trap::TooDeep => "calls nested too deep",
+        }
+    }
+
+    /// The number compiled code writes down, back into a reason.
+    pub fn from_code(code: i64) -> Option<Trap> {
+        Some(match code {
+            1 => Trap::DividedByZero,
+            2 => Trap::DivisionOverflowed,
+            3 => Trap::OutsideTheArray,
+            4 => Trap::TooDeep,
+            _ => return None,
+        })
+    }
+}
+
+/// How a run ended.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Outcome {
+    /// It finished, and this is what the entry gave back.
+    Returned(i64),
+    /// It stopped. Every engine must stop here too, and for this reason.
+    Trapped(Trap),
+}
+
 /// The version of the IR itself.
 ///
 /// The C++ backends will refuse a module whose version they do not know, rather than
@@ -165,9 +217,9 @@ pub enum Host {
     /// in `notes/the-collector-earns-its-place.md`, and the one that needs no stack maps
     /// and no cooperation from any backend.
     ArrayNew,
-    /// `(handle, index, value)` — put a value in. Counted from one.
+    /// `(handle, index, value)` — put a value in. Counted from one. Can stop.
     ArraySet,
-    /// `(handle, index)` — take one out. Counted from one.
+    /// `(handle, index)` — take one out. Counted from one. Can stop.
     ArrayGet,
     /// How many elements it has.
     ArrayLen,
@@ -197,6 +249,14 @@ impl Host {
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
         }
+    }
+
+    /// Whether this can stop the program rather than answering.
+    ///
+    /// What it costs is a check afterwards in compiled code, so it is worth knowing
+    /// which calls need one rather than guarding all of them.
+    pub fn can_stop(self) -> bool {
+        matches!(self, Host::ArrayGet | Host::ArraySet)
     }
 
     /// What it gives back. Most give an `i64` nothing is expected to use.
