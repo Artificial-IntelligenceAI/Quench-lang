@@ -23,8 +23,8 @@ fn the_same_seed_writes_the_same_program() {
         // into the same places and the two are comparable at all.
         let (mut here, mut there) = (Module::new(), Module::new());
         assert_eq!(
-            program(&mut here, seed, None),
-            program(&mut there, seed, None),
+            program(&mut here, seed, None, &[]),
+            program(&mut there, seed, None, &[]),
             "seed {seed}"
         );
         assert_eq!(here.text, there.text, "seed {seed}");
@@ -34,8 +34,8 @@ fn the_same_seed_writes_the_same_program() {
 #[test]
 fn different_seeds_write_different_programs() {
     let (mut here, mut there) = (Module::new(), Module::new());
-    let one = program(&mut here, 1, None);
-    let two = program(&mut there, 2, None);
+    let one = program(&mut here, 1, None, &[]);
+    let two = program(&mut there, 2, None, &[]);
     assert_ne!(one, two);
 }
 

@@ -75,8 +75,13 @@ pub fn settings_for(seed: u64) -> Settings {
 ///
 /// `helper`, when given, is something the program may call — which is how a generated
 /// program exercises calls at all without being able to recurse.
-pub fn program(module: &mut Module, seed: u64, helper: Option<FuncId>) -> Function {
-    program_under(module, seed, helper, settings_for(seed))
+pub fn program(
+    module: &mut Module,
+    seed: u64,
+    helper: Option<FuncId>,
+    floating: &[(FuncId, Ty)],
+) -> Function {
+    program_under(module, seed, helper, floating, settings_for(seed))
 }
 
 /// The same, under settings chosen by the caller.
@@ -87,6 +92,7 @@ pub fn program_under(
     module: &mut Module,
     seed: u64,
     helper: Option<FuncId>,
+    floating: &[(FuncId, Ty)],
     settings: Settings,
 ) -> Function {
     let mut rng = Seeded::from(seed);
@@ -383,6 +389,17 @@ pub fn program_under(
                 flags.push(answer);
             }
             8 => {
+                // A call whose signature carries a float, when there is one of this
+                // program's width to call: a parameter and a return type are places a
+                // type appears that the body never reaches on its own.
+                if rng.upto(2) == 0
+                    && let Some((id, _)) = floating.iter().find(|(_, ty)| *ty == float_ty)
+                {
+                    let given = rng.pick(&floats);
+                    let answer = b.call(*id, &[given], float_ty);
+                    floats.push(answer);
+                    continue;
+                }
                 if let Some(id) = helper {
                     let called = b.call(id, &[], Ty::I64);
                     numbers.push(called);
@@ -469,8 +486,32 @@ pub fn batch(seeds: &[u64]) -> Module {
     h.ret(mixed);
     module.add(h.finish());
 
+    // And one whose signature carries a float, in and out. A parameter and a return
+    // type are the two places a type appears that a body never reaches, so a helper
+    // that only ever took nothing and gave back an `i64` left them untested -- which is
+    // how a function returning a `b64` crashed the Dev JIT's code generator while
+    // 200,000 programs a run said everything agreed. One of them takes it in each
+    // width, since a `b16` is carried in an `f32` and could have been the odd one.
+    let mut floating = Vec::new();
+    for (name, ty) in [("halved64", Ty::F64), ("halved32", Ty::F32), ("halved16", Ty::F16)] {
+        let id = module.next_id();
+        let mut h = Builder::new(name, &[ty], ty);
+        let x = h.param(0);
+        let half = h.const_float(
+            match ty {
+                Ty::F64 => 0.5f64.to_bits(),
+                _ => u64::from(0.5f32.to_bits()),
+            },
+            ty,
+        );
+        let scaled = h.bin(BinOp::FMul, x, half);
+        h.ret(scaled);
+        module.add(h.finish());
+        floating.push((id, ty));
+    }
+
     for &seed in seeds {
-        let written = program(&mut module, seed, Some(helper_id));
+        let written = program(&mut module, seed, Some(helper_id), &floating);
         module.add(written);
     }
 

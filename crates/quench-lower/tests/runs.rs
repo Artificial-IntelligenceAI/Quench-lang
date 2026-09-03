@@ -1835,3 +1835,48 @@ fn a_decimal_refuses_what_a_binary_float_refuses() {
     let rendered = report("START { var.immut.d64 ['x'] = [*1/3*]; print.stdout['x']; }");
     assert!(rendered.contains("is not a `d64`"), "{rendered}");
 }
+
+#[test]
+fn a_function_may_take_and_give_back_a_float() {
+    // A parameter and a return type are the two places a type appears that a body never
+    // reaches, and until this test nothing exercised a float in either. The Dev JIT
+    // built the stand-in return of its stopping block with an integer constant, which
+    // Cranelift's verifier refuses outright for a float -- so every function giving one
+    // back crashed the compiler, and the oracle never wrote one to notice.
+    assert_eq!(
+        said("\
+fn.file.b64 ['halved'] [immut.b64 'x'] { give ['x' x *0.5*]; }
+fn.file.b32 ['narrow'] [immut.b32 'x'] { give ['x' + *1.0*]; }
+fn.file.b16 ['half of'] [immut.b16 'x'] { give ['x' x *0.5*]; }
+fn.file.d64 ['tenth of'] [immut.d64 'x'] { give ['x' / *10*]; }
+START {
+    var.immut.b64 ['a'] = [call 'halved'[*3.0*]];
+    var.immut.b32 ['b'] = [call 'narrow'[*1.5*]];
+    var.immut.b16 ['c'] = [call 'half of'[*5.0*]];
+    var.immut.d64 ['d'] = [call 'tenth of'[*1*]];
+    print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd'];
+}
+"),
+        "1.5 2.5 2.5 0.1",
+    );
+}
+
+#[test]
+fn an_array_of_floats_crosses_into_a_function() {
+    assert_eq!(
+        said("\
+fn.file.b64 ['sum of'] [immut.arr.b64 (2) 'xs'] {
+    var.mut.b64 ['sum'] = [*0.0*];
+    loop.temp.range.i64 ['i'] = [*1*, call count['xs']] {
+        set ['sum'] = ['sum' + 'xs'['i']];
+    }
+    give ['sum'];
+}
+START {
+    var.immut.arr.b64 (2) ['xs'] = [*1.5* *2.5*];
+    print.stdout[call 'sum of'[share 'xs']];
+}
+"),
+        "4.0",
+    );
+}

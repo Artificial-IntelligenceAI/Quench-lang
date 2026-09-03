@@ -1506,10 +1506,13 @@ fn lower(
     }
 
     // Whatever the signature promised, given back so the frame can be left. It is not
-    // an answer and nothing reads it.
+    // an answer and nothing reads it -- but it has to be *of the type promised*, and a
+    // float cannot be made with `iconst`: Cranelift's verifier refuses that outright
+    // rather than quietly building the wrong thing.
     b.switch_to_block(stopping);
     let nothing = match clif_ty(func.ret) {
-        types::I8 => b.ins().iconst(types::I8, 0),
+        types::F64 => b.ins().f64const(0.0),
+        types::F32 => b.ins().f32const(0.0),
         ty => b.ins().iconst(ty, 0),
     };
     b.ins().return_(&[nothing]);
