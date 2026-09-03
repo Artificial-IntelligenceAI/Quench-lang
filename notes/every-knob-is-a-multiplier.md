@@ -100,7 +100,7 @@ The reason to default to `stops-early` is not speed, and it is worth being preci
 about. Quench stops rather than having undefined behaviour, so under `asks-both`:
 
 ```quench
-[('n' != *0*) and ((*100* / 'n') > *5*)]
+[('n' !== *0*) and ((*100* / 'n') > *5*)]
 ```
 
 does not merely waste a division when `'n'` is nought — it **stops the program**.

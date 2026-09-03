@@ -341,10 +341,10 @@ impl OpKind {
             OpKind::Mod => "mod",
             OpKind::Lt => "<",
             OpKind::Gt => ">",
-            OpKind::Le => "<=",
-            OpKind::Ge => ">=",
+            OpKind::Le => "<==",
+            OpKind::Ge => ">==",
             OpKind::Eq => "==",
-            OpKind::Ne => "!=",
+            OpKind::Ne => "!==",
             OpKind::And => "and",
             OpKind::Or => "or",
         }

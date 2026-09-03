@@ -197,7 +197,7 @@ Both print the same thing, which is not a coincidence — it is
   `[('n' > *0*) and ('n' < *9*)]`. Whether the right side is asked once the left has
   settled it is `[defaults] logic`, and it defaults to `stops-early` — not for speed.
   Quench stops rather than having undefined behaviour, so under `asks-both`
-  `[('n' != *0*) and ((*100* / 'n') > *5*)]` does not waste a division, it **stops the
+  `[('n' !== *0*) and ((*100* / 'n') > *5*)]` does not waste a division, it **stops the
   program**. That setting was in the free pile until functions arrived and gave the
   right side something it could do.
 - **`^` answers by squaring**, in the runtime rather than as an instruction — a power
@@ -205,11 +205,14 @@ Both print the same thing, which is not a coincidence — it is
   differently. `[*2* + *3* ^ *2*]` is 11. An `e` takes a negative exponent and gives a
   ratio; an `i64` stops, because the answer to that is a fraction and this is not one.
 - **One spelling per operator, and it is the one on your keyboard**: `+` `-` `/` `^`
-  `<` `>` `<=` `>=` `==` `!=`, plus **`x`** for multiply because `*` is the
+  `<` `>` `<==` `>==` `==` `!==`, plus **`x`** for multiply because `*` is the
   written-value mark and nothing else on a keyboard means multiply. There are no
-  alternates: the wide symbols, the doubled letters and the spelled-out names all
-  went. Two spellings for one thing
-  is a decision a reader has to make for no reason.
+  alternates: the wide symbols, the doubled letters and the spelled-out names all went.
+  Two spellings for one thing is a decision a reader has to make for no reason.
+- **`==` reaches the comparisons that include it.** `<==` and `>==` and `!==`, because
+  `=` assigns and `==` is equal to — a comparison carrying a bare `=` would be the one
+  thing `==` exists to avoid, hidden inside a longer token rather than standing alone.
+  `<=` is named rather than read as a comparison and then an assignment.
 - **Words are for what programming invented**, and only that: `mod`, `and`, `or`, `not`
   have no symbol because nothing ever settled where they bind, which is the whole of
   [notes/precedence-stops-where-maths-stopped.md](notes/precedence-stops-where-maths-stopped.md).

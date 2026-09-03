@@ -659,7 +659,7 @@ fn a_function_may_call_itself() {
     assert_eq!(
         said("\
 fn.file.i64 ['factorial'] [immut.i64 'n'] {
-    if 'n' <= *1* { give [*1*]; } else { give ['n' x factorial['n' - *1*]]; }
+    if 'n' <== *1* { give [*1*]; } else { give ['n' x factorial['n' - *1*]]; }
 }
 START {
     print.stdout[factorial[*10*]];
@@ -937,7 +937,7 @@ fn stopping_early_is_what_makes_a_guard_a_guard() {
     let source = "\
 START {
     var.immut.i64 ['zero'] = [*0*];
-    var.immut.bool ['safe'] = [('zero' != *0*) and ((*100* / 'zero') > *5*)];
+    var.immut.bool ['safe'] = [('zero' !== *0*) and ((*100* / 'zero') > *5*)];
     print.stdout['safe'];
 }
 ";
@@ -990,7 +990,7 @@ START {
     var.immut.e ['point'] = [*0.5*];
 
     var.immut.bool ['text'] = ['a' == 'b'];
-    var.immut.bool ['other'] = ['a' != 'c'];
+    var.immut.bool ['other'] = ['a' !== 'c'];
     var.immut.bool ['flags'] = ['t' == 'text'];
     var.immut.bool ['exact'] = ['half' == 'point'];
     print.stdout['text' str:* * 'other' str:* * 'flags' str:* * 'exact'];
@@ -1028,7 +1028,7 @@ START {
     var.immut.arr.i64 (2) ['twin'] = [[*1* *2*]];
     var.immut.arr.i64 (2) ['other'] = [[*1* *3*]];
     var.immut.bool ['same'] = ['a' == 'twin'];
-    var.immut.bool ['not'] = ['a' != 'other'];
+    var.immut.bool ['not'] = ['a' !== 'other'];
     print.stdout['same' str:* * 'not'];
 }
 "),

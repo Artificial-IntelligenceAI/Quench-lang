@@ -163,8 +163,27 @@ its own.
 
 **The rule is: whatever is on the keyboard.** Where mathematics has a symbol and a
 keyboard has it, that is the spelling. Where a keyboard does not — `×`, `÷`, `≤`, `≥`,
-`≠` — the keyboard's own way of writing it is the spelling, and there is no second one
-kept around for people with a compose key.
+`≠` — it is spelled out of the pieces a keyboard does have, and there is no second
+spelling kept around for people with a compose key.
+
+### And `==` reaches the ones that include it
+
+`<==`, `>==`, `!==`, not `<=`, `>=`, `!=`. Equality is `==` here because `=` assigns,
+and a comparison that includes equality has to carry the same `==` — otherwise the
+bare `=` this language refused at the top level is back, hidden inside a longer token
+rather than standing on its own.
+
+```text
+`<=` is not how this is written.
+Rule(s) broken: `=` assigns and `==` is equal to, so a comparison that includes
+                equality carries `==`
+Tip(s): `<=` would put a bare `=` inside a comparison, which is the one thing `==`
+        exists to avoid.
+Suggested fix(s): `<==`
+```
+
+`<=` is what every other language writes, so it is named rather than left to be read
+as a comparison followed by an assignment.
 
 Multiplication is the one exception and it proves the rule: `*` is the written-value
 mark, so no symbol is free, so it is the word **`x`**. That works here and would not
@@ -189,8 +208,9 @@ The first fix was `</==` — `<` less than, `/` or, `==` equal to — which comp
 properly and cost division its symbol, since `/` cannot mean *or* and *divide* in one
 expression. Division became `div` for about an hour.
 
-Both were answering a question that turned out to be the wrong one. **`<=` is not a
-composition.** It is how a keyboard writes `≤`, one token, and the `=` in it is no more
-an assignment than the one in `!=` — which nobody has ever read as *not assign*. Once
-that is the rule, `</==` and `div` both go, and so do five alternate spellings that
-had nothing to do with the original problem.
+`</==` was answering the right question with the wrong separator. `/` was never *or*
+anywhere else in the language, and taking it for that cost division its symbol.
+
+What the objection was actually pointing at is the `=`. Drop the separator, keep the
+`==`, and it is `<==` — which needs nothing from `/`, so division has its symbol back
+and five alternate spellings that were never part of the problem went with the rest.

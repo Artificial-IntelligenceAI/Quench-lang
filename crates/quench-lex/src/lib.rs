@@ -63,11 +63,11 @@ impl<'a> Lexer<'a> {
                 '-' => self.single(Kind::Minus),
                 '/' => self.single(Kind::Slash),
                 '^' => self.single(Kind::Power),
-                // `<=` is the keyboard's way of writing `\u{2264}`, one token rather than
-                // two pieces — the `=` in it is no more an assignment than the one in
-                // `!=` is. One look ahead settles it.
-                '<' => self.maybe_equal(Kind::LessEqual, Kind::Less),
-                '>' => self.maybe_equal(Kind::GreaterEqual, Kind::Greater),
+                // `<==` rather than `<=`, because `=` assigns and `==` is equal to.
+                // A bare `=` inside a comparison would be the one thing `==` exists to
+                // avoid, hidden inside a longer token rather than standing alone.
+                '<' => self.maybe_equal_to(Kind::LessEqual, Kind::Less),
+                '>' => self.maybe_equal_to(Kind::GreaterEqual, Kind::Greater),
                 '!' => self.bang(),
                 ';' => self.single(Kind::Semicolon),
                 ',' => self.single(Kind::Comma),
@@ -104,31 +104,58 @@ impl<'a> Lexer<'a> {
 
 
     /// `<` and `>` on their own, or `<=` and `>=` when the rest follows.
-    fn maybe_equal(&mut self, both: Kind, alone: Kind) {
+    fn maybe_equal_to(&mut self, both: Kind, alone: Kind) {
         let start = self.at;
-        if self.source[self.at + 1..].starts_with('=') {
-            self.at += 2;
+        let after = &self.source[self.at + 1..];
+        if after.starts_with("==") {
+            self.at += 3;
             self.tokens.push(Token { kind: both, span: Span::new(start, self.at) });
-        } else {
-            self.single(alone);
+            return;
         }
+        // `<=` is the spelling every other language uses and this one does not, so it
+        // is named rather than read as a comparison and then an assignment.
+        if after.starts_with('=') {
+            let sign = self.source[start..=start].to_string();
+            self.at += 2;
+            self.errors.push(
+                Diagnostic::new("E0006", format!("`{sign}=` is not how this is written."))
+                    .primary(Span::new(start, self.at), "here")
+                    .rule("`=` assigns and `==` is equal to, so a comparison that includes equality carries `==`")
+                    .tip("`<=` would put a bare `=` inside a comparison, which is the one thing `==` exists to avoid.")
+                    .fix(format!("`{sign}==`")),
+            );
+            return;
+        }
+        self.single(alone);
     }
 
     /// `!=`. A `!` on its own is not anything.
     fn bang(&mut self) {
         let start = self.at;
-        if self.source[self.at + 1..].starts_with('=') {
-            self.at += 2;
+        let after = &self.source[self.at + 1..];
+        if after.starts_with("==") {
+            self.at += 3;
             self.tokens.push(Token { kind: Kind::NotEqual, span: Span::new(start, self.at) });
+            return;
+        }
+        if after.starts_with('=') {
+            self.at += 2;
+            self.errors.push(
+                Diagnostic::new("E0006", "`!=` is not how this is written.")
+                    .primary(Span::new(start, self.at), "here")
+                    .rule("`=` assigns and `==` is equal to, so a comparison that includes equality carries `==`")
+                    .tip("`!=` would put a bare `=` inside a comparison, which is the one thing `==` exists to avoid.")
+                    .fix("`!==`"),
+            );
             return;
         }
         self.at += 1;
         self.errors.push(
             Diagnostic::new("E0005", "`!` on its own is not something Quench reads.")
                 .primary(Span::new(start, self.at), "here")
-                .rule("not-equal is `!=`, and that is the only way to write it")
+                .rule("not-equal is `!==`, and that is the only way to write it")
                 .tip("`!` never means `not` by itself here — the word `not` does that.")
-                .fix("`!=` if a comparison was meant"),
+                .fix("`!==` if a comparison was meant"),
         );
     }
 

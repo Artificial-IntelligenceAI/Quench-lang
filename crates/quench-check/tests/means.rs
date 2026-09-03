@@ -270,7 +270,7 @@ fn every_operator_the_language_has_is_built() {
         "START { var.immut.bool ['b'] = [*true* and *false*]; }",
         "START { var.immut.bool ['b'] = [*true* or *false*]; }",
         "START { var.immut.bool ['b'] = [not *true*]; }",
-        "START { var.immut.bool ['b'] = [*1* <= *2*]; }",
+        "START { var.immut.bool ['b'] = [*1* <== *2*]; }",
     ] {
         assert!(check(source).ok(), "{source}\n{}", errors(source));
     }
@@ -812,7 +812,7 @@ fn binding_an_array_says_share_or_copy() {
 #[test]
 fn text_and_flags_can_be_compared_and_not_ordered() {
     assert!(check("START { var.immut.str ['a'] = [*x*]; var.immut.bool ['s'] = ['a' == 'a']; }").ok());
-    assert!(check("START { var.immut.bool ['a'] = [*true*]; var.immut.bool ['s'] = ['a' != 'a']; }").ok());
+    assert!(check("START { var.immut.bool ['a'] = [*true*]; var.immut.bool ['s'] = ['a' !== 'a']; }").ok());
     // Which of two is *larger* still only means something for numbers.
     assert_eq!(
         codes("START { var.immut.str ['a'] = [*x*]; var.immut.bool ['s'] = ['a' < 'a']; }"),

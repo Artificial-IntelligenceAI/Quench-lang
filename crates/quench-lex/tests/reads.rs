@@ -367,9 +367,9 @@ fn the_operators_that_need_tokens_have_them() {
         ("/", Slash),
         ("<", Less),
         (">", Greater),
-        ("<=", LessEqual),
-        (">=", GreaterEqual),
-        ("!=", NotEqual),
+        ("<==", LessEqual),
+        (">==", GreaterEqual),
+        ("!==", NotEqual),
         ("^", Power),
         ("==", EqualTo),
     ];
@@ -379,7 +379,6 @@ fn the_operators_that_need_tokens_have_them() {
         assert_eq!(out.tokens[0].kind, want, "{text:?}");
         assert_eq!(out.tokens.len(), 2, "{text:?} should be one token and the end");
     }
-    assert_eq!(kinds("!="), [NotEqual, End]);
 }
 
 #[test]
@@ -400,7 +399,7 @@ fn a_comparison_that_wears_an_equals_is_one_token() {
     // `<` applied to an assignment -- the `=` in it is no more an assignment than the
     // one in `!=`, which nobody has ever read that way.
     assert_eq!(
-        kinds("[*a* <= *b*]"),
+        kinds("[*a* <== *b*]"),
         [OpenList, Written, LessEqual, Written, CloseList, End]
     );
     assert_eq!(
@@ -442,8 +441,21 @@ fn a_lone_bang_says_what_the_ways_to_say_not_equal_are() {
     let out = lex("[*a* ! *b*]");
     assert_eq!(out.errors.len(), 1, "{:#?}", out.errors);
     assert_eq!(out.errors[0].code, "E0005");
-    assert!(out.errors[0].rules.join(" ").contains("`!=`"), "{:?}", out.errors[0]);
+    assert!(out.errors[0].rules.join(" ").contains("`!==`"), "{:?}", out.errors[0]);
     assert!(out.errors[0].tips.join(" ").contains("the word `not`"), "{:?}", out.errors[0]);
+}
+
+#[test]
+fn a_comparison_that_includes_equality_carries_the_doubled_equals() {
+    // `<=` is what every other language writes and this one does not: `=` assigns and
+    // `==` is equal to, so a bare `=` inside a comparison would be the one thing `==`
+    // exists to avoid, hidden inside a longer token rather than standing alone.
+    for (bad, good) in [("[*a* <= *b*]", "`<==`"), ("[*a* >= *b*]", "`>==`"), ("[*a* != *b*]", "`!==`")] {
+        let out = lex(bad);
+        assert_eq!(out.errors.len(), 1, "{bad}: {:#?}", out.errors);
+        assert_eq!(out.errors[0].code, "E0006", "{bad}");
+        assert!(out.errors[0].fixes.join(" ").contains(good), "{bad}: {:?}", out.errors[0]);
+    }
 }
 
 #[test]
