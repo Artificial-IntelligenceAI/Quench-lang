@@ -490,15 +490,35 @@ fn a_comment_can_say_how_many_lines_it_covers() {
     assert_eq!(kinds("#1 only itself\nvar"), [Kind::Word, Kind::End]);
     assert_eq!(kinds("# no count\nvar"), [Kind::Word, Kind::End]);
 
-    // Digits stuck to a word are text, not a count. Eating two lines because somebody
-    // wrote an ordinal is not a trade worth making.
-    assert_eq!(
-        kinds("#3rd attempt\nvar\nvar"),
-        [Kind::Word, Kind::Word, Kind::End],
-        "both `var`s survive"
-    );
-    // And a space between makes it text too, since the count is written against the `#`.
+    // A space says comment, and then the digits are just something written down.
     assert_eq!(kinds("# 3\nvar\nvar"), [Kind::Word, Kind::Word, Kind::End]);
+    assert_eq!(kinds("# 3rd attempt\nvar\nvar"), [Kind::Word, Kind::Word, Kind::End]);
+}
+
+#[test]
+fn digits_stuck_to_a_word_are_refused_rather_than_guessed_at() {
+    // Neither a count nor a comment. Reading it as a count eats two lines somebody did
+    // not offer; reading it as a comment ignores a number they wrote deliberately. The
+    // line itself does not say which, so neither does Quench.
+    let stuck = quench_lex::lex("#3rd attempt\nvar\nvar");
+    assert_eq!(stuck.errors.len(), 1, "{:#?}", stuck.errors);
+    assert_eq!(stuck.errors[0].code, "E0007");
+    assert!(
+        stuck.errors[0].message.contains("`#3rd` is neither a count nor a comment"),
+        "{}",
+        stuck.errors[0].message
+    );
+
+    // The offending line is still swallowed, so the two under it are the only tokens
+    // left and one mistake does not become three.
+    assert_eq!(
+        stuck.tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+        [Kind::Word, Kind::Word, Kind::End]
+    );
+
+    // Both ways out are offered, and both work.
+    assert!(quench_lex::lex("#3 attempt\nvar\nvar").errors.is_empty());
+    assert!(quench_lex::lex("# 3rd attempt\nvar\nvar").errors.is_empty());
 }
 
 #[test]

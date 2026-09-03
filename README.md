@@ -88,11 +88,11 @@ Both print the same thing, which is not a coincidence — it is
   `.q`, `.qs`, `.qm` and `.qml` are all taken, and `.qn` collides with a common
   abbreviation.
 - **`#` comments a line, `#3` comments three.** The count includes the line it is
-  written on, so `#3` covers this one and the two under it. Digits must stand alone
-  against the `#`: `#3 why the next two are dull` counts, and `#3rd attempt` is an
-  ordinary comment, because quietly eating two lines over an ordinal is not a trade
-  worth making. A count of nought is refused, and so is one reaching past the end of
-  the file.
+  written on, so `#3` covers this one and the two under it. Digits stuck to a word are
+  refused rather than guessed at — `#3rd attempt` is neither a count nor a comment, and
+  reading it as either would eat two lines nobody offered or ignore a number somebody
+  wrote on purpose. **A space says comment**: `# 3rd attempt` is about a third attempt.
+  A count of nought is refused, and so is one reaching past the end of the file.
 - **Two marks**: `'a name'` and `*a written value*`. Whether a written value is
   text or a number is the *type's* question, not the mark's — `*1000*` is a number
   under `i64` and four characters under `str`. A written value is literal, and

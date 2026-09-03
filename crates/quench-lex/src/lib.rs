@@ -168,10 +168,11 @@ impl<'a> Lexer<'a> {
     /// `#` to the end of the line, or `#3` to the end of the third line counting this
     /// one. Comments are not tokens; nothing downstream wants them.
     ///
-    /// A count is digits written straight after the `#` with nothing else stuck to
-    /// them: `#3 why the next two lines are dull` counts three, and `#3rd attempt` is
-    /// an ordinary comment about a third attempt. Quietly eating two lines because
-    /// somebody wrote an ordinal is not a trade worth making.
+    /// A count is digits written straight against the `#` and nothing else stuck to
+    /// them. `#3 why the next two lines are dull` counts three; `#3rd attempt` is
+    /// refused, because it is neither a count nor a comment and guessing which was
+    /// meant would either eat two lines or ignore a number. A space says comment:
+    /// `# 3rd attempt` is about a third attempt and covers its own line.
     fn comment(&mut self) {
         let start = self.at;
         self.at += 1; // the `#`
@@ -181,10 +182,34 @@ impl<'a> Lexer<'a> {
             self.at += 1;
         }
         let digits = &self.source[digits_at..self.at];
-        // Stuck to a word rather than standing alone, so it is text and not a count.
-        let counted = !digits.is_empty() && self.peek().is_none_or(char::is_whitespace);
-        let asked: usize = if counted { digits.parse().unwrap_or(usize::MAX) } else { 1 };
-        let marker = Span::new(start, if counted { self.at } else { start + 1 });
+        let standing = self.peek().is_none_or(char::is_whitespace);
+        let marker = Span::new(start, if digits.is_empty() { start + 1 } else { self.at });
+
+        // Digits with something stuck to them are neither one thing nor the other. A
+        // guess here either eats two lines over an ordinal or ignores a number somebody
+        // wrote deliberately, and there is no telling which from the line itself.
+        if !digits.is_empty() && !standing {
+            let stuck = self.source[self.at..]
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .collect::<String>();
+            self.errors.push(
+                Diagnostic::new("E0007", format!("`#{digits}{stuck}` is neither a count nor a comment."))
+                    .primary(Span::new(start, self.at + stuck.len()), "here")
+                    .rule("a count is digits written against the `#` and nothing else; a comment has a space after it")
+                    .tip("without the space there is no telling whether the number was meant to be counted or read.")
+                    .fix(format!("`#{digits}` to cover {digits} lines, or `# {digits}{stuck}` for a comment")),
+            );
+            self.to_end_of_line();
+            return;
+        }
+
+        let asked: usize = if digits.is_empty() {
+            1
+        } else {
+            digits.parse().unwrap_or(usize::MAX)
+        };
+        let counted = !digits.is_empty();
 
         self.to_end_of_line();
         if !counted {
