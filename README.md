@@ -134,7 +134,10 @@ Both print the same thing, which is not a coincidence — it is
   ['total' + *55*];`, `set ['xs'[*2*]] = [*99*];`. Changing something not declared
   `mut` is refused, with the line that would have worked.
 - **Arrays.** `var.immut.arr.i64 (2 3) ['m']` is one allocation of six, laid out row by
-  row; `arr.arr.i64` would be an array of handles and is a different type. The
+  row; `arr.arr.i64` would be an array of handles and is a different type. Holds any
+  built type — `arr.bool`, `arr.str`, `arr.e` — and crosses into and out of functions,
+  where the **call site** says `share` or `copy` so a reader knows what happens to their
+  array without opening the function. The
   shape is written **without marks** — it is part of the type, and the `64` in
   `i64` wears none either. Counted from one, because an inclusive loop with an
   unsigned counter walks `[1, count]` exactly while `[0, count - 1]` wraps on an

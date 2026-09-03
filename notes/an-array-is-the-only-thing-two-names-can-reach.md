@@ -86,3 +86,38 @@ set ['a'[*1*]] = [*99*];                      # 'b' shows [99 2]
 `immut` means *this name cannot be used to change it*, which is what it has always
 meant and is still true. It does not mean the thing never changes, and no language
 with sharing gets that for free. Saying so here rather than letting somebody find it.
+
+## Which is also what a call now says
+
+An array is the first thing that could cross into a function and be changed there,
+so the call site is where the two answers matter most:
+
+```quench
+fn.file.nothing ['zero_it'] [mut.arr.i64 (4) 'xs'] { … }
+
+zero_it[copy 'xs'];      # 'xs' is untouched
+zero_it[share 'xs'];     # 'xs' comes back zeroed
+```
+
+Nothing extra was needed for that. A call's argument is a value, and a value naming
+an array already had to say which — so the rule wrote itself, and the reader of the
+call can see what happens to their array without opening the function.
+
+## What an array holds
+
+Any type that is built: `arr.i64`, `arr.bool`, `arr.str`, `arr.e`. A slot is an
+`i64` however wide the thing in it is, so room was never what was missing — what was
+missing was *telling the runtime which*, since showing a slot and comparing two of
+them both depend on it. The element kind travels beside the handle as a constant.
+
+Text wears its marks inside an array and nowhere else:
+
+```text
+[*hello there* *world*]
+```
+
+`[hello there world]` could be two elements or three and there is no way to tell.
+Outside an array a `str` prints bare, because nothing is beside it to run into.
+
+An `e` inside an array compares by value like one outside it: an array of `1/2` and
+an array of `0.5` hold the same numbers.

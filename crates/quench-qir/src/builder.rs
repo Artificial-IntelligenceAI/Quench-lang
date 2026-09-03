@@ -123,6 +123,12 @@ impl Builder {
     }
 
     /// Ask the runtime for something.
+    /// The same, answering with a type the caller decides — for the one host whose
+    /// answer is whatever the array it read from holds.
+    pub fn call_host_giving(&mut self, host: Host, args: &[Value], ret: Ty) -> Value {
+        self.push(Inst::CallHost { host, args: args.to_vec() }, ret)
+    }
+
     pub fn call_host(&mut self, host: Host, args: &[Value]) -> Value {
         self.push(Inst::CallHost { host, args: args.to_vec() }, host.result())
     }

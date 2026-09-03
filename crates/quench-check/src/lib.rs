@@ -587,12 +587,19 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        // The type is whatever the chain says that is not `fn` and not a visibility.
+        // The type is whatever the chain says that is not `fn`, not a visibility and
+        // not an `arr` link.
         let mut returns = None;
         let mut said = false;
+        let mut arrays = Vec::new();
+        let mut ty_span = word;
         for link in func.chain.iter().skip(1) {
             let word = self.text(*link);
             if Visibility::from_word(word).is_some() {
+                continue;
+            }
+            if word == "arr" && !said {
+                arrays.push(*link);
                 continue;
             }
             if said {
@@ -605,10 +612,17 @@ impl<'a> Checker<'a> {
                 continue;
             }
             said = true;
+            ty_span = *link;
             if word == "nothing" {
                 continue;
             }
             match self.a_type(*link) {
+                Some(ty) => returns = Some(ty),
+                None => return,
+            }
+        }
+        if returns.is_some() || !arrays.is_empty() {
+            match self.arrayed(returns, ty_span, &arrays, &func.shape, func.shape_span) {
                 Some(ty) => returns = Some(ty),
                 None => return,
             }
@@ -651,9 +665,11 @@ impl<'a> Checker<'a> {
     fn parameter_ty(&mut self, param: &ast::Param) -> Option<Ty> {
         let mut mutable = None;
         let mut ty_span = None;
+        let mut arrays = Vec::new();
         for link in &param.chain {
             match self.text(*link) {
                 word @ ("mut" | "immut") if ty_span.is_none() => mutable = Some(word == "mut"),
+                "arr" if ty_span.is_none() => arrays.push(*link),
                 word => {
                     if ty_span.is_some() {
                         self.errors.push(
@@ -679,7 +695,57 @@ impl<'a> Checker<'a> {
             return None;
         }
         let ty_span = ty_span?;
-        self.a_type(ty_span)
+        let element = self.a_type(ty_span);
+        self.arrayed(element, ty_span, &arrays, &param.shape, param.shape_span)
+    }
+
+    /// Wrap an element type in the `arr` links written before it, with their sizes.
+    ///
+    /// The same three refusals a declaration gets, because it is the same question:
+    /// two `arr` links, an element type that is not packed yet, and a shape on
+    /// something that is not an array.
+    fn arrayed(
+        &mut self,
+        element: Option<Ty>,
+        element_span: Span,
+        arrays: &[Span],
+        shape: &[Span],
+        shape_span: Option<Span>,
+    ) -> Option<Ty> {
+        if arrays.len() > 1 {
+            self.errors.push(
+                Diagnostic::new("E0423", "an array of arrays is not built yet.")
+                    .primary(arrays[1], "this second `arr`")
+                    .rule("one `arr` is one allocation, however many dimensions it has; two would be an array of handles")
+                    .tip("a rectangular array does most of what nesting is wanted for: `arr.i64 (2 3)` is two rows of three.")
+                    .fix("use one `arr` with more than one size"),
+            );
+            return None;
+        }
+        let Some(arr) = arrays.first() else {
+            if let Some(span) = shape_span {
+                self.errors.push(
+                    Diagnostic::new("E0425", "only an array has a shape.")
+                        .primary(span, "here")
+                        .rule("a shape says how many elements an array holds, and this is no array")
+                        .fix("add `arr` to the chain, or remove the shape"),
+                );
+                return None;
+            }
+            return element;
+        };
+        let element = element?;
+        if matches!(element, Ty::Arr { .. }) {
+            self.errors.push(
+                Diagnostic::new("E0424", "an array of arrays is not built yet.")
+                    .primary(element_span, "here")
+                    .rule("one `arr` is one allocation; an array of them would hold handles instead of values")
+                    .fix("use one `arr` with more than one size"),
+            );
+            return None;
+        }
+        let sizes = self.sizes(shape, shape_span, *arr)?;
+        Some(Ty::Arr { of: Box::new(element), shape: sizes })
     }
 
     /// One type link, understood or honestly refused.
@@ -937,46 +1003,23 @@ impl<'a> Checker<'a> {
             );
         }
 
-        if arrays.len() > 1 {
-            self.errors.push(
-                Diagnostic::new("E0423", "an array of arrays is not built yet.")
-                    .primary(arrays[1], "this second `arr`")
-                    .rule("one `arr` is one allocation, however many dimensions it has; two would be an array of handles")
-                    .tip("a rectangular array does most of what nesting is wanted for: `arr.i64 (2 3)` is two rows of three.")
-                    .fix("use one `arr` with more than one size"),
-            );
-            return None;
-        }
-
-        if let Some(arr) = arrays.first() {
-            let Some(element) = ty else { return None };
-            if !matches!(element, Ty::I64) {
-                self.errors.push(
-                    Diagnostic::new("E0424", format!("an array of `{}` is not built yet.", element.name()))
-                        .primary(ty_span, "here")
-                        .rule("the elements of an array are packed by width, and only `i64` is built that way today")
-                        .fix("`arr.i64` for now"),
-                );
-                return None;
-            }
-            let shape = self.shape(var, *arr)?;
-            ty = Some(Ty::Arr { of: Box::new(element), shape });
-        } else if var.shape_span.is_some() {
-            self.errors.push(
-                Diagnostic::new("E0425", "only an array has a shape.")
-                    .primary(var.shape_span.expect("just checked"), "here")
-                    .rule("a shape says how many elements an array holds, and this declares no array")
-                    .fix("add `arr` to the chain, or remove the shape"),
-            );
-            return None;
+        // The same three questions a parameter and a return type get, asked by the same
+        // code: how many `arr` links, what they hold, and what shape.
+        if !arrays.is_empty() || var.shape_span.is_some() {
+            ty = Some(self.arrayed(ty, ty_span, &arrays, &var.shape, var.shape_span)?);
         }
 
         Some(Chain { mutable, ty, ty_span })
     }
 
     /// `(5)` or `(2 3)` — the sizes, which an array must have and must not be empty.
-    fn shape(&mut self, var: &ast::Var, arr: Span) -> Option<Vec<usize>> {
-        let Some(span) = var.shape_span else {
+    fn sizes(
+        &mut self,
+        shape: &[Span],
+        shape_span: Option<Span>,
+        arr: Span,
+    ) -> Option<Vec<usize>> {
+        let Some(span) = shape_span else {
             self.errors.push(
                 Diagnostic::new("E0426", "this array does not say how big it is.")
                     .primary(arr, "here")
@@ -986,7 +1029,7 @@ impl<'a> Checker<'a> {
             );
             return None;
         };
-        if var.shape.is_empty() {
+        if shape.is_empty() {
             self.errors.push(
                 Diagnostic::new("E0427", "this shape is empty.")
                     .primary(span, "here")
@@ -996,7 +1039,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let mut sizes = Vec::new();
-        for size in &var.shape {
+        for size in shape {
             match self.text(*size).parse::<usize>() {
                 Ok(0) => {
                     self.errors.push(
@@ -1299,7 +1342,18 @@ impl<'a> Checker<'a> {
 
         let mut elements = Vec::with_capacity(written.len());
         for term in written {
-            let built = self.term(term)?;
+            // Each element is read *under* the element type, which is the same rule
+            // that makes `*0.1*` one tenth under `e` and a mistake under `i64`. The
+            // array's chain is what says which, exactly as a declaration's does.
+            let outer = std::mem::replace(&mut self.reading, of.clone());
+            let built = match (of, term) {
+                (Ty::Str, ast::Term::Piece(piece)) => {
+                    self.literal(piece).map(Value::Text)
+                }
+                _ => self.term(term),
+            };
+            self.reading = outer;
+            let built = built?;
             let found = self.type_of(&built, term.span())?;
             if &found != of {
                 self.errors.push(

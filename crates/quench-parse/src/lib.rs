@@ -183,6 +183,8 @@ impl<'a> Parser<'a> {
             chain.push(self.expect(Kind::Word, "a chain")?);
         }
 
+        let (shape, shape_span) = self.shape()?;
+
         self.expect(Kind::OpenList, "a function")?;
         let name = self.expect(Kind::Name, "a function")?;
         self.expect(Kind::CloseList, "a function")?;
@@ -201,7 +203,16 @@ impl<'a> Parser<'a> {
 
         let body = self.block()?;
         let end = body.last().map(ast::Stmt::span).unwrap_or(close);
-        Some(ast::Func { chain, name, takes: open.to(close), params, body, span: word.to(end) })
+        Some(ast::Func {
+            chain,
+            shape,
+            shape_span,
+            name,
+            takes: open.to(close),
+            params,
+            body,
+            span: word.to(end),
+        })
     }
 
     /// `immut.i64 'a'` — a declaration's chain with `var` taken off.
@@ -211,8 +222,24 @@ impl<'a> Parser<'a> {
         while self.eat(Kind::Dot).is_some() {
             chain.push(self.expect(Kind::Word, "a chain")?);
         }
+        let (shape, shape_span) = self.shape()?;
         let name = self.expect(Kind::Name, "a parameter")?;
-        Some(ast::Param { chain, name, span: first.to(name) })
+        Some(ast::Param { chain, shape, shape_span, name, span: first.to(name) })
+    }
+
+    /// `(5 2)` — a shape, where one is written. Part of the type, so it sits between
+    /// the chain and whatever the chain was describing, wherever that happens.
+    fn shape(&mut self) -> Option<(Vec<Span>, Option<Span>)> {
+        if self.peek().kind != Kind::OpenGroup {
+            return Some((Vec::new(), None));
+        }
+        let open = self.bump().span;
+        let mut shape = Vec::new();
+        while self.peek().kind == Kind::Number {
+            shape.push(self.bump().span);
+        }
+        let close = self.expect(Kind::CloseGroup, "a shape")?;
+        Some((shape, Some(open.to(close))))
     }
 
     /// `{ … }` — the statements a block holds.
@@ -525,16 +552,7 @@ impl<'a> Parser<'a> {
 
         // `(5 2)` — the shape, if there is one. A shape is part of the type, so it
         // sits between the chain and the names rather than inside either.
-        let mut shape = Vec::new();
-        let mut shape_span = None;
-        if self.peek().kind == Kind::OpenGroup {
-            let open = self.bump().span;
-            while self.peek().kind == Kind::Number {
-                shape.push(self.bump().span);
-            }
-            let close = self.expect(Kind::CloseGroup, "a shape")?;
-            shape_span = Some(open.to(close));
-        }
+        let (shape, shape_span) = self.shape()?;
 
         // The names.
         self.expect(Kind::OpenList, "a declaration")?;

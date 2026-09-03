@@ -1040,3 +1040,100 @@ START {
         "true true",
     );
 }
+
+#[test]
+fn an_array_holds_any_type_that_is_built() {
+    // Text wears its marks inside an array, because `[hello there world]` cannot be
+    // read and `[*hello there* *world*]` can.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.bool (3) ['flags'] = [[*true* *false* *true*]];
+    var.immut.arr.str (2) ['words'] = [[*hello there* *world*]];
+    var.immut.arr.e (3) ['exact'] = [[*1/3* *0.5* *7*]];
+    print.stdout['flags' str:* * 'words' str:* * 'exact'];
+}
+"),
+        "[true false true] [*hello there* *world*] [1/3 1/2 7]",
+    );
+}
+
+#[test]
+fn elements_come_back_out_as_what_they_are() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.bool (2) ['flags'] = [[*true* *false*]];
+    var.immut.arr.str (2) ['words'] = [[*one* *two*]];
+    var.immut.arr.e (2) ['exact'] = [[*1/3* *2*]];
+    print.stdout['flags'[*1*] str:* * 'words'[*2*] str:* * 'exact'[*1*]];
+}
+"),
+        "true two 1/3",
+    );
+}
+
+#[test]
+fn arrays_of_exact_numbers_compare_by_what_they_hold() {
+    // A half written two ways is one number, inside an array as well as outside one.
+    assert_eq!(
+        said("\
+START {
+    var.immut.arr.e (2) ['a'] = [[*1/2* *2*]];
+    var.immut.arr.e (2) ['b'] = [[*0.5* *2*]];
+    var.immut.bool ['same'] = ['a' == 'b'];
+    print.stdout['same'];
+}
+"),
+        "true",
+    );
+}
+
+#[test]
+fn an_array_crosses_into_a_function_and_the_call_says_how() {
+    assert_eq!(
+        said("\
+fn.file.i64 ['total'] [immut.arr.i64 (4) 'xs'] {
+    var.mut.i64 ['sum'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+        set ['sum'] = ['sum' + 'xs'['i']];
+    }
+    give ['sum'];
+}
+fn.file.nothing ['zero_it'] [mut.arr.i64 (4) 'xs'] {
+    loop.temp.range.i64 ['i'] = [*1*, count['xs']] {
+        set ['xs'['i']] = [*0*];
+    }
+}
+START {
+    var.mut.arr.i64 (4) ['xs'] = [[*1* *2* *3* *4*]];
+    print.stdout[total[share 'xs'] str:* *];
+    zero_it[copy 'xs'];
+    print.stdout['xs' str:* *];
+    zero_it[share 'xs'];
+    print.stdout['xs'];
+}
+"),
+        "10 [1 2 3 4] [0 0 0 0]",
+        "which is the whole point of `share` and `copy`: the call site says",
+    );
+}
+
+#[test]
+fn an_array_comes_back_out_of_a_function() {
+    assert_eq!(
+        said("\
+fn.file.arr.i64 (3) ['triple'] [immut.i64 'n'] {
+    var.mut.arr.i64 (3) ['out'] = [[*0* *0* *0*]];
+    loop.temp.range.i64 ['i'] = [*1*, *3*] {
+        set ['out'['i']] = ['n' \u{d7} 'i'];
+    }
+    give [share 'out'];
+}
+START {
+    print.stdout[triple[*5*]];
+}
+"),
+        "[5 10 15]",
+    );
+}

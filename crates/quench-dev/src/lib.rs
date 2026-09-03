@@ -472,11 +472,7 @@ extern "C" fn pow_i64_trapping(rt: *mut Runtime, base: i64, exponent: i64) -> i6
 
 /// Called by compiled code. Not called by anything else.
 extern "C" fn text_compare(rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    let of = |index: i64| -> &[u8] {
-        let piece = unsafe { &*(*rt).pieces.add(index as usize) };
-        unsafe { std::slice::from_raw_parts(piece.at, piece.len) }
-    };
-    match of(a).cmp(of(b)) {
+    match piece_of(rt, a).cmp(piece_of(rt, b)) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -564,18 +560,48 @@ extern "C" fn array_copy(_rt: *mut Runtime, handle: i64) -> i64 {
     })
 }
 
-/// Called by compiled code. Not called by anything else.
-extern "C" fn array_equal(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    HEAP.with(|heap| {
-        let heap = heap.borrow();
-        i64::from(heap[a as usize] == heap[b as usize])
-    })
+/// One piece of the module's text, as bytes.
+fn piece_of(rt: *mut Runtime, index: i64) -> &'static [u8] {
+    let piece = unsafe { &*(*rt).pieces.add(index as usize) };
+    unsafe { std::slice::from_raw_parts(piece.at, piece.len) }
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn print_array(_rt: *mut Runtime, stream: i64, handle: i64) -> i64 {
-    let shown = HEAP.with(|heap| qir::show_array(&heap.borrow()[handle as usize]));
-    write_out(stream, shown.as_bytes());
+extern "C" fn array_equal(rt: *mut Runtime, a: i64, b: i64, kind: i64) -> i64 {
+    let kind = qir::Elements::from_code(kind).expect("the lowering wrote this constant");
+    let (left, right) = HEAP.with(|heap| {
+        let heap = heap.borrow();
+        (heap[a as usize].clone(), heap[b as usize].clone())
+    });
+    if left.len() != right.len() {
+        return 0;
+    }
+    let same = left.iter().zip(&right).all(|(x, y)| match kind {
+        qir::Elements::Exact => {
+            EXACTS.with(|e| e.borrow()[*x as usize] == e.borrow()[*y as usize])
+        }
+        qir::Elements::Text => piece_of(rt, *x) == piece_of(rt, *y),
+        _ => x == y,
+    });
+    i64::from(same)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn print_array(rt: *mut Runtime, stream: i64, handle: i64, kind: i64) -> i64 {
+    let kind = qir::Elements::from_code(kind).expect("the lowering wrote this constant");
+    let elements = HEAP.with(|heap| heap.borrow()[handle as usize].clone());
+    let parts: Vec<String> = elements
+        .iter()
+        .map(|value| match kind {
+            qir::Elements::I64 => value.to_string(),
+            qir::Elements::Bool => if *value != 0 { "true" } else { "false" }.to_string(),
+            qir::Elements::Text => {
+                format!("*{}*", String::from_utf8_lossy(piece_of(rt, *value)))
+            }
+            qir::Elements::Exact => EXACTS.with(|e| e.borrow()[*value as usize].to_string()),
+        })
+        .collect();
+    write_out(stream, qir::show_array(&parts).as_bytes());
     0
 }
 
@@ -840,11 +866,13 @@ fn lower(
                     // The table's address is a constant of this compilation. QIR carried
                     // an index; the pointer is put on here and goes no further.
                     let mut given = vec![b.ins().iconst(types::I64, table)];
-                    for (arg, want) in args.iter().zip(host.params()) {
+                    for arg in args {
                         let value = vals[arg.0 as usize].unwrap();
                         // A bool lives in an i8 here and the runtime takes an i64, so it
                         // is widened at the boundary rather than anywhere QIR can see.
-                        given.push(if *want == qir::Ty::Bool {
+                        // Keyed on what the value *is*, not on what the host's table
+                        // says: one argument is whatever the array holds.
+                        given.push(if func.ty_of(*arg) == qir::Ty::Bool {
                             b.ins().uextend(types::I64, value)
                         } else {
                             value
@@ -854,7 +882,7 @@ fn lower(
                     let mut answer = b.inst_results(call)[0];
                     // And narrowed on the way back, for the same reason: the runtime
                     // answers in an i64 and a bool lives in an i8 here.
-                    if host.result() == qir::Ty::Bool {
+                    if func.ty_of(*result) == qir::Ty::Bool {
                         answer = b.ins().ireduce(types::I8, answer);
                     }
                     if host.can_stop() {

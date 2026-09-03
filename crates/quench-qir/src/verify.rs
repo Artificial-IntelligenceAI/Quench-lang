@@ -169,6 +169,11 @@ pub fn verify(module: &Module) -> Result<(), Vec<Invalid>> {
                             ));
                         }
                         for (n, (arg, want)) in args.iter().zip(wants).enumerate() {
+                            // One argument is whatever the array holds, and a slot is
+                            // the same width whatever that is.
+                            if host.takes_an_element() == Some(n) {
+                                continue;
+                            }
                             if known(*arg, &mut say) && func.ty_of(*arg) != *want {
                                 say(format!(
                                     "block {i}: `{}` wants {} for argument {n} and is given {}",

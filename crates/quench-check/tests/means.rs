@@ -340,10 +340,21 @@ fn an_array_of_arrays_says_it_is_not_built() {
 }
 
 #[test]
-fn an_array_of_something_that_is_not_a_number_says_so() {
-    let rendered = errors("START { var.immut.arr.str (2) ['xs'] = [[*a* *b*]]; }");
-    assert!(rendered.contains("an array of `str` is not built yet"), "{rendered}");
-    assert!(rendered.contains("packed by width"), "{rendered}");
+fn an_array_holds_any_of_the_types_that_are_built() {
+    // It used to hold `i64` and nothing else. A slot is the same width whatever is in
+    // it, so what was missing was telling the runtime which -- not room for it.
+    for source in [
+        "START { var.immut.arr.i64 (2) ['xs'] = [[*1* *2*]]; }",
+        "START { var.immut.arr.bool (2) ['xs'] = [[*true* *false*]]; }",
+        "START { var.immut.arr.str (2) ['xs'] = [[*a* *b*]]; }",
+        "START { var.immut.arr.e (2) ['xs'] = [[*1/3* *0.5*]]; }",
+    ] {
+        assert!(check(source).ok(), "{source}\n{}", errors(source));
+    }
+
+    // An element is read under the element type, the same way a declaration's value is.
+    assert_eq!(codes("START { var.immut.arr.i64 (1) ['xs'] = [[*0.5*]]; }"), ["E0407"]);
+    assert!(check("START { var.immut.arr.e (1) ['xs'] = [[*0.5*]]; }").ok());
 }
 
 #[test]

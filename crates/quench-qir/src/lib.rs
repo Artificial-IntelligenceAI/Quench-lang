@@ -372,8 +372,10 @@ impl Host {
             Host::ArrayGet => &[Ty::Handle, Ty::I64],
             Host::ArrayLen => &[Ty::Handle],
             Host::ArrayCopy => &[Ty::Handle],
-            Host::ArrayEqual => &[Ty::Handle, Ty::Handle],
-            Host::PrintArray => &[Ty::I64, Ty::Handle],
+            // The last is which [`Elements`] it holds, always a constant by the time it
+            // arrives here.
+            Host::ArrayEqual => &[Ty::Handle, Ty::Handle, Ty::I64],
+            Host::PrintArray => &[Ty::I64, Ty::Handle, Ty::I64],
             Host::ExactRead => &[Ty::Text],
             Host::ExactAdd | Host::ExactSub | Host::ExactMul | Host::ExactDiv => {
                 &[Ty::Exact, Ty::Exact]
@@ -383,6 +385,19 @@ impl Host {
             Host::PrintExact => &[Ty::I64, Ty::Exact],
             Host::ExactPow => &[Ty::Exact, Ty::Exact],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
+        }
+    }
+
+    /// Which parameter is *whatever the array holds*, rather than a type fixed here.
+    ///
+    /// A slot is an `i64` however wide the thing in it is, so no runtime ever needs
+    /// telling. The IR does, because a value coming back out of one has to have a type
+    /// before anything can use it — which is why [`Host::ArrayGet`] is asked for its
+    /// answer's type at the point it is called.
+    pub fn takes_an_element(self) -> Option<usize> {
+        match self {
+            Host::ArraySet => Some(2),
+            _ => None,
         }
     }
 
@@ -418,17 +433,45 @@ impl Host {
     }
 }
 
+/// What an array's elements are, as compiled code carries it: a number an engine is
+/// handed alongside the handle, because a slot is an `i64` whatever is in it.
+///
+/// The heap holds `i64`s. What is *in* one depends on the type — a `bool` is nought or
+/// one, a `str` is which piece of text, an `e` is which exact number — and both showing
+/// and comparing have to know which.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Elements {
+    I64 = 0,
+    Bool = 1,
+    Text = 2,
+    Exact = 3,
+}
+
+impl Elements {
+    pub fn from_code(code: i64) -> Option<Elements> {
+        Some(match code {
+            0 => Elements::I64,
+            1 => Elements::Bool,
+            2 => Elements::Text,
+            3 => Elements::Exact,
+            _ => return None,
+        })
+    }
+}
+
 /// How an array is shown, written once so that no engine can have its own idea of it.
 ///
 /// Flat and bracketed: `[1 2 3]`. A `(2 3)` shows six numbers rather than two rows,
-/// because six numbers is how one is written.
-pub fn show_array(elements: &[i64]) -> String {
+/// because six numbers is how one is written. Each engine works out what its own
+/// elements say; this decides only how they are put together, which is the part two
+/// engines could otherwise disagree about.
+pub fn show_array(shown: &[String]) -> String {
     let mut out = String::from("[");
-    for (n, value) in elements.iter().enumerate() {
+    for (n, part) in shown.iter().enumerate() {
         if n > 0 {
             out.push(' ');
         }
-        out.push_str(&value.to_string());
+        out.push_str(part);
     }
     out.push(']');
     out

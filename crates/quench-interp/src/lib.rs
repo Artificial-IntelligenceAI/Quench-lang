@@ -309,15 +309,44 @@ fn evaluate(
                     return Ok(heap.len() as i64 - 1);
                 }
                 qir::Host::ArrayEqual => {
+                    let kind = qir::Elements::from_code(slots[args[2].0 as usize])
+                        .expect("the lowering wrote this constant");
                     let (a, b) = (
-                        &heap[slots[args[0].0 as usize] as usize],
-                        &heap[slots[args[1].0 as usize] as usize],
+                        heap[slots[args[0].0 as usize] as usize].clone(),
+                        heap[slots[args[1].0 as usize] as usize].clone(),
                     );
-                    return Ok(i64::from(a == b));
+                    if a.len() != b.len() {
+                        return Ok(0);
+                    }
+                    let same = a.iter().zip(&b).all(|(x, y)| match kind {
+                        // Two names for one exact number are not the only way to hold
+                        // the same one, so these are compared by value rather than by
+                        // which they are -- and so is text, for the same reason.
+                        qir::Elements::Exact => exacts[*x as usize] == exacts[*y as usize],
+                        qir::Elements::Text => {
+                            module.text[*x as usize] == module.text[*y as usize]
+                        }
+                        _ => x == y,
+                    });
+                    return Ok(i64::from(same));
                 }
                 qir::Host::PrintArray => {
-                    let shown =
-                        qir::show_array(&heap[slots[args[1].0 as usize] as usize]);
+                    let kind = qir::Elements::from_code(slots[args[2].0 as usize])
+                        .expect("the lowering wrote this constant");
+                    let parts: Vec<String> = heap[slots[args[1].0 as usize] as usize]
+                        .iter()
+                        .map(|value| match kind {
+                            qir::Elements::I64 => value.to_string(),
+                            qir::Elements::Bool => {
+                                if *value != 0 { "true" } else { "false" }.to_string()
+                            }
+                            // Wearing its marks, because an array of text with a space
+                            // in it is unreadable without them.
+                            qir::Elements::Text => format!("*{}*", module.text[*value as usize]),
+                            qir::Elements::Exact => exacts[*value as usize].to_string(),
+                        })
+                        .collect();
+                    let shown = qir::show_array(&parts);
                     let _ = write!(writing.to(slots[args[0].0 as usize]), "{shown}");
                 }
                 qir::Host::ExactRead => {

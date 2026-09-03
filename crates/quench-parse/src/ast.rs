@@ -48,6 +48,9 @@ impl Item {
 pub struct Func {
     /// `fn`, then everything dotted after it — who can see it, and what it gives back.
     pub chain: Vec<Span>,
+    /// `(2 3)` — the shape of what it gives back, when that is an array.
+    pub shape: Vec<Span>,
+    pub shape_span: Option<Span>,
     pub name: Span,
     /// Where the parameter list was written, empty or not, for pointing at when a call
     /// gives the wrong number of things.
@@ -62,6 +65,9 @@ pub struct Func {
 pub struct Param {
     /// `immut.i64` — the same links `var` would carry, said the same way.
     pub chain: Vec<Span>,
+    /// `(2 3)` — one size per `arr` link, where there is one. Empty when there is not.
+    pub shape: Vec<Span>,
+    pub shape_span: Option<Span>,
     pub name: Span,
     pub span: Span,
 }
