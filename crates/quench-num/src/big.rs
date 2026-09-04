@@ -98,6 +98,81 @@ impl Big {
     // --- comparison ---------------------------------------------------------------
 
     /// Compare magnitudes, ignoring both signs.
+    /// How many bits it takes to write, ignoring the sign. Nought takes none.
+    pub fn bits(&self) -> u64 {
+        match self.limbs.last() {
+            None => 0,
+            Some(top) => (self.limbs.len() as u64 - 1) * 64 + (64 - top.leading_zeros() as u64),
+        }
+    }
+
+    /// Whether the bit at this place is set, counting from the bottom. A binary float
+    /// asks this to find out which way a rounding goes.
+    pub fn bit(&self, at: u64) -> bool {
+        let limb = (at / 64) as usize;
+        match self.limbs.get(limb) {
+            None => false,
+            Some(word) => word >> (at % 64) & 1 == 1,
+        }
+    }
+
+    /// Multiplied by two that many times. Whole limbs first, then the bits left over,
+    /// because shifting by a whole limb is a move rather than an arithmetic.
+    pub fn shifted_up(&self, by: u64) -> Big {
+        if self.is_zero() {
+            return Big::zero();
+        }
+        let (limbs, bits) = ((by / 64) as usize, (by % 64) as u32);
+        let mut out: Vec<u64> = vec![0u64; limbs];
+        if bits == 0 {
+            out.extend_from_slice(&self.limbs);
+        } else {
+            let mut carry = 0u64;
+            for limb in &self.limbs {
+                out.push(limb << bits | carry);
+                carry = limb >> (64 - bits);
+            }
+            if carry != 0 {
+                out.push(carry);
+            }
+        }
+        trim(&mut out);
+        Big { negative: self.negative, limbs: out }
+    }
+
+    /// Divided by two that many times, rounding toward zero — the bits that fall off the
+    /// bottom are gone, which is what a shift means and is why a caller that cares about
+    /// them asks [`Big::bit`] first.
+    pub fn shifted_down(&self, by: u64) -> Big {
+        let (limbs, bits) = ((by / 64) as usize, (by % 64) as u32);
+        if limbs >= self.limbs.len() {
+            return Big::zero();
+        }
+        let kept = &self.limbs[limbs..];
+        let mut out: Vec<u64> = Vec::with_capacity(kept.len());
+        if bits == 0 {
+            out.extend_from_slice(kept);
+        } else {
+            for (n, limb) in kept.iter().enumerate() {
+                let above = kept.get(n + 1).copied().unwrap_or(0);
+                out.push(limb >> bits | above << (64 - bits));
+            }
+        }
+        trim(&mut out);
+        Big { negative: self.negative && !out.is_empty(), limbs: out }
+    }
+
+    /// Whether any bit below this place is set, which is what says a shift lost
+    /// something — the sticky bit, in the language of rounding.
+    pub fn any_below(&self, at: u64) -> bool {
+        let whole = (at / 64) as usize;
+        if self.limbs.iter().take(whole).any(|limb| *limb != 0) {
+            return true;
+        }
+        let bits = at % 64;
+        bits != 0 && self.limbs.get(whole).is_some_and(|limb| limb & ((1 << bits) - 1) != 0)
+    }
+
     pub fn cmp_abs(&self, other: &Big) -> Ordering {
         cmp_mag(&self.limbs, &other.limbs)
     }

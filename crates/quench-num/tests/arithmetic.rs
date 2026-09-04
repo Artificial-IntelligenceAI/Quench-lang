@@ -253,3 +253,35 @@ fn rounding_to_binary16_picks_the_nearest_and_ties_to_even() {
         assert_eq!(got.to_bits(), want.to_bits(), "{x:e} rounded to {got:e}, wanted {want:e}");
     }
 }
+
+#[test]
+fn shifting_is_multiplying_and_dividing_by_two() {
+    // A binary float is a whole number and a power of two, so these are what it is made
+    // of and every rounding decision is one of them.
+    let two = Big::from_u64(2);
+    let mut doubled = Big::from_u64(1);
+    let mut by_hand = Big::from_u64(1);
+    for n in 0..200u64 {
+        assert_eq!(Big::from_u64(1).shifted_up(n), by_hand, "one shifted up {n}");
+        assert_eq!(by_hand.bits(), n + 1, "one shifted up {n} takes {} bits", n + 1);
+        assert_eq!(by_hand.shifted_down(n), Big::from_u64(1), "and back down again");
+        by_hand = by_hand.mul(&two);
+        doubled = doubled.mul(&two);
+    }
+
+    // Bits fall off the bottom rather than rounding, and `any_below` is what notices.
+    let seven = Big::from_u64(7);
+    assert_eq!(seven.shifted_down(1), Big::from_u64(3), "toward zero");
+    assert!(seven.any_below(1), "a one fell off");
+    assert!(!Big::from_u64(8).any_below(3), "nothing fell off");
+    assert!(Big::from_u64(8).any_below(4), "the eight itself is below");
+    assert!(seven.bit(0) && seven.bit(1) && seven.bit(2) && !seven.bit(3));
+
+    // Across a limb boundary, which is where a shift written by hand goes wrong.
+    let big = Big::from_u64(1).shifted_up(63);
+    assert_eq!(big.bits(), 64);
+    assert_eq!(big.shifted_up(1).bits(), 65, "and over into the next limb");
+    assert_eq!(big.shifted_up(1).shifted_down(1), big);
+    assert_eq!(Big::zero().shifted_up(100), Big::zero());
+    assert_eq!(Big::from_u64(1).shifted_down(100), Big::zero());
+}

@@ -11,11 +11,13 @@
 pub mod big;
 pub mod decimal;
 pub mod maths;
+pub mod wide;
 pub mod exact;
 
 pub use big::Big;
 pub use decimal::{Decimal, Format, D32, D64};
 pub use maths::{Alone, Paired};
+pub use wide::Wide;
 pub use exact::{Exact, Trouble};
 
 /// Why a power had no answer.
