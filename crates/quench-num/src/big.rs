@@ -27,13 +27,151 @@
 
 use std::cmp::Ordering;
 
+
+/// How many limbs a number keeps without asking for memory. Six is three hundred and
+/// eighty-four bits, which covers a `b64`'s mantissa many times over, every decimal
+/// coefficient anyone writes, and the first two working widths the transcendentals use —
+/// so the arithmetic on the hot path never touches the heap at all.
+const INLINE: usize = 6;
+
+/// Limbs, kept on the stack while there are few of them.
+///
+/// This is the whole of the difference between arithmetic that costs forty nanoseconds
+/// and arithmetic that costs four hundred. Every operation here builds a new number, and
+/// when a number is a `Vec` that means asking the allocator — for three limbs. Measured
+/// on the transcendentals, allocation was the cost and the arithmetic was the rounding
+/// error: a multiply of two two-hundred-bit numbers is a handful of instructions and was
+/// spending most of its time in `malloc`.
+#[derive(Clone, Debug)]
+enum Store {
+    Few { len: u8, data: [u64; INLINE] },
+    Many(Vec<u64>),
+}
+
+impl Store {
+    fn clear(&mut self) {
+        *self = Store::new();
+    }
+
+    /// Drop the first `n` limbs, which is a shift down by whole limbs.
+    fn drop_front(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        if n >= self.len() {
+            self.clear();
+            return;
+        }
+        let kept = Store::from_slice(&self[n..]);
+        *self = kept;
+    }
+
+    fn new() -> Store {
+        Store::Few { len: 0, data: [0; INLINE] }
+    }
+
+    fn with_capacity(n: usize) -> Store {
+        if n <= INLINE {
+            Store::new()
+        } else {
+            Store::Many(Vec::with_capacity(n))
+        }
+    }
+
+    fn from_slice(limbs: &[u64]) -> Store {
+        let mut out = Store::with_capacity(limbs.len());
+        out.extend_from_slice(limbs);
+        out
+    }
+
+    fn push(&mut self, limb: u64) {
+        match self {
+            Store::Few { len, data } if (*len as usize) < INLINE => {
+                data[*len as usize] = limb;
+                *len += 1;
+            }
+            // Outgrown the stack: everything moves to the heap, once.
+            Store::Few { len, data } => {
+                let mut heap = Vec::with_capacity(INLINE * 2);
+                heap.extend_from_slice(&data[..*len as usize]);
+                heap.push(limb);
+                *self = Store::Many(heap);
+            }
+            Store::Many(heap) => heap.push(limb),
+        }
+    }
+
+    fn pop(&mut self) {
+        match self {
+            Store::Few { len, .. } => *len = len.saturating_sub(1),
+            Store::Many(heap) => {
+                heap.pop();
+            }
+        }
+    }
+
+    fn extend_from_slice(&mut self, limbs: &[u64]) {
+        for limb in limbs {
+            self.push(*limb);
+        }
+    }
+
+    fn resize_zero(&mut self, n: usize) {
+        while self.len() < n {
+            self.push(0);
+        }
+    }
+}
+
+impl std::ops::Deref for Store {
+    type Target = [u64];
+
+    fn deref(&self) -> &[u64] {
+        match self {
+            Store::Few { len, data } => &data[..*len as usize],
+            Store::Many(heap) => heap,
+        }
+    }
+}
+
+impl std::ops::DerefMut for Store {
+    fn deref_mut(&mut self) -> &mut [u64] {
+        match self {
+            Store::Few { len, data } => &mut data[..*len as usize],
+            Store::Many(heap) => heap,
+        }
+    }
+}
+
+// By what they hold, never by where they hold it: the same number inline and on the heap
+// is the same number, and nothing outside this file can tell which it is.
+impl PartialEq for Store {
+    fn eq(&self, other: &Store) -> bool {
+        **self == **other
+    }
+}
+
+impl Eq for Store {}
+
+impl std::hash::Hash for Store {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (**self).hash(state);
+    }
+}
+
+impl Default for Store {
+    fn default() -> Store {
+        Store::new()
+    }
+}
+
 /// A whole number of any size.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Big {
     /// Always `false` for zero, so a number has one representation and not two.
     negative: bool,
     /// Little-endian, and never ending in a zero limb.
-    limbs: Vec<u64>,
+    limbs: Store,
 }
 
 impl Big {
@@ -42,11 +180,11 @@ impl Big {
     }
 
     pub fn from_u64(n: u64) -> Self {
-        Big { negative: false, limbs: if n == 0 { Vec::new() } else { vec![n] } }
+        Big { negative: false, limbs: if n == 0 { Store::new() } else { Store::from_slice(&[n]) } }
     }
 
     pub fn from_i64(n: i64) -> Self {
-        Big { negative: n < 0, limbs: if n == 0 { Vec::new() } else { vec![n.unsigned_abs()] } }
+        Big { negative: n < 0, limbs: if n == 0 { Store::new() } else { Store::from_slice(&[n.unsigned_abs()]) } }
     }
 
     pub fn is_zero(&self) -> bool {
@@ -83,14 +221,14 @@ impl Big {
 
     /// The number as a `u64`, if it fits and is not negative.
     pub fn to_u64(&self) -> Option<u64> {
-        match self.limbs.as_slice() {
+        match &*self.limbs {
             [] => Some(0),
             [one] if !self.negative => Some(*one),
             _ => None,
         }
     }
 
-    fn of(negative: bool, mut limbs: Vec<u64>) -> Big {
+    fn of(negative: bool, mut limbs: Store) -> Big {
         trim(&mut limbs);
         Big { negative: negative && !limbs.is_empty(), limbs }
     }
@@ -123,12 +261,13 @@ impl Big {
             return Big::zero();
         }
         let (limbs, bits) = ((by / 64) as usize, (by % 64) as u32);
-        let mut out: Vec<u64> = vec![0u64; limbs];
+        let mut out = Store::with_capacity(self.limbs.len() + limbs + 1);
+        out.resize_zero(limbs);
         if bits == 0 {
             out.extend_from_slice(&self.limbs);
         } else {
             let mut carry = 0u64;
-            for limb in &self.limbs {
+            for limb in self.limbs.iter() {
                 out.push(limb << bits | carry);
                 carry = limb >> (64 - bits);
             }
@@ -149,7 +288,7 @@ impl Big {
             return Big::zero();
         }
         let kept = &self.limbs[limbs..];
-        let mut out: Vec<u64> = Vec::with_capacity(kept.len());
+        let mut out = Store::with_capacity(kept.len());
         if bits == 0 {
             out.extend_from_slice(kept);
         } else {
@@ -171,6 +310,38 @@ impl Big {
         }
         let bits = at % 64;
         bits != 0 && self.limbs.get(whole).is_some_and(|limb| limb & ((1 << bits) - 1) != 0)
+    }
+
+    /// `(self << places) / n`, and whether anything was left over.
+    ///
+    /// The shift and the division are one pass rather than two, which matters more than
+    /// it sounds: every series in `transcend` divides by a term index, and doing it as a
+    /// shift and then a division builds a second whole number in between. One pass is one
+    /// allocation, and allocation is what these cost — the arithmetic itself is a
+    /// multiply and a remainder per limb.
+    pub fn shifted_then_divided(&self, places: u64, n: u64) -> (Big, bool) {
+        if self.is_zero() || n == 0 {
+            return (Big::zero(), false);
+        }
+        let whole = (places / 64) as usize;
+        let bits = (places % 64) as u32;
+        // The shifted number, written straight into the buffer the quotient will use.
+        let mut limbs = Store::with_capacity(self.limbs.len() + whole + 1);
+        limbs.resize_zero(whole);
+        if bits == 0 {
+            limbs.extend_from_slice(&self.limbs);
+        } else {
+            let mut carry = 0u64;
+            for limb in self.limbs.iter() {
+                limbs.push(limb << bits | carry);
+                carry = limb >> (64 - bits);
+            }
+            if carry != 0 {
+                limbs.push(carry);
+            }
+        }
+        let rest = div_small_in_place(&mut limbs, n);
+        (Big { negative: self.negative && !limbs.is_empty(), limbs }, rest != 0)
     }
 
     /// The whole part of the square root, and whether anything was left over.
@@ -250,8 +421,8 @@ impl Big {
     /// is on the hot path of every rational operation, so it is the one routine here
     /// that must not call division.
     pub fn gcd(a: &Big, b: &Big) -> Big {
-        let mut a = a.limbs.clone();
-        let mut b = b.limbs.clone();
+        let mut a = Store::from_slice(&a.limbs);
+        let mut b = Store::from_slice(&b.limbs);
         if a.is_empty() {
             return Big::of(false, b);
         }
@@ -295,7 +466,7 @@ impl Big {
         }
         // Nineteen digits is the most that always fits in a u64, so the number is built
         // a chunk at a time rather than a digit at a time.
-        let mut limbs: Vec<u64> = Vec::new();
+        let mut limbs = Store::new();
         for chunk in (Chunks { rest: digits.as_bytes(), size: 19 }) {
             let value: u64 = std::str::from_utf8(chunk).ok()?.parse().ok()?;
             let scale = 10u64.pow(chunk.len() as u32);
@@ -369,7 +540,7 @@ impl PartialOrd for Big {
 
 // --- magnitudes, which know nothing about signs -------------------------------------
 
-fn trim(limbs: &mut Vec<u64>) {
+fn trim(limbs: &mut Store) {
     while limbs.last() == Some(&0) {
         limbs.pop();
     }
@@ -379,9 +550,9 @@ fn cmp_mag(a: &[u64], b: &[u64]) -> Ordering {
     a.len().cmp(&b.len()).then_with(|| a.iter().rev().cmp(b.iter().rev()))
 }
 
-fn add_mag(a: &[u64], b: &[u64]) -> Vec<u64> {
+fn add_mag(a: &[u64], b: &[u64]) -> Store {
     let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
-    let mut out = Vec::with_capacity(long.len() + 1);
+    let mut out = Store::with_capacity(long.len() + 1);
     let mut carry = 0u128;
     for i in 0..long.len() {
         let sum = long[i] as u128 + *short.get(i).unwrap_or(&0) as u128 + carry;
@@ -395,9 +566,9 @@ fn add_mag(a: &[u64], b: &[u64]) -> Vec<u64> {
 }
 
 /// `a - b`, and `a` must be at least `b`.
-fn sub_mag(a: &[u64], b: &[u64]) -> Vec<u64> {
+fn sub_mag(a: &[u64], b: &[u64]) -> Store {
     debug_assert!(cmp_mag(a, b) != Ordering::Less, "sub_mag would go negative");
-    let mut out = Vec::with_capacity(a.len());
+    let mut out = Store::with_capacity(a.len());
     let mut borrow = 0i128;
     for i in 0..a.len() {
         let diff = a[i] as i128 - *b.get(i).unwrap_or(&0) as i128 - borrow;
@@ -414,8 +585,9 @@ fn sub_mag(a: &[u64], b: &[u64]) -> Vec<u64> {
     out
 }
 
-fn mul_mag(a: &[u64], b: &[u64]) -> Vec<u64> {
-    let mut out = vec![0u64; a.len() + b.len()];
+fn mul_mag(a: &[u64], b: &[u64]) -> Store {
+    let mut out = Store::with_capacity(a.len() + b.len());
+    out.resize_zero(a.len() + b.len());
     for (i, &x) in a.iter().enumerate() {
         if x == 0 {
             continue;
@@ -448,12 +620,13 @@ fn trailing_zeros(limbs: &[u64]) -> usize {
     0
 }
 
-fn shl_bits(limbs: &[u64], bits: usize) -> Vec<u64> {
+fn shl_bits(limbs: &[u64], bits: usize) -> Store {
     if limbs.is_empty() {
-        return Vec::new();
+        return Store::new();
     }
     let (whole, part) = (bits / 64, bits % 64);
-    let mut out = vec![0u64; whole];
+    let mut out = Store::with_capacity(limbs.len() + whole + 1);
+    out.resize_zero(whole);
     if part == 0 {
         out.extend_from_slice(limbs);
     } else {
@@ -470,7 +643,7 @@ fn shl_bits(limbs: &[u64], bits: usize) -> Vec<u64> {
     out
 }
 
-fn shr_bits_in_place(limbs: &mut Vec<u64>, bits: usize) {
+fn shr_bits_in_place(limbs: &mut Store, bits: usize) {
     if bits == 0 || limbs.is_empty() {
         return;
     }
@@ -479,7 +652,7 @@ fn shr_bits_in_place(limbs: &mut Vec<u64>, bits: usize) {
         limbs.clear();
         return;
     }
-    limbs.drain(..whole);
+    limbs.drop_front(whole);
     if part != 0 {
         for i in 0..limbs.len() {
             let high = limbs.get(i + 1).copied().unwrap_or(0);
@@ -489,7 +662,7 @@ fn shr_bits_in_place(limbs: &mut Vec<u64>, bits: usize) {
     trim(limbs);
 }
 
-fn mul_small_in_place(limbs: &mut Vec<u64>, factor: u64) {
+fn mul_small_in_place(limbs: &mut Store, factor: u64) {
     let mut carry = 0u128;
     for limb in limbs.iter_mut() {
         let product = *limb as u128 * factor as u128 + carry;
@@ -503,7 +676,7 @@ fn mul_small_in_place(limbs: &mut Vec<u64>, factor: u64) {
     trim(limbs);
 }
 
-fn add_small_in_place(limbs: &mut Vec<u64>, addend: u64) {
+fn add_small_in_place(limbs: &mut Store, addend: u64) {
     let mut carry = addend as u128;
     let mut i = 0;
     while carry != 0 {
@@ -519,7 +692,7 @@ fn add_small_in_place(limbs: &mut Vec<u64>, addend: u64) {
 }
 
 /// Divide in place by a single limb, returning the remainder.
-fn div_small_in_place(limbs: &mut Vec<u64>, divisor: u64) -> u64 {
+fn div_small_in_place(limbs: &mut Store, divisor: u64) -> u64 {
     let mut rest = 0u128;
     for limb in limbs.iter_mut().rev() {
         let value = (rest << 64) | *limb as u128;
@@ -536,15 +709,15 @@ fn div_small_in_place(limbs: &mut Vec<u64>, divisor: u64) -> u64 {
 /// the two-limb estimate of each quotient digit wrong by at most one. Everything after
 /// that is a multiply-and-subtract, with an add-back on the rare occasion the estimate
 /// was high.
-fn div_rem_mag(u: &[u64], v: &[u64]) -> (Vec<u64>, Vec<u64>) {
+fn div_rem_mag(u: &[u64], v: &[u64]) -> (Store, Store) {
     debug_assert!(!v.is_empty(), "division by zero reaches here");
     if cmp_mag(u, v) == Ordering::Less {
-        return (Vec::new(), u.to_vec());
+        return (Store::new(), Store::from_slice(u));
     }
     if v.len() == 1 {
-        let mut q = u.to_vec();
+        let mut q = Store::from_slice(u);
         let r = div_small_in_place(&mut q, v[0]);
-        return (q, if r == 0 { Vec::new() } else { vec![r] });
+        return (q, if r == 0 { Store::new() } else { Store::from_slice(&[r]) });
     }
 
     let shift = v[v.len() - 1].leading_zeros() as usize;
@@ -554,7 +727,8 @@ fn div_rem_mag(u: &[u64], v: &[u64]) -> (Vec<u64>, Vec<u64>) {
 
     let n = vn.len();
     let m = un.len() - 1 - n;
-    let mut q = vec![0u64; m + 1];
+    let mut q = Store::with_capacity(m + 2);
+    q.resize_zero(m + 1);
 
     for j in (0..=m).rev() {
         let top = ((un[j + n] as u128) << 64) | un[j + n - 1] as u128;
@@ -600,7 +774,7 @@ fn div_rem_mag(u: &[u64], v: &[u64]) -> (Vec<u64>, Vec<u64>) {
     }
 
     trim(&mut q);
-    let mut r = un[..n].to_vec();
+    let mut r = Store::from_slice(&un[..n]);
     trim(&mut r);
     shr_bits_in_place(&mut r, shift);
     (q, r)

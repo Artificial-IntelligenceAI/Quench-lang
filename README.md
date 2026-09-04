@@ -256,12 +256,13 @@ Both print the same thing, which is not a coincidence — it is
   turns out to need, and rounds exactly once. **Twenty thousand arguments against this
   machine's own `libm`: `ln` agreed everywhere, `exp` and `pow` differed on about one in
   seven hundred — and at three hundred bits the true value was on our side every time.**
-  **It is slow, and not by a little**: eighteen to fifty microseconds a call against one
-  to four nanoseconds for the machine's own, so about twenty thousand times. That is what
-  arbitrary precision costs, and closing it would mean a fast path accurate enough to
-  *prove* its own rounding — a real piece of work rather than a tuning pass. The
-  reference engine is the one that does the least and being right was the point, so the
-  bill is paid. `b64` only: rounding a `b64` answer down to a `b32` rounds twice.
+  **It is slow**: four to thirteen microseconds a call against one to five nanoseconds
+  for the machine's own, so a few thousand times. That is down from seventy microseconds
+  — most of the first draft was recomputing `ln 2` and π on every call, and then asking
+  the allocator for a three-limb number several hundred times per call. Closing the rest
+  would mean a fast path accurate enough to *prove* its own rounding, which is a real
+  piece of work rather than a tuning pass. The reference engine is the one that does the
+  least and being right was the point, so the bill is paid. `b64` only: rounding a `b64` answer down to a `b32` rounds twice.
   `sin`, `cos`, `tan`, `atan` and `atan2` are here too, and the argument reduction is
   the part a C library cannot afford: knowing which quarter-turn `1e300` falls in means
   knowing π to a thousand bits. Here π is a `Big` and it is asked for as many bits as the

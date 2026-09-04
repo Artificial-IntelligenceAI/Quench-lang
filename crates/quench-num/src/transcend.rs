@@ -56,14 +56,15 @@ fn remembered(name: &'static str, bits: u64, make: impl FnOnce() -> Wide) -> Wid
 
 /// The working width to start at, and how far to go before giving up.
 ///
-/// A hundred and sixty bits is a hundred more than a `b64` needs, and the slack below is
-/// counted generously against it. That asymmetry is deliberate: a slack that is too small
+/// Ninety-six bits is forty more than a `b64` needs, and the slack below is counted
+/// generously against it — an interval of about `2^-72`, which is eighteen bits finer
+/// than a `b64` can tell apart, so it settles on the first round essentially always. That asymmetry is deliberate: a slack that is too small
 /// accepts a rounding that was never settled, and is *wrong*; a slack that is too large
 /// only asks for another round, and is *slow*. So every one of these is an
 /// over-estimate, and the cost of that is a retry that has never been seen to happen. Nothing has been seen to need the second round, let alone the
 /// fourth; the ceiling is there so that a mistake in a series shows up as a panic during
 /// a test rather than as a program that never finishes.
-const START: u64 = 160;
+const START: u64 = 96;
 const CEILING: u64 = 4096;
 
 /// How many units of the working width the answer might be out by, counted with a very
@@ -260,7 +261,7 @@ fn exp_wide(x: &Wide, bits: u64) -> Wide {
     let mut term = Wide::whole(1, work);
     let mut sum = term.clone();
     for n in 1..=(work as i64) {
-        term = term.mul(&r).div(&Wide::whole(n, work));
+        term = term.mul(&r).div_small(n as u64);
         if term.is_zero() {
             break;
         }
@@ -292,7 +293,7 @@ fn ln_wide(x: &Wide, bits: u64) -> Wide {
     let mut sum = t;
     for n in 1..=(work as i64) {
         power = power.mul(&square);
-        let term = power.div(&Wide::whole(2 * n + 1, work));
+        let term = power.div_small((2 * n + 1) as u64);
         if term.is_zero() {
             break;
         }
@@ -302,7 +303,7 @@ fn ln_wide(x: &Wide, bits: u64) -> Wide {
         }
         sum = next;
     }
-    let ln_m = sum.mul(&Wide::whole(2, work));
+    let ln_m = sum.scaled(1);
     ln_m.add(&Wide::whole(e, work).mul(&ln_two(work))).to_bits_of(bits)
 }
 
@@ -334,13 +335,13 @@ fn ln_two(bits: u64) -> Wide {
 
 fn ln_two_made(bits: u64) -> Wide {
     let work = bits + 16;
-    let third = Wide::whole(1, work).div(&Wide::whole(3, work));
+    let third = Wide::whole(1, work).div_small(3);
     let square = third.mul(&third);
     let mut power = third.clone();
     let mut sum = third;
     for n in 1..=(work as i64) {
         power = power.mul(&square);
-        let term = power.div(&Wide::whole(2 * n + 1, work));
+        let term = power.div_small((2 * n + 1) as u64);
         if term.is_zero() {
             break;
         }
@@ -350,7 +351,7 @@ fn ln_two_made(bits: u64) -> Wide {
         }
         sum = next;
     }
-    sum.mul(&Wide::whole(2, work)).to_bits_of(bits)
+    sum.scaled(1).to_bits_of(bits)
 }
 
 /// `sin`, correctly rounded.
@@ -488,7 +489,7 @@ fn circular(x: f64, bits: u64, cosine: bool) -> Wide {
     // reducing a positive number is one fewer thing to get wrong.
     let sign = value.is_negative();
     let size = value.abs();
-    let half = Wide::whole(1, work).div(&Wide::whole(2, work));
+    let half = Wide::whole(1, work).scaled(-1);
     let quarters = size.div(&half_pi).add(&half).floor_abs();
     let k = i64::from(quarters.bit(1)) * 2 + i64::from(quarters.bit(0));
     let r = size.sub(&Wide::from_big(&quarters, work).mul(&half_pi));
@@ -520,7 +521,7 @@ fn sin_series(r: &Wide, bits: u64) -> Wide {
     let mut term = r.clone();
     let mut sum = term.clone();
     for n in 1..=(bits as i64) {
-        term = term.mul(&square).div(&Wide::whole(2 * n * (2 * n + 1), bits)).negated();
+        term = term.mul(&square).div_small((2 * n * (2 * n + 1)) as u64).negated();
         let next = sum.add(&term);
         if term.is_zero() || next == sum {
             break;
@@ -535,7 +536,7 @@ fn cos_series(r: &Wide, bits: u64) -> Wide {
     let mut term = Wide::whole(1, bits);
     let mut sum = term.clone();
     for n in 1..=(bits as i64) {
-        term = term.mul(&square).div(&Wide::whole(2 * n * (2 * n - 1), bits)).negated();
+        term = term.mul(&square).div_small((2 * n * (2 * n - 1)) as u64).negated();
         let next = sum.add(&term);
         if term.is_zero() || next == sum {
             break;
@@ -562,7 +563,7 @@ fn arctan(x: &Wide, bits: u64) -> Wide {
         t = one.div(&t);
     }
 
-    let sixteenth = one.div(&Wide::whole(16, bits));
+    let sixteenth = one.scaled(-4);
     let step = remembered("atan 1/16", bits, || atan_series(&sixteenth, bits));
     let mut bites = 0i64;
     while t.cmp_abs(&sixteenth) == std::cmp::Ordering::Greater {
@@ -583,7 +584,7 @@ fn atan_series(t: &Wide, bits: u64) -> Wide {
     let mut sum = t.clone();
     for n in 1..=(bits as i64) {
         power = power.mul(&square).negated();
-        let term = power.div(&Wide::whole(2 * n + 1, bits));
+        let term = power.div_small((2 * n + 1) as u64);
         let next = sum.add(&term);
         if term.is_zero() || next == sum {
             break;
@@ -607,11 +608,11 @@ fn pi_made(bits: u64) -> Wide {
     let work = bits + 32;
     let one = Wide::whole(1, work);
     let fifth = one.div(&Wide::whole(5, work));
-    let small = one.div(&Wide::whole(239, work));
+    let small = one.div_small(239);
     let quarter = atan_series(&fifth, work)
-        .mul(&Wide::whole(4, work))
+        .scaled(2)
         .sub(&atan_series(&small, work));
-    quarter.mul(&Wide::whole(4, work)).to_bits_of(bits)
+    quarter.scaled(2).to_bits_of(bits)
 }
 
 /// `asin`, correctly rounded. `asin x = atan(x / √(1 − x²))`, which is why it waited for
@@ -797,7 +798,7 @@ pub fn cbrt(x: f64) -> f64 {
             let work = bits + 40;
             let size = Wide::from_f64(x.abs(), work);
             // `x^(1/3)` as `e^(ln x / 3)`, which is the definition and needs nothing new.
-            let third = ln_wide_of(&size, work).div(&Wide::whole(3, work));
+            let third = ln_wide_of(&size, work).div_small(3);
             exp_wide(&third, work).to_bits_of(bits)
         },
         SLACK,
@@ -841,14 +842,14 @@ fn ln_wide_of(x: &Wide, bits: u64) -> Wide {
     let mut sum = t;
     for n in 1..=(bits as i64) {
         power = power.mul(&square);
-        let term = power.div(&Wide::whole(2 * n + 1, bits));
+        let term = power.div_small((2 * n + 1) as u64);
         let next = sum.add(&term);
         if term.is_zero() || next == sum {
             break;
         }
         sum = next;
     }
-    sum.mul(&Wide::whole(2, bits)).add(&Wide::whole(e, bits).mul(&ln_two(bits)))
+    sum.scaled(1).add(&Wide::whole(e, bits).mul(&ln_two(bits)))
 }
 
 // Opened up for `tests/transcendence.rs`, which checks the series against digits
@@ -905,7 +906,7 @@ pub fn at_width(name: &str, x: f64, y: f64, bits: u64) -> Wide {
         "atanh" => ln_wide_of(&one.add(&wx).div(&one.sub(&wx)), work).scaled(-1),
         "cbrt" => {
             let size = Wide::from_f64(x.abs(), work);
-            let third = ln_wide_of(&size, work).div(&Wide::whole(3, work));
+            let third = ln_wide_of(&size, work).div_small(3);
             let out = exp_wide(&third, work);
             if x < 0.0 { out.negated() } else { out }
         }
