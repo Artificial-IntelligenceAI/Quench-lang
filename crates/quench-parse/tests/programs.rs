@@ -303,3 +303,52 @@ fn a_call_separates_its_arguments_with_commas() {
     assert_eq!(call.args[0].terms.len(), 2, "`*1*` and `*2*`");
     assert!(call.args[0].has_operators());
 }
+
+/// The words the parser takes and the words it says it takes, held against each other.
+///
+/// One direction is easy and was never the problem: every word on the list works. The
+/// other is the one that bites — a word the parser accepts and the list has not heard
+/// of. `give` was exactly that, accepted for as long as it has existed and never once
+/// mentioned in the sentence telling a reader what a statement may begin with.
+///
+/// So this reads the match in `statement` out of the source. That is a blunt instrument
+/// and it is deliberate: the list has to be checked against the code rather than against
+/// somebody's memory of the code, and the code is the only thing that cannot be wrong.
+#[test]
+fn the_words_that_begin_a_statement_are_the_words_it_says_they_are() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("the parser is beside its own tests");
+    let body = source
+        .split_once("fn statement(&mut self) -> Option<Stmt> {")
+        .expect("`statement` is still called that")
+        .1;
+    let body = body.split_once("\n    fn ").map_or(body, |(before, _)| before);
+
+    // `"word" =>` at the head of a match arm, which is how every one of them is written.
+    let mut accepted: Vec<String> = Vec::new();
+    for line in body.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix('"') {
+            if let Some((word, after)) = rest.split_once('"') {
+                if after.trim_start().starts_with("=>") {
+                    accepted.push(word.to_string());
+                }
+            }
+        }
+    }
+    accepted.sort();
+    accepted.dedup();
+
+    let mut said: Vec<String> = quench_parse::STATEMENTS.iter().map(|w| w.to_string()).collect();
+    said.sort();
+    assert_eq!(
+        accepted, said,
+        "the match in `statement` and `STATEMENTS` disagree; the match is the one that is right"
+    );
+
+    // And the sentence a reader is shown is built from the list rather than typed again.
+    let out = report("START { wobble ['x']; }");
+    for word in quench_parse::STATEMENTS {
+        assert!(out.contains(&format!("`{word}`")), "`{word}` missing from the message:\n{out}");
+    }
+}

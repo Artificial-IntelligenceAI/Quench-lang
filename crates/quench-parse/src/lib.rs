@@ -22,6 +22,38 @@ pub use ast::{
 use quench_diag::{Diagnostic, Span};
 use quench_lex::{Kind, Token};
 
+/// Every word that begins a statement.
+///
+/// The diagnostic for a line beginning with something else reads this, rather than a
+/// sentence somebody has to remember to update — which had already gone wrong twice:
+/// `call` was put in by hand when calls started wearing it, and `give` was never in the
+/// sentence at all, having been accepted for as long as it has existed and advertised
+/// never. `tests/programs.rs` holds this against the match in `statement` itself.
+pub const STATEMENTS: &[&str] =
+    &["var", "set", "add", "print", "call", "give", "if", "loop", "break"];
+
+/// The operators that are words rather than symbols. `x` because `*` is the
+/// written-value mark and no other symbol was free; the rest because nothing ever
+/// settled where they bind, which is the whole of
+/// `notes/precedence-stops-where-maths-stopped.md`.
+pub const OPERATORS: &[&str] = &["x", "mod", "and", "or"];
+
+/// The words that stand in front of a value and change what it means.
+pub const BEFORE_A_VALUE: &[&str] = &["not", "share", "copy"];
+
+/// What a file holds at the top.
+pub const TOP_LEVEL: &[&str] = &["fn", "const", "START"];
+
+/// A list of words as a reader should see it.
+pub fn listed(words: &[&str]) -> String {
+    let all: Vec<String> = words.iter().map(|word| format!("`{word}`")).collect();
+    match all.split_last() {
+        None => "nothing".to_string(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+    }
+}
+
 /// What a file turned into, and everything wrong with it.
 #[derive(Clone, Debug)]
 pub struct Parsed {
@@ -364,9 +396,9 @@ impl<'a> Parser<'a> {
                 self.errors.push(
                     Diagnostic::new("E0104", format!("`{other}` is not something Quench does."))
                         .primary(token.span, "here")
-                        .rule("a statement begins with `var`, `set`, `add`, `print`, `call`, `if`, `loop` or `break`")
+                        .rule(format!("a statement begins with {}", listed(STATEMENTS)))
                         .tip("that is the whole list, for now.")
-                        .fix("did you mean `var`, `set`, `add`, `print`, `call`, `if`, `loop` or `break`?"),
+                        .fix(format!("did you mean {}?", listed(STATEMENTS))),
                 );
                 None
             }
