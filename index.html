@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-theme="glass">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quench</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="bar glass">
+  <span class="wordmark">Quench</span>
+  <div class="themes" role="group" aria-label="Theme">
+    <button type="button" data-set-theme="glass" aria-pressed="true">Glass</button>
+    <button type="button" data-set-theme="solarized-dark" aria-pressed="false">Dark</button>
+    <button type="button" data-set-theme="solarized-light" aria-pressed="false">Light</button>
+  </div>
+</nav>
+
+<main>
+  <section class="card glass">
+    <p class="label">You are visitor number</p>
+    <p class="count" id="count" aria-live="polite">1</p>
+    <p class="note">It goes up when you refresh. That is the whole site so far.</p>
+  </section>
+</main>
+
+<footer>
+  <span>MIT OR Apache-2.0</span>
+  <a href="https://github.com/Artificial-IntelligenceAI/Quench-lang">Source</a>
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>

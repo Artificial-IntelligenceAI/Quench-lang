@@ -1,0 +1,214 @@
+:root {
+  --font: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 22px;
+  --lens-scale: 1.14;
+  --lens-blur: 3px;
+}
+
+/* The glass theme needs something worth refracting, so the backdrop is the
+   design rather than a neutral page colour. Both the page and the lensing
+   layer inside each panel read this same stack. */
+[data-theme="glass"] {
+  --backdrop:
+    radial-gradient(1100px 700px at 12% -8%, #6c71c4 0%, transparent 60%),
+    radial-gradient(900px 600px at 88% 4%, #2aa198 0%, transparent 58%),
+    radial-gradient(800px 900px at 70% 96%, #d33682 0%, transparent 62%),
+    radial-gradient(700px 500px at 20% 88%, #268bd2 0%, transparent 60%),
+    linear-gradient(168deg, #0b1020 0%, #131a33 55%, #0a0f1e 100%);
+  --ink: #f4f6fb;
+  --ink-dim: rgba(244, 246, 251, 0.66);
+  --panel: rgba(255, 255, 255, 0.09);
+  --rule: rgba(255, 255, 255, 0.18);
+  --glass-blur: 26px;
+}
+
+[data-theme="solarized-dark"] {
+  --backdrop: #002b36;
+  --ink: #93a1a1;
+  --ink-dim: #586e75;
+  --panel: #073642;
+  --rule: #586e75;
+  --accent: #2aa198;
+}
+
+[data-theme="solarized-light"] {
+  --backdrop: #fdf6e3;
+  --ink: #586e75;
+  --ink-dim: #93a1a1;
+  --panel: #eee8d5;
+  --rule: #93a1a1;
+  --accent: #268bd2;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--backdrop) fixed;
+  background-size: cover;
+}
+
+/* --- The material ------------------------------------------------------- */
+
+.glass {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background-color: var(--panel);
+  /* The pointer-tracked specular sheen. Sits above the frost, below content. */
+  background-image: radial-gradient(
+    340px circle at var(--mx, 50%) var(--my, -20%),
+    rgba(255, 255, 255, 0.20), transparent 70%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.glass > * { position: relative; z-index: 1; }
+
+/* Edge lensing, without an SVG displacement map. A copy of the page backdrop
+   is pinned to the viewport, so it lines up with what is genuinely behind the
+   panel, then scaled — which offsets it — and masked to the rim. The middle
+   stays frosted; the edge bends. Safari and Firefox honour every line of it. */
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background-image: var(--backdrop);
+  background-attachment: fixed;
+  background-size: cover;
+  transform: scale(var(--lens-scale));
+  filter: blur(var(--lens-blur)) saturate(150%);
+  -webkit-mask: radial-gradient(115% 115% at 50% 50%, transparent 52%, #000 88%);
+  mask: radial-gradient(115% 115% at 50% 50%, transparent 52%, #000 88%);
+  pointer-events: none;
+}
+
+/* The bright hairline that reads as a lit edge. A gradient border drawn by
+   masking the fill out of the middle. */
+.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.95),
+    rgba(255, 255, 255, 0.10) 28%,
+    transparent 52%,
+    rgba(255, 255, 255, 0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Solarized is a flat, contrast-tuned palette. Frosting it would undo the one
+   thing it is for, so the material switches off and the panels go solid. */
+[data-theme^="solarized"] .glass {
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid var(--rule);
+  box-shadow: none;
+}
+[data-theme^="solarized"] .glass::before,
+[data-theme^="solarized"] .glass::after { display: none; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background-color: var(--panel);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass::before { display: none; }
+}
+
+/* --- Page --------------------------------------------------------------- */
+
+.bar {
+  position: sticky;
+  top: 12px;
+  z-index: 10;
+  margin: 12px auto 0;
+  width: min(920px, calc(100% - 24px));
+  padding: 10px 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wordmark { font-weight: 600; letter-spacing: -0.01em; }
+
+.themes { display: flex; gap: 4px; }
+
+.themes button {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-dim);
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+.themes button:hover { color: var(--ink); }
+.themes button[aria-pressed="true"] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.themes button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+main {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 8vh 16px;
+}
+
+.card {
+  width: min(440px, 100%);
+  padding: 40px 32px 34px;
+  text-align: center;
+}
+
+.label {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.count {
+  margin: 10px 0 14px;
+  font-family: var(--mono);
+  font-size: clamp(56px, 14vw, 92px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.note { margin: 0; font-size: 14px; color: var(--ink-dim); }
+
+footer {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding: 22px 16px 28px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+footer a { color: inherit; }
