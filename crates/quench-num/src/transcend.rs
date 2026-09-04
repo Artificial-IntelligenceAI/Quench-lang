@@ -305,6 +305,263 @@ fn ln_two(bits: u64) -> Wide {
     sum.mul(&Wide::whole(2, work)).to_bits_of(bits)
 }
 
+/// `sin`, correctly rounded.
+pub fn sin(x: f64) -> f64 {
+    if !x.is_finite() {
+        return f64::NAN;
+    }
+    // The one exact value, and it keeps the sign it came with: `sin(-0)` is `-0`.
+    if x == 0.0 {
+        return x;
+    }
+    certain(|bits| circular(x, bits, false), 6)
+}
+
+/// `cos`, correctly rounded.
+pub fn cos(x: f64) -> f64 {
+    if !x.is_finite() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return 1.0;
+    }
+    certain(|bits| circular(x, bits, true), 6)
+}
+
+/// `tan`, correctly rounded.
+pub fn tan(x: f64) -> f64 {
+    if !x.is_finite() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return x;
+    }
+    certain(
+        |bits| {
+            let s = circular(x, bits + 32, false);
+            let c = circular(x, bits + 32, true);
+            s.div(&c).to_bits_of(bits)
+        },
+        // A division on top of two series, and near a pole the division magnifies
+        // whatever error the cosine had.
+        16,
+    )
+}
+
+/// `atan`, correctly rounded.
+pub fn atan(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return x;
+    }
+    if x.is_infinite() {
+        let half = certain(|bits| pi(bits).scaled(-1), 3);
+        return if x > 0.0 { half } else { -half };
+    }
+    certain(|bits| arctan(&Wide::from_f64(x, bits + 32), bits + 32).to_bits_of(bits), 6)
+}
+
+/// `atan2`: the angle to the point, with the quadrant taken from both signs rather than
+/// from the ratio, which is the whole reason it exists.
+pub fn atan2(y: f64, x: f64) -> f64 {
+    if y.is_nan() || x.is_nan() {
+        return f64::NAN;
+    }
+    let quarter = |sign: f64| certain(|bits| pi(bits).scaled(-1), 3) * sign;
+    if y == 0.0 {
+        // A nought on top: the answer is nought or half a turn, and which one is the
+        // *sign* of the bottom, not its size. Signed zero earns its keep here.
+        return if x.is_sign_negative() {
+            if y.is_sign_negative() { -std::f64::consts::PI } else { std::f64::consts::PI }
+        } else {
+            y
+        };
+    }
+    if x == 0.0 {
+        return quarter(if y > 0.0 { 1.0 } else { -1.0 });
+    }
+    if x.is_infinite() && y.is_infinite() {
+        let eighth = certain(|bits| pi(bits).scaled(-2), 3);
+        let turn = if x > 0.0 { eighth } else { eighth * 3.0 };
+        return if y > 0.0 { turn } else { -turn };
+    }
+    if y.is_infinite() {
+        return quarter(if y > 0.0 { 1.0 } else { -1.0 });
+    }
+    if x.is_infinite() {
+        let half = certain(|bits| pi(bits), 3);
+        return if x > 0.0 {
+            if y > 0.0 { 0.0 } else { -0.0 }
+        } else if y > 0.0 {
+            half
+        } else {
+            -half
+        };
+    }
+    certain(
+        |bits| {
+            let work = bits + 32;
+            let ratio = Wide::from_f64(y, work).div(&Wide::from_f64(x, work));
+            let angle = arctan(&ratio, work);
+            if x > 0.0 {
+                angle.to_bits_of(bits)
+            } else if y > 0.0 {
+                angle.add(&pi(work)).to_bits_of(bits)
+            } else {
+                angle.sub(&pi(work)).to_bits_of(bits)
+            }
+        },
+        10,
+    )
+}
+
+/// `sin` or `cos` at the working width, by taking the argument down into an eighth of a
+/// turn and running the series there.
+///
+/// The reduction is where a library usually gives up: `x` can be enormous, and knowing
+/// which eighth of a turn it lands in means knowing π to as many bits as `x` has
+/// exponent. A library cannot afford that. This one keeps π in a `Big` and asks for as
+/// many bits as it needs, so a sine of ten to the three hundredth is as exact as a sine
+/// of a half.
+fn circular(x: f64, bits: u64, cosine: bool) -> Wide {
+    let above = (x.abs().log2().max(0.0) as u64) + 8;
+    let work = bits + above + 32;
+    let value = Wide::from_f64(x, work);
+    let half_pi = pi(work).scaled(-1);
+
+    // Which quarter turn it falls in, kept as a whole number of any size rather than
+    // squeezed through an `f64`. That was the bug: `1e100 / (π/2)` needs three hundred
+    // and thirty bits to name and an `f64` has fifty-three, so the quarter it landed in
+    // was a guess and the sine of it was nonsense.
+    //
+    // The sign comes off first, because sine and cosine both know what to do with it and
+    // reducing a positive number is one fewer thing to get wrong.
+    let sign = value.is_negative();
+    let size = value.abs();
+    let half = Wide::whole(1, work).div(&Wide::whole(2, work));
+    let quarters = size.div(&half_pi).add(&half).floor_abs();
+    let k = i64::from(quarters.bit(1)) * 2 + i64::from(quarters.bit(0));
+    let r = size.sub(&Wide::from_big(&quarters, work).mul(&half_pi));
+
+    // `sin(-x)` is `-sin(x)` and `cos(-x)` is `cos(x)`, so the sign is put back at the
+    // end rather than carried through the reduction.
+    let flip = sign && !cosine;
+
+    // Past a quarter turn the two swap and the signs go round: what is left is one
+    // series on an argument no bigger than a quarter turn.
+    let (want_cos, negate) = match (cosine, k) {
+        (false, 0) => (false, false),
+        (false, 1) => (true, false),
+        (false, 2) => (false, true),
+        (false, _) => (true, true),
+        (true, 0) => (true, false),
+        (true, 1) => (false, true),
+        (true, 2) => (true, true),
+        (true, _) => (false, false),
+    };
+    let answer = if want_cos { cos_series(&r, work) } else { sin_series(&r, work) };
+    let answer = if negate != flip { answer.negated() } else { answer };
+    answer.to_bits_of(bits)
+}
+
+/// `sin r` for a small `r`, by its Taylor series.
+fn sin_series(r: &Wide, bits: u64) -> Wide {
+    let square = r.mul(r);
+    let mut term = r.clone();
+    let mut sum = term.clone();
+    for n in 1..=(bits as i64) {
+        term = term.mul(&square).div(&Wide::whole(2 * n * (2 * n + 1), bits)).negated();
+        let next = sum.add(&term);
+        if term.is_zero() || next == sum {
+            break;
+        }
+        sum = next;
+    }
+    sum
+}
+
+fn cos_series(r: &Wide, bits: u64) -> Wide {
+    let square = r.mul(r);
+    let mut term = Wide::whole(1, bits);
+    let mut sum = term.clone();
+    for n in 1..=(bits as i64) {
+        term = term.mul(&square).div(&Wide::whole(2 * n * (2 * n - 1), bits)).negated();
+        let next = sum.add(&term);
+        if term.is_zero() || next == sum {
+            break;
+        }
+        sum = next;
+    }
+    sum
+}
+
+/// `atan` at the working width.
+///
+/// The plain series crawls as the argument approaches one, so the argument is walked down
+/// instead: `atan t = atan c + atan((t − c) / (1 + c t))` takes a fixed bite of `atan c`
+/// out of the angle each time, and a sixteenth is small enough that what is left runs
+/// fast and few enough bites that the walk is short.
+fn arctan(x: &Wide, bits: u64) -> Wide {
+    let negative = x.is_negative();
+    let mut t = x.abs();
+    let one = Wide::whole(1, bits);
+
+    // Above one, turn it upside down: `atan t = π/2 − atan(1/t)`.
+    let flipped = t.cmp_abs(&one) == std::cmp::Ordering::Greater;
+    if flipped {
+        t = one.div(&t);
+    }
+
+    let sixteenth = one.div(&Wide::whole(16, bits));
+    let step = atan_series(&sixteenth, bits);
+    let mut bites = 0i64;
+    while t.cmp_abs(&sixteenth) == std::cmp::Ordering::Greater {
+        t = t.sub(&sixteenth).div(&one.add(&sixteenth.mul(&t)));
+        bites += 1;
+    }
+    let mut angle = atan_series(&t, bits).add(&Wide::whole(bites, bits).mul(&step));
+    if flipped {
+        angle = pi(bits).scaled(-1).sub(&angle);
+    }
+    if negative { angle.negated() } else { angle }
+}
+
+/// `atan t` for a small `t`, by its Taylor series.
+fn atan_series(t: &Wide, bits: u64) -> Wide {
+    let square = t.mul(t);
+    let mut power = t.clone();
+    let mut sum = t.clone();
+    for n in 1..=(bits as i64) {
+        power = power.mul(&square).negated();
+        let term = power.div(&Wide::whole(2 * n + 1, bits));
+        let next = sum.add(&term);
+        if term.is_zero() || next == sum {
+            break;
+        }
+        sum = next;
+    }
+    sum
+}
+
+/// π, by Machin: `π/4 = 4 atan(1/5) − atan(1/239)`.
+///
+/// Worked out rather than written down, for the same reason `ln 2` is: a constant copied
+/// from somewhere is a constant nobody checked, and this one has to be right to however
+/// many bits the argument turns out to need — which for a sine of a very large number is
+/// a great many.
+fn pi(bits: u64) -> Wide {
+    let work = bits + 32;
+    let one = Wide::whole(1, work);
+    let fifth = one.div(&Wide::whole(5, work));
+    let small = one.div(&Wide::whole(239, work));
+    let quarter = atan_series(&fifth, work)
+        .mul(&Wide::whole(4, work))
+        .sub(&atan_series(&small, work));
+    quarter.mul(&Wide::whole(4, work)).to_bits_of(bits)
+}
+
 // Opened up for `tests/transcendence.rs`, which checks the series against digits
 // somebody else published rather than against another run of the same series.
 pub fn ln_two_for_tests(bits: u64) -> Wide {
@@ -317,4 +574,20 @@ pub fn exp_for_tests(x: f64, bits: u64) -> Wide {
 
 pub fn ln_for_tests(x: f64, bits: u64) -> Wide {
     ln_wide(&Wide::from_f64(x, bits), bits)
+}
+
+pub fn pi_for_tests(bits: u64) -> Wide {
+    pi(bits)
+}
+
+pub fn sin_for_tests(x: f64, bits: u64) -> Wide {
+    circular(x, bits, false)
+}
+
+pub fn cos_for_tests(x: f64, bits: u64) -> Wide {
+    circular(x, bits, true)
+}
+
+pub fn atan_for_tests(x: f64, bits: u64) -> Wide {
+    arctan(&Wide::from_f64(x, bits), bits)
 }

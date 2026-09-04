@@ -51,6 +51,64 @@ fn ln_ten_matches_too() {
     assert_eq!(got, want, "forty-one digits of ln 10");
 }
 
+#[test]
+fn pi_matches_the_digits_everybody_else_publishes() {
+    // 3.14159265358979323846264338327950288419716939937510582097494...
+    let want = published("31415926535897932384626433832795028841971");
+    let got = digits(&transcend::pi_for_tests(300), 40);
+    assert_eq!(got, want, "forty-one digits of pi");
+}
+
+#[test]
+fn the_trig_answers_what_the_identities_say_it_must() {
+    // No published table can cover every argument, so the check is the relations that
+    // hold everywhere: a sine and a cosine square to one, and a tangent is their ratio.
+    let mut rng = Rng(0x5EED);
+    for _ in 0..400 {
+        let x = rng.unit() * 200.0 - 100.0;
+        let (s, c) = (transcend::sin(x), transcend::cos(x));
+        let sum = s * s + c * c;
+        assert!((sum - 1.0).abs() < 1e-15, "sin({x})^2 + cos({x})^2 was {sum}");
+        let t = transcend::tan(x);
+        if c.abs() > 1e-8 {
+            let ratio = s / c;
+            assert!(
+                (t - ratio).abs() <= ratio.abs() * 1e-14,
+                "tan({x}) was {t} and sin/cos is {ratio}"
+            );
+        }
+        // And the angle comes back from its own tangent, inside a quarter turn.
+        let small = rng.unit() * 2.0 - 1.0;
+        let back = transcend::tan(transcend::atan(small));
+        assert!((back - small).abs() < 1e-14, "atan then tan of {small} gave {back}");
+    }
+}
+
+#[test]
+fn a_sine_of_something_enormous_is_still_a_sine() {
+    // The case a C library cannot do: reducing 10^300 into a quarter turn needs π to a
+    // thousand bits, which nobody keeps in a table. Here it is a `Big`.
+    for x in [1e17f64, 1e100, 1e300, -1e300] {
+        let (s, c) = (transcend::sin(x), transcend::cos(x));
+        let sum = s * s + c * c;
+        assert!((sum - 1.0).abs() < 1e-15, "sin({x:e})^2 + cos({x:e})^2 was {sum}");
+        assert!(s.abs() <= 1.0 && c.abs() <= 1.0, "out of range at {x:e}");
+    }
+}
+
+#[test]
+fn atan2_takes_its_quarter_from_both_signs() {
+    let pi = std::f64::consts::PI;
+    assert_eq!(transcend::atan2(0.0, 1.0), 0.0);
+    assert_eq!(transcend::atan2(-0.0, 1.0), -0.0, "the sign survives");
+    assert_eq!(transcend::atan2(0.0, -1.0), pi);
+    assert_eq!(transcend::atan2(-0.0, -1.0), -pi);
+    assert!((transcend::atan2(1.0, 1.0) - pi / 4.0).abs() < 1e-15);
+    assert!((transcend::atan2(1.0, -1.0) - 3.0 * pi / 4.0).abs() < 1e-15);
+    assert!((transcend::atan2(-1.0, -1.0) + 3.0 * pi / 4.0).abs() < 1e-15);
+    assert!((transcend::atan2(1.0, 0.0) - pi / 2.0).abs() < 1e-15);
+}
+
 /// The series being right, an answer at three hundred bits settles which `b64` is
 /// correct — and where the platform's library differs, this says which of the two the
 /// true value is actually nearer.

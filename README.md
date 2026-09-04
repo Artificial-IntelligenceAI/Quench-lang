@@ -257,7 +257,20 @@ Both print the same thing, which is not a coincidence — it is
   That costs about forty microseconds a call, a thousand times what the machine's own
   would; the reference engine is the one that does the least, and being right was the
   point. `b64` only: rounding a `b64` answer down to a `b32` rounds twice.
-  `sin`, `cos`, `tan` and `atan2` are still absent, and arrive the same way.
+  `sin`, `cos`, `tan`, `atan` and `atan2` are here too, and the argument reduction is
+  the part a C library cannot afford: knowing which quarter-turn `1e300` falls in means
+  knowing π to a thousand bits. Here π is a `Big` and it is asked for as many bits as the
+  argument has exponent, so a sine of ten to the three hundredth is as exact as a sine of
+  a half. Against this machine's `libm` over five thousand arguments each — and adjudicated
+  at four hundred bits, which settles it past any doubt:
+
+  ```text
+  sin    differed on   196 of 5000   ours right   196   platform right     0
+  cos    differed on   190 of 5000   ours right   190   platform right     0
+  tan    differed on  2084 of 5000   ours right  2084   platform right     0
+  atan   differed on   379 of 5000   ours right   379   platform right     0
+  exp    differed on     9 of 5000   ours right     9   platform right     0
+  ```
 - **`call count['s']` counts characters, and what a character *is* is a setting.**
   `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is **1** under
   `characters = "clusters"` and **7** under `"letters"`, because that emoji is seven

@@ -113,8 +113,11 @@ deliberately.)
 Quench's own tree that every engine calls. They are worked out in a float as wide as the
 answer needs and rounded once, and the rounding is only accepted when every value in the
 interval the answer might be in rounds the same way — Ziv's strategy, which makes them
-provably correctly rounded rather than probably. `sin`, `cos`, `tan` and `atan2` remain,
-and want π to a few thousand digits for argument reduction, which is a `Big`.
+provably correctly rounded rather than probably. `sin`, `cos`, `tan`, `atan` and `atan2` are built too. Their argument reduction is the
+part a library cannot afford — which quarter-turn `1e300` falls in needs π to a thousand
+bits — and here π is a `Big` asked for as many bits as the argument has exponent. What is
+left of the list is `asin`, `acos` and the hyperbolics, which want a square root in the
+wide float.
 
 ## The rest of the list
 

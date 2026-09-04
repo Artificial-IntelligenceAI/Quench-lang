@@ -460,7 +460,8 @@ pub enum Host {
     FloatPaired,
     /// `(a, b, c, width)` — multiply and add with one rounding rather than two.
     FloatFused,
-    /// `(float, which)` — `exp` or `ln`, worked out until the rounding is certain.
+    /// `(float, which)` — `exp`, `ln`, `sin`, `cos`, `tan` or `atan`, worked out until
+    /// the rounding is certain.
     ///
     /// Kept apart from [`Host::FloatAlone`] because the two halves of a maths library
     /// are not the same kind of thing. That one is what IEEE 754 *requires*, and the
@@ -468,7 +469,7 @@ pub enum Host {
     /// whatever width the particular answer needs — which is why there is no width
     /// argument: only `b64` has it, and the checker says so.
     FloatSlow,
-    /// `(a, b)` — `a` to the power `b`, the same way.
+    /// `(a, b, which)` — `pow` or `atan2`, the same way.
     FloatPower,
 
     /// `(text)` — how many characters a piece of text has.
@@ -576,7 +577,7 @@ impl Host {
             Host::FloatPaired => &[Ty::F64, Ty::F64, Ty::I64, Ty::I64],
             Host::FloatFused => &[Ty::F64, Ty::F64, Ty::F64, Ty::I64],
             Host::FloatSlow => &[Ty::F64, Ty::I64],
-            Host::FloatPower => &[Ty::F64, Ty::F64],
+            Host::FloatPower => &[Ty::F64, Ty::F64, Ty::I64],
             Host::TextClusters | Host::TextLetters => &[Ty::Text],
             Host::SayI64 | Host::SayU64 => &[Ty::I64],
             Host::SayBool => &[Ty::Bool],

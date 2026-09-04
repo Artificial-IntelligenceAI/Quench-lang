@@ -188,6 +188,18 @@ const PAIRED: [quench_num::Paired; 4] = [
     quench_num::Paired::Remainder,
 ];
 
+/// The functions IEEE only recommends, in the order the lowering numbers them.
+fn alone_slow(which: i64, x: f64) -> f64 {
+    match which {
+        0 => quench_num::transcend::exp(x),
+        1 => quench_num::transcend::ln(x),
+        2 => quench_num::transcend::sin(x),
+        3 => quench_num::transcend::cos(x),
+        4 => quench_num::transcend::tan(x),
+        _ => quench_num::transcend::atan(x),
+    }
+}
+
 /// Which decimal format a digit count names. The lowering only ever writes the two.
 fn decimal_format(digits: i64) -> quench_num::Format {
     if digits == 7 { quench_num::D32 } else { quench_num::D64 }
@@ -682,17 +694,17 @@ fn evaluate(
                 }
                 qir::Host::FloatSlow => {
                     let x = f64::from_bits(slots[args[0].0 as usize] as u64);
-                    let answer = if slots[args[1].0 as usize] == 0 {
-                        quench_num::transcend::exp(x)
-                    } else {
-                        quench_num::transcend::ln(x)
-                    };
-                    return Ok(answer.to_bits() as i64);
+                    return Ok(alone_slow(slots[args[1].0 as usize], x).to_bits() as i64);
                 }
                 qir::Host::FloatPower => {
                     let a = f64::from_bits(slots[args[0].0 as usize] as u64);
                     let b = f64::from_bits(slots[args[1].0 as usize] as u64);
-                    return Ok(quench_num::transcend::pow(a, b).to_bits() as i64);
+                    let answer = if slots[args[2].0 as usize] == 0 {
+                        quench_num::transcend::pow(a, b)
+                    } else {
+                        quench_num::transcend::atan2(a, b)
+                    };
+                    return Ok(answer.to_bits() as i64);
                 }
                 qir::Host::TextClusters => {
                     let said = heap.said(slots[args[0].0 as usize]);

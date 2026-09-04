@@ -217,6 +217,11 @@ impl Wide {
         Wide { exponent: self.exponent + by, ..self.clone() }
     }
 
+    /// A whole number of any size, exactly, held to this many bits.
+    pub fn from_big(n: &Big, bits: u64) -> Wide {
+        Wide::made(n.is_negative(), n.abs(), 0, bits)
+    }
+
     /// The whole-number part, ignoring the sign. What a test uses to read the digits of
     /// a value off against a constant somebody else published.
     pub fn floor_abs(&self) -> Big {

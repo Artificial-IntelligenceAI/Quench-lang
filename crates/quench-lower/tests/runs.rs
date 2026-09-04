@@ -2104,9 +2104,10 @@ fn the_maths_takes_floats_of_one_width_and_says_so() {
         assert!(rendered.contains("Error code: E0494"), "{source}\n{rendered}");
     }
 
-    // And a bare word that is none of them lists the ones that are.
-    let unknown = report("START { var.immut.b64 ['x'] = [call sin[*1.0*]]; print.stdout['x']; }");
-    assert!(unknown.contains("there is nothing called `sin`"), "{unknown}");
+    // And a bare word that is none of them lists the ones that are. `sinh` rather than
+    // `sin`, which used to serve here and has since been built.
+    let unknown = report("START { var.immut.b64 ['x'] = [call sinh[*1.0*]]; print.stdout['x']; }");
+    assert!(unknown.contains("there is nothing called `sinh`"), "{unknown}");
     assert!(unknown.contains("`sqrt`"), "{unknown}");
 }
 
@@ -2144,4 +2145,29 @@ fn the_recommended_maths_is_a_b64_and_says_why() {
     let whole = report("START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call ln['n']]; print.stdout['y']; }");
     assert!(whole.contains("`ln` works on a `b64`"), "{whole}");
     assert!(whole.contains("because the standard settles those"), "{whole}");
+}
+
+#[test]
+fn the_trig_reduces_an_argument_no_library_would_dare_to() {
+    // Working out which quarter turn `1e300` lands in needs π to a thousand bits, which
+    // is why a C library gets vague out here and this one does not: π is a `Big` and it
+    // is asked for as many bits as the argument has exponent.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['one'] = [*1.0*];
+    var.immut.b64 ['huge'] = [*1e300*];
+    print.stdout[call stitch[
+        call sin['one'] str:* *
+        call cos['one'] str:* *
+        call tan['one'] str:* *
+        call atan['one'] str:* *
+        call atan2['one', 'one'] str:* *
+        call sin['huge']
+    ]];
+}
+"),
+        "0.8414709848078965 0.5403023058681398 1.5574077246549023 \
+0.7853981633974483 0.7853981633974483 -0.8178819121159085",
+    );
 }

@@ -740,18 +740,26 @@ extern "C" fn float_fused(_rt: *mut Runtime, a: i64, b: i64, c: i64, width: i64)
 /// Called by compiled code. Not called by anything else.
 extern "C" fn float_slow(_rt: *mut Runtime, bits: i64, which: i64) -> i64 {
     let x = f64::from_bits(bits as u64);
-    let answer = if which == 0 {
-        quench_num::transcend::exp(x)
-    } else {
-        quench_num::transcend::ln(x)
+    let answer = match which {
+        0 => quench_num::transcend::exp(x),
+        1 => quench_num::transcend::ln(x),
+        2 => quench_num::transcend::sin(x),
+        3 => quench_num::transcend::cos(x),
+        4 => quench_num::transcend::tan(x),
+        _ => quench_num::transcend::atan(x),
     };
     answer.to_bits() as i64
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn float_power(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
-    quench_num::transcend::pow(f64::from_bits(a as u64), f64::from_bits(b as u64)).to_bits()
-        as i64
+extern "C" fn float_power(_rt: *mut Runtime, a: i64, b: i64, which: i64) -> i64 {
+    let (a, b) = (f64::from_bits(a as u64), f64::from_bits(b as u64));
+    let answer = if which == 0 {
+        quench_num::transcend::pow(a, b)
+    } else {
+        quench_num::transcend::atan2(a, b)
+    };
+    answer.to_bits() as i64
 }
 
 /// Called by compiled code. Not called by anything else.

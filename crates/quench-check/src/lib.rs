@@ -253,7 +253,12 @@ pub const PROVIDED: &[(&str, Provides)] = &[
     // correctly-rounded `b64` down to a `b32` rounds twice, and twice is once too many.
     ("exp", Provides::Slow(0)),
     ("ln", Provides::Slow(1)),
-    ("pow", Provides::Power),
+    ("sin", Provides::Slow(2)),
+    ("cos", Provides::Slow(3)),
+    ("tan", Provides::Slow(4)),
+    ("atan", Provides::Slow(5)),
+    ("pow", Provides::Power(0)),
+    ("atan2", Provides::Power(1)),
 ];
 
 /// What one of [`PROVIDED`] is, and how the checker reads it.
@@ -272,7 +277,7 @@ pub enum Provides {
     /// One `b64` in, one out, worked out until the rounding is certain.
     Slow(u8),
     /// Two `b64`s in, one out, the same way.
-    Power,
+    Power(u8),
 }
 
 /// One variable.
@@ -2344,7 +2349,7 @@ impl<'a> Checker<'a> {
             Provides::Paired(which) => return self.maths(call, &name, 2, *which),
             Provides::Fused => return self.maths(call, &name, 3, 0),
             Provides::Slow(which) => return self.slowly(call, &name, 1, *which),
-            Provides::Power => return self.slowly(call, &name, 2, 0),
+            Provides::Power(which) => return self.slowly(call, &name, 2, *which),
             Provides::Count => {}
         }
 
