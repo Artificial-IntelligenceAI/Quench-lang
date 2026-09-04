@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "ec7b5f8",
+    "commit": "bef712c",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,8 +13,8 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 85,
-  "confirmed": 85,
+  "words": 87,
+  "confirmed": 87,
   "missing": [],
   "categories": [
     {
@@ -61,7 +61,7 @@
     {
       "id": "chainLinks",
       "label": "Chain links",
-      "count": 9,
+      "count": 11,
       "words": [
         "mut",
         "immut",
@@ -71,7 +71,9 @@
         "perm",
         "range",
         "while",
-        "nothing"
+        "nothing",
+        "any",
+        "number"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
