@@ -22,8 +22,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build with nothing to say
-        # The bar is a warning-free build, not a passing one.
-        run: cargo build --all-targets 2>&1 | tee build.log && ! grep -q "^warning" build.log
+        # The bar is a warning-free build, not merely a passing one.
+        #
+        # `set -o pipefail` is the whole reason this is a block rather than a line. A
+        # pipeline reports the exit status of its *last* command, and GitHub's default
+        # shell does not set pipefail — so `cargo build | tee log` succeeds however
+        # badly cargo failed, and the `grep` after it then finds no *warning* in a log
+        # full of *errors* and calls the step green. A broken build would have been
+        # reported as a clean one, and only the test step afterwards would have caught
+        # it, blaming the wrong thing.
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --all-targets 2>&1 | tee build.log
+          if grep -q "^warning" build.log; then
+            echo "::error::the build has something to say, and the bar is that it does not"
+            grep "^warning" build.log
+            exit 1
+          fi
       - name: Tests
         run: cargo test --workspace
       - name: A short oracle run
