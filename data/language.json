@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "a5bb097",
+    "commit": "b9d9c86",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,8 +13,8 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 84,
-  "confirmed": 84,
+  "words": 83,
+  "confirmed": 83,
   "missing": [],
   "categories": [
     {
@@ -163,7 +163,7 @@
     {
       "id": "provided",
       "label": "Provided",
-      "count": 31,
+      "count": 30,
       "words": [
         "count",
         "stitch",
@@ -193,7 +193,6 @@
         "acosh",
         "atanh",
         "cbrt",
-        "pow",
         "atan2",
         "hypot"
       ],
