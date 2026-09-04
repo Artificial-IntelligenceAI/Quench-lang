@@ -384,6 +384,10 @@ interface Axis {
 interface Language {
   readonly id: string;
   readonly name: string;
+  /** The version these answers were checked against — not whatever is current.
+      A newer release could change any of them, and showing its number beside an
+      answer nobody re-ran would be a claim about a version never tested. */
+  readonly version: string;
   /** Keyed by axis id. A missing answer shows as a dash rather than a blank. */
   readonly on: Readonly<Record<string, string>>;
 }
@@ -406,6 +410,7 @@ const LANGUAGES: readonly Language[] = [
   {
     id: "quench",
     name: "Quench",
+    version: "0.0.0",
     on: {
       reserved: "None. Every word the language uses is still yours to name something.",
       names: "Between marks, everywhere — `'a name'`. A bare word is never a name.",
@@ -419,6 +424,7 @@ const LANGUAGES: readonly Language[] = [
   {
     id: "go",
     name: "Go",
+    version: "1.26.5",
     on: {
       reserved: "Twenty-five, unchanged since Go 1.0. `len` and `nil` are not among them and can be shadowed; `if` and `range` are not yours.",
       names: "A bare identifier, and its first letter decides who can see it — capitalised is exported, lower case is not.",
@@ -432,6 +438,7 @@ const LANGUAGES: readonly Language[] = [
   {
     id: "zig",
     name: "Zig",
+    version: "0.16.0",
     on: {
       reserved: "Forty-six — but `@\"…\"` makes any string an identifier, so `@\"if\"` is a name, and so is `@\"a name with spaces\"`. The nearest thing to Quench's marks in a language that also has bare words.",
       names: "A bare identifier, or `@\"anything at all\"` where the bare form will not do — keywords and spaces included.",
@@ -452,7 +459,7 @@ function fillPicker(picker: HTMLSelectElement, chosen: string): void {
   for (const language of LANGUAGES) {
     const option = document.createElement("option");
     option.value = language.id;
-    option.textContent = language.name;
+    option.textContent = `${language.name} ${language.version}`;
     option.selected = language.id === chosen;
     picker.appendChild(option);
   }
@@ -476,6 +483,18 @@ function writeAnswer(cell: HTMLElement, answer: string): void {
   });
 }
 
+/** A column heading is the language and the version its answers were taken from. */
+function writeHead(head: HTMLElement | null, language: Language): void {
+  if (head === null) {
+    return;
+  }
+  head.replaceChildren(document.createTextNode(language.name));
+  const version = document.createElement("span");
+  version.className = "ver";
+  version.textContent = language.version;
+  head.appendChild(version);
+}
+
 function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
   const first = languageBy(left.value);
   const second = languageBy(right.value);
@@ -486,8 +505,8 @@ function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
     return;
   }
 
-  if (leftHead !== null) leftHead.textContent = first.name;
-  if (rightHead !== null) rightHead.textContent = second.name;
+  writeHead(leftHead, first);
+  writeHead(rightHead, second);
 
   body.replaceChildren();
   for (const axis of AXES) {
