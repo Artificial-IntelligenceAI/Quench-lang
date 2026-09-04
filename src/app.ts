@@ -171,3 +171,157 @@ void countTheLanguage().then(
     say(`Could not reach the source, so nothing above is claimed: ${String(reason)}`);
   },
 );
+
+/* --- Copying a number --------------------------------------------------- */
+
+/** The number and what it counts, as a sentence: `54 non-reserved keywords`. */
+function readingOf(panel: Element): string | null {
+  const shown = panel.querySelector(".stat-count")?.textContent?.trim() ?? "";
+  const unit = panel.querySelector(".stat-label")?.textContent?.trim() ?? "";
+  if (shown === "" || shown === "—" || unit === "") {
+    return null;
+  }
+  return `${shown} ${unit.charAt(0).toLowerCase()}${unit.slice(1)}`;
+}
+
+function flash(button: HTMLButtonElement): void {
+  const mark = button.querySelector<SVGElement>(".mark");
+  const done = button.querySelector<SVGElement>(".done");
+  if (mark === null || done === null) {
+    return;
+  }
+  button.classList.add("copied");
+  mark.toggleAttribute("hidden", true);
+  done.toggleAttribute("hidden", false);
+  button.setAttribute("aria-label", "Copied");
+  window.setTimeout(() => {
+    button.classList.remove("copied");
+    mark.toggleAttribute("hidden", false);
+    done.toggleAttribute("hidden", true);
+    button.setAttribute("aria-label", "Copy");
+  }, 1400);
+}
+
+/** The old way, kept because the new one is refused more often than it ought to
+    be — an insecure origin, a browser that wants a permission first, or an
+    embedded view that simply says no. It must run inside the click itself, so it
+    is tried before anything is awaited rather than after. */
+function copyTheOldWay(text: string): boolean {
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.top = "-1000px";
+  document.body.appendChild(field);
+  field.select();
+  let done = false;
+  try {
+    done = document.execCommand("copy");
+  } catch {
+    done = false;
+  }
+  field.remove();
+  return done;
+}
+
+for (const button of document.querySelectorAll<HTMLButtonElement>(".copy")) {
+  button.addEventListener("click", () => {
+    const panel = button.closest(".stat");
+    const reading = panel === null ? null : readingOf(panel);
+    if (reading === null) {
+      /* Nothing was counted, so there is nothing to hand over. */
+      return;
+    }
+
+    /* Done inside the gesture, so that it still works when the promise below is
+       refused — by then the click is over and the old way is no longer allowed. */
+    const already = copyTheOldWay(reading);
+    if (already) {
+      flash(button);
+    }
+
+    void navigator.clipboard?.writeText(reading).then(
+      () => flash(button),
+      () => {
+        if (!already) {
+          button.setAttribute("aria-label", "Could not copy");
+        }
+      },
+    );
+  });
+}
+
+/* --- Descriptions ------------------------------------------------------- */
+
+const tip = document.getElementById("tip");
+
+/** What to say about a control. The copy buttons describe what they would put on
+    the clipboard, which is not known until the numbers have arrived. */
+function describe(control: HTMLElement): string | null {
+  const written = control.dataset["tip"];
+  if (written !== undefined && written !== "") {
+    return written;
+  }
+  if (control.classList.contains("copy")) {
+    const panel = control.closest(".stat");
+    const reading = panel === null ? null : readingOf(panel);
+    return reading === null ? "Nothing counted yet, so nothing to copy." : `Copy “${reading}”`;
+  }
+  return null;
+}
+
+function hideTip(): void {
+  if (tip !== null) {
+    tip.classList.remove("shown");
+    tip.hidden = true;
+  }
+}
+
+function showTip(control: HTMLElement): void {
+  if (tip === null) {
+    return;
+  }
+  const words = describe(control);
+  if (words === null) {
+    return;
+  }
+  tip.textContent = words;
+  tip.hidden = false;
+
+  /* Measured after it is in the layout, so the clamping below knows its width. */
+  const box = control.getBoundingClientRect();
+  const own = tip.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(
+    Math.max(margin, box.left + box.width / 2 - own.width / 2),
+    window.innerWidth - own.width - margin,
+  );
+  /* Above by preference: a copy button sits inside the panel it describes, and a
+     tooltip under it would cover the very number it is naming. The bar's buttons
+     have nothing above them, so they fall through to below on their own. */
+  const above = box.top - own.height - margin;
+  const roomAbove = above >= margin;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${roomAbove ? above : box.bottom + margin}px`;
+  tip.classList.add("shown");
+}
+
+for (const control of document.querySelectorAll<HTMLElement>("[data-tip], .copy")) {
+  control.addEventListener("pointerenter", (event: PointerEvent) => {
+    /* A touch has no hover, and a tooltip that appears on tap is just a delay. */
+    if (event.pointerType !== "touch") {
+      showTip(control);
+    }
+  });
+  control.addEventListener("pointerleave", hideTip);
+  control.addEventListener("focus", () => showTip(control));
+  control.addEventListener("blur", hideTip);
+}
+
+window.addEventListener("keydown", (event: KeyboardEvent) => {
+  if (event.key === "Escape") {
+    hideTip();
+  }
+});
+
+window.addEventListener("scroll", hideTip, { passive: true });

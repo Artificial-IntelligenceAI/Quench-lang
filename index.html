@@ -11,25 +11,55 @@
 <nav class="bar glass">
   <span class="wordmark">Quench</span>
   <div class="themes" role="group" aria-label="Theme">
-    <button type="button" data-set-theme="glass" aria-pressed="true">Glass</button>
-    <button type="button" data-set-theme="solarized-dark" aria-pressed="false">Dark</button>
-    <button type="button" data-set-theme="solarized-light" aria-pressed="false">Light</button>
+    <button type="button" data-set-theme="glass" aria-pressed="true"
+            data-tip="Liquid glass. Frosted panels that bend the backdrop at their rim.">Glass</button>
+    <button type="button" data-set-theme="solarized-dark" aria-pressed="false"
+            data-tip="Solarized Dark. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Dark</button>
+    <button type="button" data-set-theme="solarized-light" aria-pressed="false"
+            data-tip="Solarized Light. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Light</button>
   </div>
 </nav>
 
 <main>
   <section class="stats" aria-label="The language, counted">
     <article class="stat glass">
+      <button type="button" class="copy" aria-label="Copy">
+        <svg class="mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+          <path d="M5 15V5a2 2 0 0 1 2-2h10"></path>
+        </svg>
+        <svg class="done" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+          <path d="M4 12.5 9 17.5 20 6.5"></path>
+        </svg>
+      </button>
       <p class="stat-count" id="reserved" aria-live="polite">&mdash;</p>
       <p class="stat-label">Reserved keywords</p>
       <p class="stat-note">A name always wears marks, so no word is ever taken away from you.</p>
     </article>
     <article class="stat glass">
+      <button type="button" class="copy" aria-label="Copy">
+        <svg class="mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+          <path d="M5 15V5a2 2 0 0 1 2-2h10"></path>
+        </svg>
+        <svg class="done" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+          <path d="M4 12.5 9 17.5 20 6.5"></path>
+        </svg>
+      </button>
       <p class="stat-count" id="words" aria-live="polite">&mdash;</p>
       <p class="stat-label">Non-reserved keywords</p>
       <p class="stat-note">Words the language answers to. You may still use every one of them as a name.</p>
     </article>
     <article class="stat glass">
+      <button type="button" class="copy" aria-label="Copy">
+        <svg class="mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+          <path d="M5 15V5a2 2 0 0 1 2-2h10"></path>
+        </svg>
+        <svg class="done" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+          <path d="M4 12.5 9 17.5 20 6.5"></path>
+        </svg>
+      </button>
       <p class="stat-count" id="symbols" aria-live="polite">&mdash;</p>
       <p class="stat-label">Total symbols</p>
       <p class="stat-note">Punctuation and operators, of the twenty-eight kinds of token.</p>
@@ -43,6 +73,8 @@
   <span>MIT OR Apache-2.0</span>
   <a href="https://github.com/Artificial-IntelligenceAI/Quench-lang">Source</a>
 </footer>
+
+<div id="tip" role="tooltip" hidden></div>
 
 <script src="js/app.js"></script>
 </body>

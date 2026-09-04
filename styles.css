@@ -233,3 +233,84 @@ main { gap: 22px; align-content: center; }
   line-height: 1.6;
   color: var(--ink-dim);
 }
+
+/* --- Copying a number --------------------------------------------------- */
+
+.stat .copy {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+/* Shown on hover, but never hidden from a keyboard or a touch screen, neither
+   of which has a pointer to hover with. */
+.stat:hover .copy,
+.stat .copy:focus-visible,
+.stat .copy.copied { opacity: 1; }
+
+@media (hover: none) {
+  .stat .copy { opacity: 1; }
+}
+
+.stat .copy:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.stat .copy:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+.stat .copy.copied { color: var(--ink); }
+
+.copy svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.copy svg[hidden] { display: none; }
+
+/* --- Descriptions ------------------------------------------------------- */
+
+/* Body-level rather than a pseudo-element on the button, because every panel and
+   the bar itself clip their overflow, and a tooltip drawn inside one would be cut
+   off at the rim it is trying to escape. */
+#tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 260px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+[data-theme="glass"] #tip {
+  background: rgba(18, 22, 40, 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+#tip.shown { opacity: 1; transform: translateY(0); }
