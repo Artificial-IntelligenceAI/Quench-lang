@@ -1,0 +1,48 @@
+# A module is a named box of declarations. It lives inside a file, it nests, and what
+# it does is decide which names reach which code. See
+# `notes/five-lines-a-name-can-cross.md`.
+
+module ['maths'] {
+    # `module` reaches this module and everything nested inside it, so `trig` below can
+    # call this and nothing outside `maths` can.
+    fn.module.b64 ['reduce'] [immut.b64 'x'] {
+        give ['x' + *1.0*];
+    }
+
+    module ['trig'] {
+        # `parent` reaches the module around this one -- `maths` -- and everything under
+        # it. One rung up and no further.
+        fn.parent.b64 ['quarter turn'] [immut.b64 'x'] {
+            give ['x' / *2.0*];
+        }
+
+        # And this one nothing outside `trig` may name at all.
+        fn.module.b64 ['halved'] [immut.b64 'x'] {
+            give ['x' / *2.0*];
+        }
+    }
+
+    fn.export.b64 ['sin'] [immut.b64 'x'] {
+        # A name is looked for here first and then outward, so `maths` says
+        # `'trig'.'quarter turn'` without having to say `maths` again.
+        give [call 'reduce'[call 'trig'.'quarter turn'['x']]];
+    }
+}
+
+module ['text'] {
+    const.module.str ['MARK'] = [*!*];
+
+    fn.export.str ['shout'] [immut.str 'what'] {
+        give ['what' 'MARK'];
+    }
+}
+
+# Two modules may each hold a `'size'`, and so may the file. Three functions of one
+# name, and nothing collides -- which is most of what a module is for.
+fn.file.i64 ['size'] [] { give [*0*]; }
+
+START {
+    print.stdout[call 'maths'.'sin'[*8.0*] \n];
+    print.stdout[call 'text'.'shout'[*hi*] \n];
+    print.stdout[call 'size'[] \n];
+}

@@ -54,6 +54,6 @@ if Quench grew modules inside a file the ladder would grow a rung.
 
 It grew two. A module is a block inside a file, it nests, and the ladder is `module`,
 `parent`, `file`, `program`, `export` — see
-[five lines a name can cross](five-lines-a-name-can-cross.md). None of it is built yet,
-so everything above is still what the compiler does; the successor note is what it is
-going to do.
+[five lines a name can cross](five-lines-a-name-can-cross.md), which is built. So
+everything above is still true about *why* the middle rung exists, and the ladder it
+describes is two rungs short — read the successor for what the compiler does now.

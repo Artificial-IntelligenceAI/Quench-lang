@@ -1069,10 +1069,10 @@ fn a_chain_belongs_only_to_the_two_that_cannot_work_the_type_out() {
     assert!(provided.contains("`count` carries no chain."), "{provided}");
     assert!(provided.contains("Error code: E0499"), "{provided}");
 
-    // And a writer's own name is between marks, which is where the chain would have
-    // gone. What it gives back was said where it was declared.
+    // A marked name does carry a chain now -- it is how a module path is written -- but
+    // the links of one path all say the same thing about who made it.
     let mine = errors("START { var.immut.i64 ['n'] = [call 'mine'.i64['x']]; }");
-    assert!(mine.contains("a name you declared carries no chain."), "{mine}");
+    assert!(mine.contains("this path is marked in one place and bare in another."), "{mine}");
     assert!(mine.contains("Error code: E0499"), "{mine}");
 }
 
@@ -1258,4 +1258,75 @@ START { print.stdout[str:*x*]; }
 ",
     );
     assert!(giving.contains("`arr.i64 (any)`, and it is being given to an `arr.i64 (3)`"), "{giving}");
+}
+
+#[test]
+fn a_module_decides_which_names_reach_which_code() {
+    // `module` reaches this module and everything nested inside it, so a child sees its
+    // ancestors and the file does not see in.
+    let hidden = errors(
+        "module ['m'] { fn.module.i64 ['hidden'] [] { give [*1*]; } } START { print.stdout[call 'm'.'hidden'[]]; }",
+    );
+    assert!(hidden.contains("`'m.hidden'` says `module`, and this is written in the top of the file."), "{hidden}");
+    assert!(hidden.contains("Error code: E0511"), "{hidden}");
+
+    // And a child seeing its ancestor is the case modules exist for.
+    let inward = check(
+        "\
+module ['maths'] {
+    fn.module.i64 ['reduce'] [] { give [*1*]; }
+    module ['trig'] {
+        fn.export.i64 ['sin'] [] { give [call 'reduce'[]]; }
+    }
+}
+START { print.stdout[call 'maths'.'trig'.'sin'[]]; }
+",
+    );
+    assert!(inward.ok(), "a child must see its ancestors");
+
+    // `parent` reaches the module around the declaring one, and no further.
+    let up = errors(
+        "module ['a'] { module ['b'] { fn.parent.i64 ['up'] [] { give [*1*]; } } } START { print.stdout[call 'a'.'b'.'up'[]]; }",
+    );
+    assert!(up.contains("says `parent`"), "{up}");
+}
+
+#[test]
+fn the_two_narrow_words_want_a_boundary_that_is_there() {
+    // Refused where they are written, the way `any` outside a function is, rather than
+    // quietly widened into the next rung up.
+    let no_module = errors("fn.module.i64 ['x'] [] { give [*1*]; } START { print.stdout[call 'x'[]]; }");
+    assert!(no_module.contains("`module` says a boundary that is not here."), "{no_module}");
+    assert!(no_module.contains("Error code: E0512"), "{no_module}");
+
+    // At one level deep the module around this one *is* the file, and `parent` would
+    // then be a second spelling of `file`.
+    let no_parent = errors("module ['m'] { fn.parent.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.'x'[]]; }");
+    assert!(no_parent.contains("`parent` says a boundary that is not here."), "{no_parent}");
+}
+
+#[test]
+fn a_module_holds_declarations_and_a_program_begins_once() {
+    let start = errors("module ['m'] { START { print.stdout[str:*x*]; } }");
+    assert!(start.contains("`START` is not something a module holds."), "{start}");
+    assert!(start.contains("Error code: E0103"), "{start}");
+}
+
+#[test]
+fn every_link_of_a_path_says_the_same_thing_about_who_made_it() {
+    let mixed = errors(
+        "module ['m'] { fn.file.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.x[]]; }",
+    );
+    assert!(mixed.contains("this path is marked in one place and bare in another."), "{mixed}");
+    assert!(mixed.contains("Error code: E0499"), "{mixed}");
+}
+
+#[test]
+fn the_ladder_is_five_and_the_list_is_not_a_second_copy() {
+    // The guard that caught six stale lists in a day, pointed at the one that just grew.
+    assert_eq!(quench_check::Visibility::ALL, ["module", "parent", "file", "program", "export"]);
+    let rendered = errors("fn.i64 ['x'] [] { give [*1*]; } START { print.stdout[call 'x'[]]; }");
+    for word in quench_check::Visibility::ALL {
+        assert!(rendered.contains(&format!("`{word}`")), "`{word}` missing from the message:\n{rendered}");
+    }
 }

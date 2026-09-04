@@ -185,6 +185,46 @@ Both print the same thing, which is not a coincidence — it is
   That is forced rather than chosen: a slot is an `i64` whatever is in it, and one copy
   serving every type would have to tag every value so the collector knew what to follow.
   See [notes/a-hole-is-not-a-name.md](notes/a-hole-is-not-a-name.md).
+- **A module is a block inside a file, and it nests.** What it does is decide which
+  names reach which code; below the checker a function is just a function with a longer
+  name, so nothing that runs knows modules exist.
+
+  ```quench
+  module ['maths'] {
+      fn.module.b64 ['reduce'] [immut.b64 'x'] { give ['x' + *1.0*]; }
+
+      module ['trig'] {
+          fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { give ['x' / *2.0*]; }
+      }
+
+      fn.export.b64 ['sin'] [immut.b64 'x'] {
+          give [call 'reduce'[call 'trig'.'quarter turn'['x']]];
+      }
+  }
+
+  START {
+      print.stdout[call 'maths'.'sin'[*8.0*] \n];
+  }
+  ```
+
+  ```text
+  5.0
+  ```
+
+  The ladder is five, narrowest first: **`module`** (this module and everything nested
+  inside it), **`parent`** (the module around this one, and everything under that),
+  `file`, `program`, `export`. `module` reaching downward is what the whole thing is
+  for — a helper in `maths` called from `maths.trig` — and the consequence, that a
+  parent cannot see *into* a child, is what `parent` answers. `parent` goes one rung up
+  and no further: Rust's `pub(in path)` is declined, because wanting to reach three
+  levels up is evidence the nesting is too deep.
+
+  A path is **marks, dots, marks** — `call 'maths'.'trig'.'quarter turn'[…]` — because
+  the rule is the one `call` already had: a bare word is Quench's, a marked name is
+  yours, and every link of one path says the same thing about who made it. A name is
+  looked for here and then outward, paths included, so `maths` says `'trig'.'…'`
+  without saying `maths` again. See
+  [notes/five-lines-a-name-can-cross.md](notes/five-lines-a-name-can-cross.md).
 - **Constants outside, functions at the top, variables inside.**
   `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is
   written in wherever it is named — so `set` on one is refused. A constant *array* does
@@ -474,13 +514,10 @@ Both print the same thing, which is not a coincidence — it is
   want it, because no check can be made honest against a world that changes underneath
   it. `START` returns an `i64` exit status for now.
 - Whether **`mut`** keeps that spelling, given visibility chose words over initials.
-- **How `import` is written, and what a program is.** Modules themselves are decided —
-  a block inside a file, nesting, and a ladder of five: `module`, `parent`, `file`,
-  `program`, `export`. See
-  [notes/five-lines-a-name-can-cross.md](notes/five-lines-a-name-can-cross.md). What is
-  not decided is reaching across files, which is the bigger half: nothing in the
-  compiler reads more than one file, so a program has no way to say which files it *is*.
-  None of this is built.
+- **How `import` is written, and what a program is.** Modules inside a file are built;
+  reaching across files is not, and it is the bigger half — nothing in the compiler
+  reads more than one file, so a program has no way to say which files it *is*, and
+  that is the only thing that would make `file` and `program` differ.
 
 ## Types, iteration 1
 

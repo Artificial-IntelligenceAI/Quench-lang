@@ -1,8 +1,8 @@
 # Five lines a name can cross
 
-**Decided, not built.** Nothing in this note exists in the compiler yet. It is written
-now because the decisions were made in one sitting and would otherwise have to be made
-again, worse. Successor to
+**Built, except `import`.** Modules, the five words, nesting and paths all work; what
+does not exist is reaching across *files*, which is the second half and has its own
+section at the bottom. Successor to
 [three lines a name can cross](three-lines-a-name-can-cross.md), whose last section
 said this note would have to exist.
 
@@ -107,11 +107,47 @@ information about *ownership* — once `'maths'` is marked, nothing after the do
 be Quench's. That is true, and it is an argument about verbosity rather than a rule, so
 it lost to three rules.
 
+## How a name is found
+
+Here first, then outward, and the innermost match wins:
+
+```quench
+module ['maths'] {
+    fn.module.b64 ['reduce'] [immut.b64 'x'] { … }
+    module ['trig'] {
+        fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { … }
+    }
+    fn.export.b64 ['sin'] [immut.b64 'x'] {
+        give [call 'reduce'[call 'trig'.'quarter turn'['x']]];
+    }
+}
+```
+
+`'reduce'` is found in `maths` because that is where this is written.
+`'trig'.'quarter turn'` is a *path*, and it goes through the same walk — so `maths` says
+it without having to say `maths` again, and the top of the file says
+`'maths'.'trig'.'quarter turn'` in full. One rule rather than two, and no word needed
+for "start from the top", which is what Rust's `crate::` is.
+
+What a module does not change is anything below the checker. A module decides which
+names reach which code, and that is settled while checking; by the time anything is
+lowered, a function is a function with a longer name — `maths.trig.quarter turn`. Two
+modules may each hold a `'size'` and the file may hold a third.
+
+## What is not built inside a file either
+
+**A constant in another module.** Constants walk outward like anything else, so a module
+reaches the ones above it, but there is no path syntax for a *value* — only for a call.
+`'text'.'MARK'` as a value is not written.
+
+**Visibility on a module itself.** `module ['maths'] { … }` carries no chain, so every
+module is visible everywhere in the file. Only what is *inside* one is controlled.
+
 ## `import` is a different feature, and it is the big one
 
 Three things get called "modules" and only the first is settled here.
 
-- **Grouping inside a file.** This note. Buildable against the compiler as it stands.
+- **Grouping inside a file.** This note, and **built**.
 - **Naming across files.** What `import` means, and what was asked for. The syntax is
   the small part: nothing in the compiler reads more than one file, so a program has no
   way to say which files it *is*, no resolution across them, and no rule for two files

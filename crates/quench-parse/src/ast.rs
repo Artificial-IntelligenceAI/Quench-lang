@@ -32,6 +32,21 @@ pub enum Item {
     /// says one thing is noise rather than explicitness.
     Const(Var),
     Func(Func),
+    /// `module ['maths'] { … }` — a named box of declarations, which may hold others.
+    Module(Module),
+}
+
+/// `module ['maths'] { … }`
+///
+/// A block inside a file rather than a file itself, and it nests. See
+/// `notes/five-lines-a-name-can-cross.md`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Module {
+    /// `module`, for pointing at.
+    pub word: Span,
+    pub name: Span,
+    pub items: Vec<Item>,
+    pub span: Span,
 }
 
 impl Item {
@@ -39,6 +54,7 @@ impl Item {
         match self {
             Item::Const(c) => c.span,
             Item::Func(f) => f.span,
+            Item::Module(m) => m.span,
         }
     }
 }

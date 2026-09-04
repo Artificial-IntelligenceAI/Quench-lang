@@ -2503,3 +2503,54 @@ START {
 ";
     assert_eq!(said(source), "30 99\n9.25 400\n2 5\n");
 }
+
+#[test]
+fn a_module_is_a_box_of_declarations_and_it_nests() {
+    // The whole of what a module does is decide which names reach which code. By the
+    // time anything runs, a function is a function with a longer name.
+    let source = "\
+module ['maths'] {
+    module ['trig'] {
+        fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { give ['x' / *2.0*]; }
+    }
+
+    fn.module.b64 ['reduce'] [immut.b64 'x'] { give ['x' + *1.0*]; }
+
+    fn.export.b64 ['sin'] [immut.b64 'x'] {
+        give [call 'reduce'[call 'trig'.'quarter turn'['x']]];
+    }
+}
+
+module ['text'] {
+    fn.export.str ['shout'] [immut.str 'what'] { give ['what' *!*]; }
+}
+
+START {
+    print.stdout[call 'maths'.'sin'[*8.0*] str:* * call 'text'.'shout'[*hi*] \\n];
+}
+";
+    assert_eq!(said(source), "5.0 hi!\n");
+}
+
+#[test]
+fn a_name_is_looked_for_here_and_then_outward() {
+    // One rule for a bare name and for a path, which is what lets `maths` say
+    // `'trig'.'reduce'` without saying `maths` again. The innermost match wins.
+    let source = "\
+module ['a'] {
+    const.file.i64 ['LIMIT'] = [*10*];
+    fn.export.i64 ['size'] [] { give ['LIMIT']; }
+}
+
+module ['b'] {
+    fn.export.i64 ['size'] [] { give [*99*]; }
+}
+
+fn.file.i64 ['size'] [] { give [*0*]; }
+
+START {
+    print.stdout[call 'a'.'size'[] str:* * call 'b'.'size'[] str:* * call 'size'[] \\n];
+}
+";
+    assert_eq!(said(source), "10 99 0\n", "three functions of one name, and no collision");
+}

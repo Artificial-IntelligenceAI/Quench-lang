@@ -49,7 +49,7 @@ pub const AFTER_A_BLOCK: &[&str] = &["else-if", "else"];
 pub const BEFORE_A_VALUE: &[&str] = &["not", "share", "copy"];
 
 /// What a file holds at the top.
-pub const TOP_LEVEL: &[&str] = &["fn", "const", "START"];
+pub const TOP_LEVEL: &[&str] = &["fn", "const", "module", "START"];
 
 /// A list of words as a reader should see it.
 pub fn listed(words: &[&str]) -> String {
@@ -153,6 +153,29 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The same, without walking out of the block it was in.
+    ///
+    /// Skipping to the next `;` is right at the top of a file, where there are no
+    /// braces to fall out of. Inside a module it is not: a `START` written there is
+    /// refused, and then the `}` closing *its* block would be read as the one closing
+    /// the module, so one mistake became two errors and the second was nonsense.
+    fn recover_inside(&mut self) {
+        let mut depth = 0usize;
+        while !self.at_end() {
+            match self.peek().kind {
+                Kind::CloseBlock if depth == 0 => return,
+                Kind::OpenBlock => depth += 1,
+                Kind::CloseBlock => depth -= 1,
+                Kind::Semicolon if depth == 0 => {
+                    self.bump();
+                    return;
+                }
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
     // --- the grammar ----------------------------------------------------------------
 
     fn program(&mut self) -> Program {
@@ -169,26 +192,12 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if token.kind == Kind::Word {
-                match self.text(token.span) {
-                    "fn" => {
-                        match self.function() {
-                            Some(func) => program.items.push(ast::Item::Func(func)),
-                            None => self.recover(),
-                        }
-                        continue;
-                    }
-                    // A constant is a declaration written somewhere else, so it is
-                    // parsed by the same code and gets the same errors.
-                    "const" => {
-                        match self.var() {
-                            Some(item) => program.items.push(ast::Item::Const(item)),
-                            None => self.recover(),
-                        }
-                        continue;
-                    }
-                    _ => {}
+            if let Some(item) = self.top_level(token) {
+                match item {
+                    Some(item) => program.items.push(item),
+                    None => self.recover(),
                 }
+                continue;
             }
 
             // `var` at the top of a file is the one worth naming, because it is the
@@ -215,6 +224,82 @@ impl<'a> Parser<'a> {
     }
 
     /// `fn.export.i64 ['add'] [immut.i64 'a', immut.i64 'b'] { … }`
+    /// One of the three things that may stand at the top of a file or inside a module.
+    ///
+    /// `Some(Some(item))` parsed one, `Some(None)` tried and failed, and `None` means
+    /// this token was not one of them at all — which is the caller's business, because
+    /// what else may appear there differs between a file and a module.
+    fn top_level(&mut self, token: Token) -> Option<Option<ast::Item>> {
+        if token.kind != Kind::Word {
+            return None;
+        }
+        match self.text(token.span) {
+            "fn" => Some(self.function().map(ast::Item::Func)),
+            // A constant is a declaration written somewhere else, so it is parsed by
+            // the same code and gets the same errors.
+            "const" => Some(self.var().map(ast::Item::Const)),
+            "module" => Some(self.module().map(ast::Item::Module)),
+            _ => None,
+        }
+    }
+
+    /// `module ['maths'] { … }`
+    fn module(&mut self) -> Option<ast::Module> {
+        let word = self.bump().span;
+        self.expect(Kind::OpenList, "a module")?;
+        let name = self.expect(Kind::Name, "a module")?;
+        self.expect(Kind::CloseList, "a module")?;
+        let open = self.expect(Kind::OpenBlock, "a module")?;
+
+        let mut items = Vec::new();
+        loop {
+            let token = self.peek();
+            match token.kind {
+                Kind::CloseBlock => {
+                    let close = self.bump().span;
+                    return Some(ast::Module { word, name, items, span: word.to(close) });
+                }
+                Kind::End => {
+                    self.errors.push(
+                        Diagnostic::new("E0109", "a module was opened here and never closed.")
+                            .primary(open, "this `{` has no partner")
+                            .rule("a module begins with `{` and ends with `}`")
+                            .tip("the end of the file closes nothing — it is the brace that does.")
+                            .fix("add a `}` where the module should end"),
+                    );
+                    return Some(ast::Module { word, name, items, span: word.to(open) });
+                }
+                _ => {}
+            }
+            match self.top_level(token) {
+                Some(Some(item)) => items.push(item),
+                Some(None) => self.recover_inside(),
+                None => {
+                    // `START` is the one worth naming, because a module is exactly where
+                    // somebody would reasonably try to put one.
+                    let diag = if token.kind == Kind::Word
+                        && self.text(token.span) == quench_qir_entry()
+                    {
+                        Diagnostic::new("E0103", "`START` is not something a module holds.")
+                            .primary(token.span, "here")
+                            .secondary(name, "this module")
+                            .rule("a program begins once, at the top of a file, and a module is a box of declarations")
+                            .tip("a module holds `fn`, `const` and other modules, which is the whole list.")
+                            .fix("move it outside the module")
+                    } else {
+                        Diagnostic::new("E0102", "this cannot be inside a module.")
+                            .primary(token.span, "here")
+                            .secondary(name, "this module")
+                            .rule("a module holds `fn`, `const` and other modules, and nothing else")
+                            .fix("move it outside, or declare it with `fn` or `const`")
+                    };
+                    self.errors.push(diag);
+                    self.recover_inside();
+                }
+            }
+        }
+    }
+
     fn function(&mut self) -> Option<ast::Func> {
         let word = self.bump().span;
         let mut chain = vec![word];
@@ -481,23 +566,33 @@ impl<'a> Parser<'a> {
         let marked = named.kind == Kind::Name;
         let name = self.bump().span;
 
-        // `call as.i64['line']`. A bare word is Quench's own name and one word, so the
-        // chain is the only way something the language provides says a second thing —
-        // and it is the same chain `var.immut.i64` and `print.stdout` already are.
+        // Two things wear dots here and they are not the same thing.
+        //
+        // After a bare word the links are bare too: `call as.i64['line']`, where the
+        // chain is the only way something the language provides says a second thing,
+        // because a bare word is one token.
+        //
+        // After a marked name they are marked too: `call 'maths'.'sin'[…]`, which is a
+        // path through modules the writer declared. A path is uniformly one or the
+        // other -- nobody adds to a module Quench ships -- so a mixed one is refused
+        // rather than given a meaning.
         let mut chain = Vec::new();
         while self.peek().kind == Kind::Dot {
             self.bump();
-            chain.push(self.expect(Kind::Word, "a call")?);
-        }
-        if marked && !chain.is_empty() {
-            self.errors.push(
-                Diagnostic::new("E0499", "a name you declared carries no chain.")
-                    .primary(chain[0], "here")
-                    .rule("a chain after `call` belongs to a bare word, which is one of Quench's own")
-                    .tip("what a function of yours gives back is written where it was declared, not where it is called.")
-                    .fix(format!("`call {}[…]`", self.text(name))),
-            );
-            return None;
+            let want = if marked { Kind::Name } else { Kind::Word };
+            let link = self.peek();
+            if link.kind != want {
+                self.errors.push(
+                    Diagnostic::new("E0499", "this path is marked in one place and bare in another.")
+                        .primary(link.span, format!("found {}", link.kind.describe()))
+                        .secondary(name, if marked { "a name you declared" } else { "one of Quench's own" })
+                        .rule("marks say who made a thing, so every link of one path says the same")
+                        .tip("`call 'maths'.'sin'[…]` is yours and `call maths.sin[…]` would be Quench's; there is no half of either.")
+                        .fix(if marked { "put marks round it" } else { "take the marks off" }),
+                );
+                return None;
+            }
+            chain.push(self.bump().span);
         }
 
         self.expect(Kind::OpenList, "a call")?;

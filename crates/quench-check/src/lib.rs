@@ -14,7 +14,7 @@ mod holes;
 
 use quench_diag::{Diagnostic, Span};
 use quench_num::{whole_range, Whole};
-use quench_parse::{ast, counted, Parsed};
+use quench_parse::{ast, counted, listed, Parsed};
 use std::collections::HashMap;
 
 /// A type, as far as the checker is concerned.
@@ -216,22 +216,56 @@ impl Ty {
 /// into existence later.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Visibility {
+    /// This module, and everything nested inside it. Not a preference: a helper
+    /// declared in `maths` and called from `maths.trig` is the case modules exist for,
+    /// so a child sees its ancestors. The consequence — a parent cannot see into a
+    /// child — is what `Parent` is for.
+    Module,
+    /// The module around this one, and everything under that, siblings included.
+    /// Rust's `pub(super)`. One rung up and no further.
+    Parent,
     File,
     Program,
     Export,
 }
 
 impl Visibility {
-    /// Every visibility there is, which is the list `from_word` below answers to.
-    pub const ALL: &[&str] = &["file", "program", "export"];
+    /// Every visibility there is, narrowest first, which is the list `from_word` below
+    /// answers to. See `notes/five-lines-a-name-can-cross.md`.
+    pub const ALL: &[&str] = &["module", "parent", "file", "program", "export"];
 
     fn from_word(word: &str) -> Option<Visibility> {
         match word {
+            "module" => Some(Visibility::Module),
+            "parent" => Some(Visibility::Parent),
             "file" => Some(Visibility::File),
             "program" => Some(Visibility::Program),
             "export" => Some(Visibility::Export),
             _ => None,
         }
+    }
+
+    /// Whether code in `from` may name something declared in `at` with this word.
+    ///
+    /// A module path is a list of names, outermost first, and "inside" is the prefix
+    /// relation — which is the whole of the rule.
+    pub fn reaches(self, from: &[String], at: &[String]) -> bool {
+        match self {
+            Visibility::Module => from.starts_with(at),
+            // The module around the declaring one. A declaration at the top of a file
+            // has none, and is refused where it is written rather than here.
+            Visibility::Parent => match at.split_last() {
+                Some((_, around)) => from.starts_with(around),
+                None => false,
+            },
+            // One file and no linking, so these three cannot yet be told apart by
+            // anything that runs. See `notes/three-lines-a-name-can-cross.md`.
+            Visibility::File | Visibility::Program | Visibility::Export => true,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        Visibility::ALL[self as usize]
     }
 }
 
@@ -361,6 +395,8 @@ pub struct Func {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Constant {
     pub name: String,
+    /// The module it was declared in, outermost first. Empty at the top of a file.
+    pub in_module: Vec<String>,
     pub visibility: Visibility,
     pub ty: Ty,
     pub value: Value,
@@ -785,6 +821,8 @@ impl Checked {
 /// they were written in deciding whether that works.
 struct Signature {
     name: String,
+    /// The module it was declared in, outermost first. Empty at the top of a file.
+    in_module: Vec<String>,
     visibility: Option<Visibility>,
     returns: Option<Ty>,
     /// The hole this function opened, if it opened one. At most one, always.
@@ -806,6 +844,7 @@ pub fn check(source: &str) -> Checked {
         scope: vec![HashMap::new()],
         depth: 0,
         returns: None,
+        at_module: Vec::new(),
         hole: None,
         opening: false,
         signatures: Vec::new(),
@@ -819,30 +858,40 @@ pub fn check(source: &str) -> Checked {
         errors,
     };
 
+    // Modules are flattened away first, into a list of what was declared and which
+    // module each was declared in. Written order is kept, so a constant may still be
+    // built out of the ones above it -- including ones above it in another module.
+    let mut flat: Vec<(Vec<String>, &ast::Item)> = Vec::new();
+    checker.flatten(&program.items, &mut Vec::new(), &mut flat);
+
     // Constants first, in the order written: one may be built out of those above it,
     // and out of nothing else, because there is nothing else yet worked out.
-    for item in &program.items {
+    for (at, item) in &flat {
         if let ast::Item::Const(declaration) = item {
+            checker.at_module.clone_from(at);
             checker.constant(declaration);
         }
     }
 
     // Then every signature, before any body. Which is what lets `even` call `odd` when
     // `odd` is written underneath it.
-    for item in &program.items {
+    for (at, item) in &flat {
         if let ast::Item::Func(func) = item {
+            checker.at_module.clone_from(at);
             checker.signature(func);
         }
     }
 
     let mut funcs = Vec::new();
-    for item in &program.items {
+    for (at, item) in &flat {
         if let ast::Item::Func(func) = item {
+            checker.at_module.clone_from(at);
             if let Some(checked) = checker.function(func) {
                 funcs.push(checked);
             }
         }
     }
+    checker.at_module.clear();
 
     let start = program.start.as_ref().map(|start| {
         checker.in_start = true;
@@ -895,6 +944,10 @@ struct Checker<'a> {
     constants: Vec<Constant>,
     /// Constant name to its place in `constants`.
     known: HashMap<String, u32>,
+    /// Which module is being read or checked, outermost first, empty at the top of a
+    /// file. A declaration's key is this joined with its name, and a name written
+    /// without a path is looked for here first and then outward.
+    at_module: Vec<String>,
     /// The hole the function being read or checked opened, if it opened one.
     ///
     /// One per function, so this is a single slot rather than a list. While a signature
@@ -943,6 +996,129 @@ impl<'a> Checker<'a> {
         }
     }
 
+    // --- modules ------------------------------------------------------------------------
+
+    /// Every declaration in a file, paired with the module it was declared in.
+    ///
+    /// Modules exist for the checker and for nothing below it: what a module *does* is
+    /// decide which names reach which code, and that is settled here. By the time
+    /// anything is lowered a function is a function with a longer name.
+    fn flatten<'b>(
+        &mut self,
+        items: &'b [ast::Item],
+        at: &mut Vec<String>,
+        out: &mut Vec<(Vec<String>, &'b ast::Item)>,
+    ) {
+        for item in items {
+            match item {
+                ast::Item::Module(module) => {
+                    at.push(self.named(module.name));
+                    self.flatten(&module.items, at, out);
+                    at.pop();
+                }
+                other => out.push((at.clone(), other)),
+            }
+        }
+    }
+
+    /// A name as it is keyed: the module it is in, then it, dots between.
+    fn qualified(at: &[String], name: &str) -> String {
+        if at.is_empty() {
+            return name.to_string();
+        }
+        format!("{}.{name}", at.join("."))
+    }
+
+    /// Where a name is looked for: this module, then the one around it, and outward to
+    /// the top of the file. The innermost match wins.
+    ///
+    /// A path goes through the same walk, so `'trig'.'reduce'` written inside `maths`
+    /// finds `maths.trig.reduce` — one rule rather than two, and no word needed for
+    /// "start from the top".
+    fn reachable(&self, name: &str) -> Option<u32> {
+        for depth in (0..=self.at_module.len()).rev() {
+            let key = Checker::qualified(&self.at_module[..depth], name);
+            if let Some(&which) = self.named.get(&key) {
+                return Some(which);
+            }
+        }
+        None
+    }
+
+    fn reachable_constant(&self, name: &str) -> Option<u32> {
+        for depth in (0..=self.at_module.len()).rev() {
+            let key = Checker::qualified(&self.at_module[..depth], name);
+            if let Some(&which) = self.known.get(&key) {
+                return Some(which);
+            }
+        }
+        None
+    }
+
+    /// Which function a marked call names, and whether it may be named from here.
+    ///
+    /// Then it has to get past what the declaration said about who may name it.
+    fn function_named(&mut self, call: &ast::Call) -> Option<u32> {
+        let mut path = vec![self.named(call.name)];
+        for link in &call.chain {
+            path.push(self.named(*link));
+        }
+        let spelt = path.join(".");
+        // One rule for a bare name and for a path: look here, then outward. Which is
+        // what lets `maths` call `'trig'.'reduce'` without saying `maths` again, and
+        // still lets the top of the file say `'maths'.'trig'.'reduce'` in full.
+        let found = self.reachable(&spelt);
+
+        let Some(which) = found else {
+            // A name that exists somewhere else is worth saying so, because the fix is
+            // a path rather than a spelling.
+            let elsewhere: Option<String> = self
+                .named
+                .keys()
+                .find(|key| key.rsplit('.').next() == Some(path[path.len() - 1].as_str()))
+                .cloned();
+            let mut diagnostic =
+                Diagnostic::new("E0455", format!("there is nothing called `'{spelt}'`."))
+                    .primary(call.name.to(call.close), "here")
+                    .rule("a name between marks after `call` is a function the writer declared")
+                    .tip("a bare word there is one of Quench's own, which is how a reader tells them apart.");
+            diagnostic = match elsewhere {
+                Some(key) => diagnostic
+                    .fix(format!("`call '{}'[…]`, which is where that name is", key.replace('.', "'.'"))),
+                None => diagnostic.fix("check the spelling, or declare it with `fn`"),
+            };
+            self.errors.push(diagnostic);
+            return None;
+        };
+
+        let signature = &self.signatures[which as usize];
+        if let Some(visibility) = signature.visibility {
+            if !visibility.reaches(&self.at_module, &signature.in_module) {
+                let (said, at, held) =
+                    (visibility.word(), signature.at, signature.in_module.join("."));
+                let reaches = match visibility {
+                    Visibility::Module => format!("`module` reaches `{held}` and everything nested inside it"),
+                    _ => format!("`parent` reaches the module around `{held}`, and everything under that"),
+                };
+                let here = if self.at_module.is_empty() {
+                    "the top of the file".to_string()
+                } else {
+                    format!("`{}`", self.at_module.join("."))
+                };
+                self.errors.push(
+                    Diagnostic::new("E0511", format!("`'{spelt}'` says `{said}`, and this is written in {here}."))
+                        .secondary(at, format!("`{said}` here"))
+                        .primary(call.name.to(call.close), "and named here")
+                        .rule(reaches)
+                        .tip("the ladder is `module`, `parent`, `file`, `program`, `export`, narrowest first.")
+                        .fix("widen what it says, or move this inside"),
+                );
+                return None;
+            }
+        }
+        Some(which)
+    }
+
     // --- the top of a file ------------------------------------------------------------
 
     /// Read a chain's visibility link, and complain when there is none or two.
@@ -956,20 +1132,46 @@ impl<'a> Checker<'a> {
                     Diagnostic::new("E0458", "this says twice who can see it.")
                         .secondary(first, format!("`{}` here", self.text(first)))
                         .primary(*link, format!("and `{}` here", self.text(*link)))
-                        .rule("a top-level declaration says `file`, `program` or `export`, once")
+                        .rule(format!("a declaration says one of {}, once", listed(Visibility::ALL)))
                         .fix("keep the one that was meant"),
                 ),
             }
         }
         match found {
-            Some((visibility, _)) => Some(visibility),
+            Some((visibility, at)) => {
+                // Two of the five name a boundary that may not be there. Refused where
+                // it is written, the way `any` outside a function is, rather than
+                // quietly widened into the next rung up.
+                let missing = match visibility {
+                    Visibility::Module if self.at_module.is_empty() => {
+                        Some(("module", "there is no module around this"))
+                    }
+                    // At one level deep the module around this one *is* the file, and
+                    // `parent` would then be a second spelling of `file`.
+                    Visibility::Parent if self.at_module.len() < 2 => {
+                        Some(("parent", "there is no module around the one this is in"))
+                    }
+                    _ => None,
+                };
+                if let Some((said, why)) = missing {
+                    self.errors.push(
+                        Diagnostic::new("E0512", format!("`{said}` says a boundary that is not here."))
+                            .primary(at, why)
+                            .rule(format!("{} are the five, narrowest first, and each names a boundary a name may cross", listed(Visibility::ALL)))
+                            .tip("`module` wants a module around it, and `parent` wants one around that.")
+                            .fix("`file` here"),
+                    );
+                    return None;
+                }
+                Some(visibility)
+            }
             None => {
                 self.errors.push(
                     Diagnostic::new("E0459", format!("this {what} does not say who can see it."))
                         .primary(word, "here")
-                        .rule("everything at the top of a file says `file`, `program` or `export`, and silence is not one of them")
+                        .rule(format!("everything at the top of a file or a module says one of {}, and silence is not one of them", listed(Visibility::ALL)))
                         .tip("`file` is the careful answer: nothing outside this file can name it.")
-                        .fix("`file` here, `program` across the program, `export` for anything outside it"),
+                        .fix("`file` here, `module` for this module alone, `export` for anything outside the program"),
                 );
                 None
             }
@@ -1029,9 +1231,11 @@ impl<'a> Checker<'a> {
             }
 
             let at_index = self.constants.len() as u32;
-            self.known.insert(name.clone(), at_index);
+            let key = Checker::qualified(&self.at_module, &name);
+            self.known.insert(key.clone(), at_index);
             self.constants.push(Constant {
-                name,
+                name: key,
+                in_module: self.at_module.clone(),
                 visibility: visibility.unwrap_or(Visibility::File),
                 ty,
                 value,
@@ -1061,10 +1265,11 @@ impl<'a> Checker<'a> {
 
     fn read_signature(&mut self, func: &ast::Func) {
         let name = self.named(func.name);
+        let key = Checker::qualified(&self.at_module, &name);
         let word = func.chain[0];
         let visibility = self.seen_by(&func.chain, word, "function");
 
-        if let Some(&first) = self.named.get(&name) {
+        if let Some(&first) = self.named.get(&key) {
             let at = self.signatures[first as usize].at;
             self.errors.push(
                 Diagnostic::new("E0461", format!("`'{name}'` is declared twice."))
@@ -1140,9 +1345,12 @@ impl<'a> Checker<'a> {
         }
 
         let hole = self.hole;
-        self.named.insert(name.clone(), self.signatures.len() as u32);
+        self.named.insert(key.clone(), self.signatures.len() as u32);
         self.signatures.push(Signature {
-            name,
+            // The qualified one, so two modules may each hold a `'sin'` and the module
+            // a compiled function ends up in still has one name per function.
+            name: key,
+            in_module: self.at_module.clone(),
             visibility,
             returns,
             hole,
@@ -1441,7 +1649,7 @@ impl<'a> Checker<'a> {
 
     /// A whole function: its parameters put in scope, then its body.
     fn function(&mut self, func: &ast::Func) -> Option<Func> {
-        let name = self.named(func.name);
+        let name = Checker::qualified(&self.at_module, &self.named(func.name));
         let which = *self.named.get(&name)?;
         let signature = &self.signatures[which as usize];
         let (visibility, returns) = (signature.visibility, signature.returns.clone());
@@ -1820,6 +2028,28 @@ impl<'a> Checker<'a> {
 
     /// Pieces side by side, which is how text is built.
     fn juxtaposed(&mut self, value: &ast::Value, ty: &Ty, ty_span: Span) -> Option<Value> {
+        // A value that says its own type is read by that type and then checked against
+        // the one that was wanted. Where the chain also says it this is a repetition
+        // rather than a mistake -- and it is not always a repetition, since a call's
+        // argument may be going into a hole, which says nothing at all.
+        if let [one @ ast::Term::Piece(ast::Piece::Written { ty: Some(_), .. })] =
+            value.terms.as_slice()
+        {
+            let built = self.term(one)?;
+            let found = self.type_of(&built, value.span)?;
+            if !ty.accepts(&found) {
+                self.errors.push(
+                    Diagnostic::new("E0406", format!("this says it is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                        .primary(value.span, format!("{} `{}`", found.article(), found.name()))
+                        .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                        .rule("nothing converts on its own — two types meet only where something says they should")
+                        .fix(format!("say `{}`, or leave the type off and let the chain say it", ty.name())),
+                );
+                return None;
+            }
+            return Some(built);
+        }
+
         // A value that is one name is that variable's value, whatever the type.
         if let [ast::Term::Piece(ast::Piece::Name(span))] = value.terms.as_slice() {
             let (built, held) = self.named_value(*span)?;
@@ -2733,17 +2963,7 @@ impl<'a> Checker<'a> {
         // difference between `call count['xs']` and `call 'count'['xs']`, and why both
         // may be written in one program.
         if call.marked {
-            let name = self.named(call.name);
-            let Some(&which) = self.named.get(&name) else {
-                self.errors.push(
-                    Diagnostic::new("E0455", format!("there is nothing called `'{name}'`."))
-                        .primary(call.name, "here")
-                        .rule("a name between marks after `call` is a function the writer declared")
-                        .tip("a bare word there is one of Quench's own, which is how a reader tells them apart.")
-                        .fix("check the spelling, or declare it with `fn`"),
-                );
-                return None;
-            };
+            let which = self.function_named(call)?;
             return self.called(which, call);
         }
         let name = self.text(call.name).to_string();
@@ -3487,18 +3707,16 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let name = if call.marked {
-            self.named(call.name)
-        } else {
-            self.text(call.name).to_string()
-        };
-        let Some(&which) = self.named.get(&name).filter(|_| call.marked) else {
+        if !call.marked {
             self.errors.push(
                 Diagnostic::new("E0455", format!("there is nothing called `{}`.", self.text(call.name)))
                     .primary(call.name, "here")
                     .rule("a call written on its own names a function the writer declared, between marks")
                     .fix("check the spelling, or declare it with `fn`"),
             );
+            return;
+        }
+        let Some(which) = self.function_named(call) else {
             return;
         };
         let Some((args, fill)) = self.arguments(which, call.name, &call.args, call.close)
@@ -4039,7 +4257,7 @@ impl<'a> Checker<'a> {
         if let Some(local) = self.seen(&name) {
             return Some((Value::Copy(local), self.locals[local.0 as usize].ty.clone()));
         }
-        if let Some(&which) = self.known.get(&name) {
+        if let Some(which) = self.reachable_constant(&name) {
             return Some((Value::Const(which), self.constants[which as usize].ty.clone()));
         }
         self.lookup(span)
@@ -4049,7 +4267,7 @@ impl<'a> Checker<'a> {
     /// A name that has to be somewhere a value *lives* — indexed, counted or changed.
     fn lookup(&mut self, span: Span) -> Option<LocalId> {
         let name = self.named(span);
-        if let Some(&which) = self.known.get(&name) {
+        if let Some(which) = self.reachable_constant(&name) {
             let at = self.constants[which as usize].at;
             self.errors.push(
                 Diagnostic::new("E0472", format!("`'{name}'` is a constant."))
