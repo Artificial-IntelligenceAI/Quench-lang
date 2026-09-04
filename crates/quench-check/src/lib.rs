@@ -257,8 +257,18 @@ pub const PROVIDED: &[(&str, Provides)] = &[
     ("cos", Provides::Slow(3)),
     ("tan", Provides::Slow(4)),
     ("atan", Provides::Slow(5)),
+    ("asin", Provides::Slow(6)),
+    ("acos", Provides::Slow(7)),
+    ("sinh", Provides::Slow(8)),
+    ("cosh", Provides::Slow(9)),
+    ("tanh", Provides::Slow(10)),
+    ("asinh", Provides::Slow(11)),
+    ("acosh", Provides::Slow(12)),
+    ("atanh", Provides::Slow(13)),
+    ("cbrt", Provides::Slow(14)),
     ("pow", Provides::Power(0)),
     ("atan2", Provides::Power(1)),
+    ("hypot", Provides::Power(2)),
 ];
 
 /// What one of [`PROVIDED`] is, and how the checker reads it.

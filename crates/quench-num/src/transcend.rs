@@ -21,12 +21,23 @@
 
 use crate::Wide;
 
-/// How much working width to start with beyond a `b64`'s fifty-three bits, and how far to
-/// go before giving up. Nothing has been seen to need the second round, let alone the
+/// The working width to start at, and how far to go before giving up.
+///
+/// A hundred and sixty bits is a hundred more than a `b64` needs, and the slack below is
+/// counted generously against it. That asymmetry is deliberate: a slack that is too small
+/// accepts a rounding that was never settled, and is *wrong*; a slack that is too large
+/// only asks for another round, and is *slow*. So every one of these is an
+/// over-estimate, and the cost of that is a retry that has never been seen to happen. Nothing has been seen to need the second round, let alone the
 /// fourth; the ceiling is there so that a mistake in a series shows up as a panic during
 /// a test rather than as a program that never finishes.
-const START: u64 = 96;
+const START: u64 = 160;
 const CEILING: u64 = 4096;
+
+/// How many units of the working width the answer might be out by, counted with a very
+/// heavy hand. At a hundred and sixty bits this is still an interval of about `2^-136`
+/// relative, which is eighty bits finer than a `b64` can tell apart — so it settles on
+/// the first round essentially always, and when it does the answer is not in doubt.
+const SLACK: i64 = 1 << 24;
 
 /// `e^x`, correctly rounded.
 pub fn exp(x: f64) -> f64 {
@@ -150,7 +161,7 @@ pub fn pow(x: f64, y: f64) -> f64 {
         },
         // Two series and a multiplication between them, so the slack from the first is
         // carried through the second and multiplied by however large the exponent is.
-        12,
+        SLACK,
     );
     if flip { -answer } else { answer }
 }
@@ -344,7 +355,7 @@ pub fn tan(x: f64) -> f64 {
         },
         // A division on top of two series, and near a pole the division magnifies
         // whatever error the cosine had.
-        16,
+        SLACK,
     )
 }
 
@@ -357,7 +368,7 @@ pub fn atan(x: f64) -> f64 {
         return x;
     }
     if x.is_infinite() {
-        let half = certain(|bits| pi(bits).scaled(-1), 3);
+        let half = certain(|bits| pi(bits).scaled(-1), SLACK);
         return if x > 0.0 { half } else { -half };
     }
     certain(|bits| arctan(&Wide::from_f64(x, bits + 32), bits + 32).to_bits_of(bits), 6)
@@ -369,7 +380,7 @@ pub fn atan2(y: f64, x: f64) -> f64 {
     if y.is_nan() || x.is_nan() {
         return f64::NAN;
     }
-    let quarter = |sign: f64| certain(|bits| pi(bits).scaled(-1), 3) * sign;
+    let quarter = |sign: f64| certain(|bits| pi(bits).scaled(-1), SLACK) * sign;
     if y == 0.0 {
         // A nought on top: the answer is nought or half a turn, and which one is the
         // *sign* of the bottom, not its size. Signed zero earns its keep here.
@@ -383,7 +394,7 @@ pub fn atan2(y: f64, x: f64) -> f64 {
         return quarter(if y > 0.0 { 1.0 } else { -1.0 });
     }
     if x.is_infinite() && y.is_infinite() {
-        let eighth = certain(|bits| pi(bits).scaled(-2), 3);
+        let eighth = certain(|bits| pi(bits).scaled(-2), SLACK);
         let turn = if x > 0.0 { eighth } else { eighth * 3.0 };
         return if y > 0.0 { turn } else { -turn };
     }
@@ -391,7 +402,7 @@ pub fn atan2(y: f64, x: f64) -> f64 {
         return quarter(if y > 0.0 { 1.0 } else { -1.0 });
     }
     if x.is_infinite() {
-        let half = certain(|bits| pi(bits), 3);
+        let half = certain(|bits| pi(bits), SLACK);
         return if x > 0.0 {
             if y > 0.0 { 0.0 } else { -0.0 }
         } else if y > 0.0 {
@@ -413,7 +424,7 @@ pub fn atan2(y: f64, x: f64) -> f64 {
                 angle.sub(&pi(work)).to_bits_of(bits)
             }
         },
-        10,
+        SLACK,
     )
 }
 
@@ -562,6 +573,243 @@ fn pi(bits: u64) -> Wide {
     quarter.mul(&Wide::whole(4, work)).to_bits_of(bits)
 }
 
+/// `asin`, correctly rounded. `asin x = atan(x / √(1 − x²))`, which is why it waited for
+/// a square root.
+pub fn asin(x: f64) -> f64 {
+    if x.is_nan() || x.abs() > 1.0 {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return x;
+    }
+    if x.abs() == 1.0 {
+        let quarter = certain(|bits| pi(bits).scaled(-1), SLACK);
+        return if x > 0.0 { quarter } else { -quarter };
+    }
+    certain(
+        |bits| {
+            let work = bits + 32;
+            let t = Wide::from_f64(x, work);
+            let one = Wide::whole(1, work);
+            let root = one.sub(&t.mul(&t)).sqrt();
+            arctan(&t.div(&root), work).to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// `acos`, correctly rounded. A quarter turn less the arcsine.
+pub fn acos(x: f64) -> f64 {
+    if x.is_nan() || x.abs() > 1.0 {
+        return f64::NAN;
+    }
+    if x == 1.0 {
+        return 0.0;
+    }
+    certain(
+        |bits| {
+            let work = bits + 32;
+            let t = Wide::from_f64(x, work);
+            let one = Wide::whole(1, work);
+            let root = one.sub(&t.mul(&t)).sqrt();
+            let angle = if x == -1.0 {
+                pi(work)
+            } else {
+                pi(work).scaled(-1).sub(&arctan(&t.div(&root), work))
+            };
+            angle.to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// `sinh`, `cosh` and `tanh`, correctly rounded.
+///
+/// Written as they are defined, out of `e^x` and `e^-x`. A library cannot do that for a
+/// small `x`, because the two are nearly equal and subtracting them throws the answer
+/// away — but here the working width is chosen after the fact, so the cancellation costs
+/// bits that were never in short supply.
+pub fn sinh(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    certain(|bits| hyperbolic(x, bits, Hyper::Sine), 8)
+}
+
+pub fn cosh(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x.is_infinite() {
+        return f64::INFINITY;
+    }
+    certain(|bits| hyperbolic(x, bits, Hyper::Cosine), 8)
+}
+
+pub fn tanh(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return x;
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { 1.0 } else { -1.0 };
+    }
+    // Past this the two exponentials differ by more than a `b64` can hold apart, and the
+    // answer is one to every bit of it.
+    if x.abs() > 40.0 {
+        return if x > 0.0 { 1.0 } else { -1.0 };
+    }
+    certain(|bits| hyperbolic(x, bits, Hyper::Tangent), 12)
+}
+
+enum Hyper {
+    Sine,
+    Cosine,
+    Tangent,
+}
+
+fn hyperbolic(x: f64, bits: u64, which: Hyper) -> Wide {
+    // The cancellation in `sinh` of a small argument is exactly as many bits as the
+    // argument is small, so the working width is told about it in advance.
+    let below = if x == 0.0 { 0 } else { (-x.abs().log2()).max(0.0) as u64 };
+    let work = bits + below + 40;
+    let up = exp_wide(&Wide::from_f64(x, work), work);
+    let down = Wide::whole(1, work).div(&up);
+    let answer = match which {
+        Hyper::Sine => up.sub(&down).scaled(-1),
+        Hyper::Cosine => up.add(&down).scaled(-1),
+        Hyper::Tangent => up.sub(&down).div(&up.add(&down)),
+    };
+    answer.to_bits_of(bits)
+}
+
+/// `asinh x = ln(x + √(x² + 1))`, correctly rounded.
+pub fn asinh(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    certain(
+        |bits| {
+            let work = bits + 40;
+            let t = Wide::from_f64(x, work);
+            let one = Wide::whole(1, work);
+            ln_wide_of(&t.mul(&t).add(&one).sqrt().add(&t), work).to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// `acosh x = ln(x + √(x² − 1))`, correctly rounded. Below one there is no answer.
+pub fn acosh(x: f64) -> f64 {
+    if x.is_nan() || x < 1.0 {
+        return f64::NAN;
+    }
+    if x == 1.0 {
+        return 0.0;
+    }
+    if x.is_infinite() {
+        return f64::INFINITY;
+    }
+    certain(
+        |bits| {
+            let work = bits + 40;
+            let t = Wide::from_f64(x, work);
+            let one = Wide::whole(1, work);
+            ln_wide_of(&t.mul(&t).sub(&one).sqrt().add(&t), work).to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// `atanh x = ½ ln((1 + x) / (1 − x))`, correctly rounded.
+pub fn atanh(x: f64) -> f64 {
+    if x.is_nan() || x.abs() > 1.0 {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return x;
+    }
+    if x.abs() == 1.0 {
+        return if x > 0.0 { f64::INFINITY } else { f64::NEG_INFINITY };
+    }
+    certain(
+        |bits| {
+            let work = bits + 40;
+            let t = Wide::from_f64(x, work);
+            let one = Wide::whole(1, work);
+            ln_wide_of(&one.add(&t).div(&one.sub(&t)), work).scaled(-1).to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// The cube root, correctly rounded. Negative arguments have one, unlike a square root,
+/// and the sign simply comes off first.
+pub fn cbrt(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    let answer = certain(
+        |bits| {
+            let work = bits + 40;
+            let size = Wide::from_f64(x.abs(), work);
+            // `x^(1/3)` as `e^(ln x / 3)`, which is the definition and needs nothing new.
+            let third = ln_wide_of(&size, work).div(&Wide::whole(3, work));
+            exp_wide(&third, work).to_bits_of(bits)
+        },
+        SLACK,
+    );
+    if x < 0.0 { -answer } else { answer }
+}
+
+/// `√(x² + y²)` without the overflow that squaring would cause in a `b64`, because
+/// nothing here is held in one until the end.
+pub fn hypot(x: f64, y: f64) -> f64 {
+    if x.is_infinite() || y.is_infinite() {
+        return f64::INFINITY;
+    }
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return y.abs();
+    }
+    if y == 0.0 {
+        return x.abs();
+    }
+    certain(
+        |bits| {
+            let work = bits + 40;
+            let (a, b) = (Wide::from_f64(x, work), Wide::from_f64(y, work));
+            a.mul(&a).add(&b.mul(&b)).sqrt().to_bits_of(bits)
+        },
+        SLACK,
+    )
+}
+
+/// `ln` of a value already in the working width, which the ones above need and `ln`
+/// itself does not expose.
+fn ln_wide_of(x: &Wide, bits: u64) -> Wide {
+    let (m, e) = split(x, bits);
+    let one = Wide::whole(1, bits);
+    let t = m.sub(&one).div(&m.add(&one));
+    let square = t.mul(&t);
+    let mut power = t.clone();
+    let mut sum = t;
+    for n in 1..=(bits as i64) {
+        power = power.mul(&square);
+        let term = power.div(&Wide::whole(2 * n + 1, bits));
+        let next = sum.add(&term);
+        if term.is_zero() || next == sum {
+            break;
+        }
+        sum = next;
+    }
+    sum.mul(&Wide::whole(2, bits)).add(&Wide::whole(e, bits).mul(&ln_two(bits)))
+}
+
 // Opened up for `tests/transcendence.rs`, which checks the series against digits
 // somebody else published rather than against another run of the same series.
 pub fn ln_two_for_tests(bits: u64) -> Wide {
@@ -590,4 +838,53 @@ pub fn cos_for_tests(x: f64, bits: u64) -> Wide {
 
 pub fn atan_for_tests(x: f64, bits: u64) -> Wide {
     arctan(&Wide::from_f64(x, bits), bits)
+}
+
+/// Any of them at a width of the caller's choosing, so that a test can work an answer
+/// out far more accurately than a `b64` and then ask which `b64` the truth is nearer.
+/// Test-only, and the one place these are addressed by name rather than by call.
+pub fn at_width(name: &str, x: f64, y: f64, bits: u64) -> Wide {
+    let work = bits + 40;
+    let one = Wide::whole(1, work);
+    let wx = Wide::from_f64(x, work);
+    let answer = match name {
+        "exp" => exp_wide(&wx, work),
+        "ln" => ln_wide_of(&wx, work),
+        "sin" => circular(x, work, false),
+        "cos" => circular(x, work, true),
+        "tan" => circular(x, work, false).div(&circular(x, work, true)),
+        "atan" => arctan(&wx, work),
+        "asin" => arctan(&wx.div(&one.sub(&wx.mul(&wx)).sqrt()), work),
+        "acos" => pi(work).scaled(-1).sub(&arctan(&wx.div(&one.sub(&wx.mul(&wx)).sqrt()), work)),
+        "sinh" => hyperbolic(x, work, Hyper::Sine),
+        "cosh" => hyperbolic(x, work, Hyper::Cosine),
+        "tanh" => hyperbolic(x, work, Hyper::Tangent),
+        "asinh" => ln_wide_of(&wx.mul(&wx).add(&one).sqrt().add(&wx), work),
+        "acosh" => ln_wide_of(&wx.mul(&wx).sub(&one).sqrt().add(&wx), work),
+        "atanh" => ln_wide_of(&one.add(&wx).div(&one.sub(&wx)), work).scaled(-1),
+        "cbrt" => {
+            let size = Wide::from_f64(x.abs(), work);
+            let third = ln_wide_of(&size, work).div(&Wide::whole(3, work));
+            let out = exp_wide(&third, work);
+            if x < 0.0 { out.negated() } else { out }
+        }
+        "hypot" => {
+            let wy = Wide::from_f64(y, work);
+            wx.mul(&wx).add(&wy.mul(&wy)).sqrt()
+        }
+        "pow" => exp_wide(&ln_wide_of(&wx, work).mul(&Wide::from_f64(y, work)), work),
+        "atan2" => {
+            let wy = Wide::from_f64(y, work);
+            let angle = arctan(&wy.div(&wx), work);
+            if x > 0.0 {
+                angle
+            } else if y > 0.0 {
+                angle.add(&pi(work))
+            } else {
+                angle.sub(&pi(work))
+            }
+        }
+        other => panic!("no such function: {other}"),
+    };
+    answer.to_bits_of(bits)
 }

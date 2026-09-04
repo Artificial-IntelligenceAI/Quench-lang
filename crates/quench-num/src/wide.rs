@@ -235,6 +235,38 @@ impl Wide {
         }
     }
 
+    /// The square root, correctly rounded to this value's width.
+    ///
+    /// A square root of a binary float is a square root of a whole number and a halving
+    /// of the exponent, so the whole thing is one integer square root once the exponent
+    /// has been made even. Enough bits are asked for that the root comes out two wider
+    /// than the answer needs, and whatever the root left over becomes the sticky bit —
+    /// so the rounding at the end is the ordinary one and is correct.
+    pub fn sqrt(&self) -> Wide {
+        if self.is_zero() || self.negative {
+            return Wide { negative: self.negative, ..Wide::zero(self.bits) };
+        }
+        let want = (self.bits + 2) * 2;
+        let have = self.mantissa.bits();
+        // Lift by an even number, so that halving the exponent stays whole.
+        let mut lift = want.saturating_sub(have);
+        let mut exponent = self.exponent;
+        if (exponent - lift as i64) % 2 != 0 {
+            lift += 1;
+        }
+        let lifted = self.mantissa.shifted_up(lift);
+        exponent -= lift as i64;
+        let (root, rest) = lifted.sqrt_floor();
+        // A root that did not come out exactly is *above* what is written, and one bit
+        // is all that has to survive of it.
+        let (root, exponent) = if rest {
+            (root.shifted_up(1).add(&Big::from_u64(1)), exponent / 2 - 1)
+        } else {
+            (root, exponent / 2)
+        };
+        Wide::made(false, root, exponent, self.bits)
+    }
+
     pub fn cmp_abs(&self, other: &Wide) -> Ordering {
         if self.is_zero() || other.is_zero() {
             return self.is_zero().cmp(&other.is_zero()).reverse();

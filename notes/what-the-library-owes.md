@@ -115,9 +115,10 @@ answer needs and rounded once, and the rounding is only accepted when every valu
 interval the answer might be in rounds the same way — Ziv's strategy, which makes them
 provably correctly rounded rather than probably. `sin`, `cos`, `tan`, `atan` and `atan2` are built too. Their argument reduction is the
 part a library cannot afford — which quarter-turn `1e300` falls in needs π to a thousand
-bits — and here π is a `Big` asked for as many bits as the argument has exponent. What is
-left of the list is `asin`, `acos` and the hyperbolics, which want a square root in the
-wide float.
+bits — and here π is a `Big` asked for as many bits as the argument has exponent. `asin`, `acos` and the hyperbolics followed once the wide float grew a square root —
+eighteen functions in all, and every one of them checked by asking which `b64` the true
+value is *nearer*, worked out four hundred bits wide so the comparison itself does not
+round.
 
 ## The rest of the list
 

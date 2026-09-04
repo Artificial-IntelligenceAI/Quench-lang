@@ -149,3 +149,75 @@ impl Rng {
         (self.0 >> 11) as f64 / 9_007_199_254_740_992.0
     }
 }
+
+/// Where we and the platform disagree, which `b64` is the true value actually nearer?
+///
+/// This is the whole claim, and it is asked the only way that settles it: work the
+/// answer out four hundred bits wide, then measure the distance to each of the two
+/// candidates *in that width*, so that the comparison itself does not round.
+#[test]
+fn where_we_differ_from_the_platform_the_truth_is_nearer_ours() {
+    fn nearer(truth: &Wide, a: f64, b: f64) -> f64 {
+        let (wa, wb) = (Wide::from_f64(a, truth.bits()), Wide::from_f64(b, truth.bits()));
+        let (da, db) = (truth.sub(&wa).abs(), truth.sub(&wb).abs());
+        if da.cmp_abs(&db) == std::cmp::Ordering::Greater { b } else { a }
+    }
+
+    let cases: [(&str, fn(f64) -> f64, fn(f64) -> f64, f64, f64); 11] = [
+        ("asin", transcend::asin, |x| x.asin(), -1.0, 1.0),
+        ("acos", transcend::acos, |x| x.acos(), -1.0, 1.0),
+        ("sinh", transcend::sinh, |x| x.sinh(), -10.0, 10.0),
+        ("cosh", transcend::cosh, |x| x.cosh(), -10.0, 10.0),
+        ("tanh", transcend::tanh, |x| x.tanh(), -10.0, 10.0),
+        ("asinh", transcend::asinh, |x| x.asinh(), -10.0, 10.0),
+        ("acosh", transcend::acosh, |x| x.acosh(), 1.0, 100.0),
+        ("atanh", transcend::atanh, |x| x.atanh(), -1.0, 1.0),
+        ("cbrt", transcend::cbrt, |x| x.cbrt(), -100.0, 100.0),
+        ("sin", transcend::sin, |x| x.sin(), -100.0, 100.0),
+        ("tan", transcend::tan, |x| x.tan(), -100.0, 100.0),
+    ];
+
+    let mut rng = Rng(0x2026_0904);
+    let mut ever_differed = false;
+    for (name, ours_fn, theirs_fn, low, high) in cases {
+        let mut differed = 0;
+        for _ in 0..500 {
+            let x = low + rng.unit() * (high - low);
+            let (ours, theirs) = (ours_fn(x), theirs_fn(x));
+            if !ours.is_finite() || !theirs.is_finite() || ours.to_bits() == theirs.to_bits() {
+                continue;
+            }
+            differed += 1;
+            let truth = transcend::at_width(name, x, 0.0, 400);
+            assert_eq!(
+                nearer(&truth, ours, theirs).to_bits(),
+                ours.to_bits(),
+                "{name}({x}): ours {ours:e}, platform {theirs:e}"
+            );
+        }
+        if differed > 0 {
+            ever_differed = true;
+        }
+    }
+    assert!(ever_differed, "the platform agreed everywhere, so this checked nothing");
+}
+
+#[test]
+fn the_inverses_undo_what_they_invert() {
+    // A check no table can give: each of these composed with its own inverse is the
+    // identity, everywhere it is defined.
+    let mut rng = Rng(0xC0FFEE);
+    for _ in 0..300 {
+        let u = rng.unit() * 1.8 - 0.9;
+        assert!((transcend::sin(transcend::asin(u)) - u).abs() < 1e-15, "sin asin {u}");
+        assert!((transcend::tanh(transcend::atanh(u)) - u).abs() < 1e-15, "tanh atanh {u}");
+        let m = rng.unit() * 8.0 - 4.0;
+        assert!((transcend::sinh(transcend::asinh(m)) - m).abs() <= m.abs() * 1e-14 + 1e-15, "sinh asinh {m}");
+        assert!((transcend::ln(transcend::exp(m)) - m).abs() <= m.abs() * 1e-14 + 1e-15, "ln exp {m}");
+        let c = transcend::cbrt(m);
+        assert!((c * c * c - m).abs() <= m.abs() * 1e-14, "cbrt cubed {m}");
+        // And the one relation that ties the hyperbolics together.
+        let (s, ch) = (transcend::sinh(m), transcend::cosh(m));
+        assert!((ch * ch - s * s - 1.0).abs() < 1e-9, "cosh^2 - sinh^2 at {m}");
+    }
+}

@@ -2104,10 +2104,11 @@ fn the_maths_takes_floats_of_one_width_and_says_so() {
         assert!(rendered.contains("Error code: E0494"), "{source}\n{rendered}");
     }
 
-    // And a bare word that is none of them lists the ones that are. `sinh` rather than
-    // `sin`, which used to serve here and has since been built.
-    let unknown = report("START { var.immut.b64 ['x'] = [call sinh[*1.0*]]; print.stdout['x']; }");
-    assert!(unknown.contains("there is nothing called `sinh`"), "{unknown}");
+    // And a bare word that is none of them lists the ones that are. This has been
+    // `sin` and then `sinh`, both of which were built out from under it within the
+    // hour, so it is now something with no plans: the error function.
+    let unknown = report("START { var.immut.b64 ['x'] = [call erf[*1.0*]]; print.stdout['x']; }");
+    assert!(unknown.contains("there is nothing called `erf`"), "{unknown}");
     assert!(unknown.contains("`sqrt`"), "{unknown}");
 }
 
@@ -2169,5 +2170,26 @@ START {
 "),
         "0.8414709848078965 0.5403023058681398 1.5574077246549023 \
 0.7853981633974483 0.7853981633974483 -0.8178819121159085",
+    );
+}
+
+#[test]
+fn the_inverse_and_hyperbolic_functions_are_here_too() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['half'] = [*0.5*];
+    var.immut.b64 ['one'] = [*1.0*];
+    var.immut.b64 ['two'] = [*2.0*];
+    print.stdout[call stitch[
+        call asin['half'] str:* * call acos['half'] str:* *
+        call sinh['one'] str:* * call tanh['one'] str:* *
+        call acosh['two'] str:* * call atanh['half'] str:* *
+        call cbrt['two'] str:* * call hypot['one', 'two']
+    ]];
+}
+"),
+        "0.5235987755982989 1.0471975511965979 1.1752011936438014 0.7615941559557649 \
+1.3169578969248168 0.5493061443340549 1.2599210498948732 2.23606797749979",
     );
 }

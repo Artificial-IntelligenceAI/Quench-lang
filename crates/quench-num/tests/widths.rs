@@ -112,3 +112,23 @@ impl Rng {
         sign * ((n >> 11) as f64) / 4_194_304.0
     }
 }
+
+/// A square root wide enough to be exact must land on the same `b64` the hardware does,
+/// because the hardware's is *required* to be correctly rounded and so is this.
+#[test]
+fn square_root_agrees_with_the_hardware() {
+    let mut rng = Rng(0x_5417);
+    for _ in 0..5_000 {
+        let x = rng.modest().abs();
+        let got = Wide::from_f64(x, 200).sqrt().to_f64();
+        assert_eq!(got, x.sqrt(), "sqrt({x})");
+    }
+    for named in [0.0, 1.0, 2.0, 4.0, 0.25, 1e300, 1e-300, f64::MIN_POSITIVE] {
+        assert_eq!(Wide::from_f64(named, 200).sqrt().to_f64(), named.sqrt(), "sqrt({named})");
+    }
+    // And squaring it back lands on the value again where the root was exact.
+    for n in 1..500u32 {
+        let square = f64::from(n * n);
+        assert_eq!(Wide::from_f64(square, 200).sqrt().to_f64(), f64::from(n), "sqrt({square})");
+    }
+}

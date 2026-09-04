@@ -293,10 +293,10 @@ pub fn program_under(
                     let x = rng.pick(&floats);
                     let made = if rng.upto(3) == 0 {
                         let y = rng.pick(&floats);
-                        let which = b.const_i64(rng.upto(2) as i64);
+                        let which = b.const_i64(rng.upto(3) as i64);
                         b.call_host_giving(Host::FloatPower, &[x, y, which], Ty::F64)
                     } else {
-                        let which = b.const_i64(rng.upto(6) as i64);
+                        let which = b.const_i64(rng.upto(15) as i64);
                         b.call_host_giving(Host::FloatSlow, &[x, which], Ty::F64)
                     };
                     floats.push(made);

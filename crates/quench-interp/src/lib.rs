@@ -196,7 +196,16 @@ fn alone_slow(which: i64, x: f64) -> f64 {
         2 => quench_num::transcend::sin(x),
         3 => quench_num::transcend::cos(x),
         4 => quench_num::transcend::tan(x),
-        _ => quench_num::transcend::atan(x),
+        5 => quench_num::transcend::atan(x),
+        6 => quench_num::transcend::asin(x),
+        7 => quench_num::transcend::acos(x),
+        8 => quench_num::transcend::sinh(x),
+        9 => quench_num::transcend::cosh(x),
+        10 => quench_num::transcend::tanh(x),
+        11 => quench_num::transcend::asinh(x),
+        12 => quench_num::transcend::acosh(x),
+        13 => quench_num::transcend::atanh(x),
+        _ => quench_num::transcend::cbrt(x),
     }
 }
 
@@ -699,11 +708,12 @@ fn evaluate(
                 qir::Host::FloatPower => {
                     let a = f64::from_bits(slots[args[0].0 as usize] as u64);
                     let b = f64::from_bits(slots[args[1].0 as usize] as u64);
-                    let answer = if slots[args[2].0 as usize] == 0 {
-                        quench_num::transcend::pow(a, b)
-                    } else {
-                        quench_num::transcend::atan2(a, b)
-                    };
+                    let which = slots[args[2].0 as usize];
+    let answer = match which {
+        0 => quench_num::transcend::pow(a, b),
+        1 => quench_num::transcend::atan2(a, b),
+        _ => quench_num::transcend::hypot(a, b),
+    };
                     return Ok(answer.to_bits() as i64);
                 }
                 qir::Host::TextClusters => {

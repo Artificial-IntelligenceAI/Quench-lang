@@ -173,6 +173,30 @@ impl Big {
         bits != 0 && self.limbs.get(whole).is_some_and(|limb| limb & ((1 << bits) - 1) != 0)
     }
 
+    /// The whole part of the square root, and whether anything was left over.
+    ///
+    /// Newton's, from a guess that is deliberately too big: halving the distance to the
+    /// answer from above converges without ever undershooting, so the loop can stop the
+    /// moment it stops improving rather than needing a bound worked out in advance.
+    pub fn sqrt_floor(&self) -> (Big, bool) {
+        if self.is_zero() || self.negative {
+            return (Big::zero(), false);
+        }
+        let two = Big::from_u64(2);
+        // Two to the half the bit count, rounded up, is above the root and near it.
+        let mut root = Big::from_u64(1).shifted_up(self.bits().div_ceil(2));
+        loop {
+            let (divided, _) = self.div_rem(&root).expect("a root above nought");
+            let (next, _) = root.add(&divided).div_rem(&two).expect("two is not nought");
+            if next.cmp_abs(&root) != Ordering::Less {
+                break;
+            }
+            root = next;
+        }
+        let square = root.mul(&root);
+        (root.clone(), square != *self)
+    }
+
     pub fn cmp_abs(&self, other: &Big) -> Ordering {
         cmp_mag(&self.limbs, &other.limbs)
     }

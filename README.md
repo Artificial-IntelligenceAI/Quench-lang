@@ -265,12 +265,16 @@ Both print the same thing, which is not a coincidence — it is
   at four hundred bits, which settles it past any doubt:
 
   ```text
-  sin    differed on   196 of 5000   ours right   196   platform right     0
-  cos    differed on   190 of 5000   ours right   190   platform right     0
-  tan    differed on  2084 of 5000   ours right  2084   platform right     0
-  atan   differed on   379 of 5000   ours right   379   platform right     0
-  exp    differed on     9 of 5000   ours right     9   platform right     0
+  asin   differed on    98 of 2000   nearer: ours    98, platform     0
+  acos   differed on   262 of 2000   nearer: ours   262, platform     0
+  atanh  differed on   665 of 2000   nearer: ours   665, platform     0
+  cbrt   differed on   153 of 2000   nearer: ours   153, platform     0
+  sin    differed on    78 of 2000   nearer: ours    78, platform     0
+  tan    differed on   872 of 2000   nearer: ours   872, platform     0
   ```
+
+  Eighteen of them altogether: `exp`, `ln`, `pow`, `sin`, `cos`, `tan`, `atan`, `atan2`,
+  `asin`, `acos`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `cbrt`, `hypot`.
 - **`call count['s']` counts characters, and what a character *is* is a setting.**
   `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is **1** under
   `characters = "clusters"` and **7** under `"letters"`, because that emoji is seven
