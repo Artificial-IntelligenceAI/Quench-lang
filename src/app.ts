@@ -356,3 +356,136 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
 });
 
 window.addEventListener("scroll", hideTip, { passive: true });
+
+/* --- Comparing two languages -------------------------------------------- */
+
+/** One thing two languages can disagree about. */
+interface Axis {
+  readonly id: string;
+  readonly label: string;
+}
+
+interface Language {
+  readonly id: string;
+  readonly name: string;
+  /** Keyed by axis id. A missing answer shows as a dash rather than a blank. */
+  readonly on: Readonly<Record<string, string>>;
+}
+
+const AXES: readonly Axis[] = [
+  { id: "reserved", label: "Reserved words" },
+  { id: "names", label: "How a name is written" },
+  { id: "tenths", label: "0.1 + 0.2" },
+  { id: "precedence", label: "Precedence" },
+  { id: "output", label: "Where output goes" },
+  { id: "conversion", label: "Implicit conversion" },
+  { id: "running", label: "How it runs" },
+];
+
+/* Quench's answers are the ones the README already gives. Test and Test2 are
+   placeholders, and say so, so that changing the pickers is visibly doing
+   something before there is a second real language to put here. */
+const LANGUAGES: readonly Language[] = [
+  {
+    id: "quench",
+    name: "Quench",
+    on: {
+      reserved: "None. Every word the language uses is still yours to name something.",
+      names: "Between marks, everywhere — 'a name'. A bare word is never a name.",
+      tenths: "Exactly 0.3 under e, its unbounded exact rationals. Binary floats are there when asked for by name.",
+      precedence: "Only what mathematics settled. Everything programming invented takes brackets.",
+      output: "Said every time: print.stdout[…] or print.stderr[…]. There is no default.",
+      conversion: "None. call stitch[…] is the one conversion, and it is written down.",
+      running: "Compiles once to one artefact; the machine decides how to run it. Two of four ways exist today.",
+    },
+  },
+  {
+    id: "test",
+    name: "Test",
+    on: {
+      reserved: "Placeholder. Test is not a language.",
+      names: "Placeholder. Test is not a language.",
+      tenths: "Placeholder. Test is not a language.",
+      precedence: "Placeholder. Test is not a language.",
+      output: "Placeholder. Test is not a language.",
+      conversion: "Placeholder. Test is not a language.",
+      running: "Placeholder. Test is not a language.",
+    },
+  },
+  {
+    id: "test2",
+    name: "Test2",
+    on: {
+      reserved: "Placeholder the second.",
+      names: "Placeholder the second.",
+      tenths: "Placeholder the second.",
+      precedence: "Placeholder the second.",
+      output: "Placeholder the second.",
+      conversion: "Placeholder the second.",
+      running: "Placeholder the second.",
+    },
+  },
+];
+
+function languageBy(id: string): Language | undefined {
+  return LANGUAGES.find((language) => language.id === id);
+}
+
+function fillPicker(picker: HTMLSelectElement, chosen: string): void {
+  for (const language of LANGUAGES) {
+    const option = document.createElement("option");
+    option.value = language.id;
+    option.textContent = language.name;
+    option.selected = language.id === chosen;
+    picker.appendChild(option);
+  }
+}
+
+function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
+  const first = languageBy(left.value);
+  const second = languageBy(right.value);
+  const body = document.getElementById("compare-body");
+  const leftHead = document.getElementById("left-head");
+  const rightHead = document.getElementById("right-head");
+  if (first === undefined || second === undefined || body === null) {
+    return;
+  }
+
+  if (leftHead !== null) leftHead.textContent = first.name;
+  if (rightHead !== null) rightHead.textContent = second.name;
+
+  body.replaceChildren();
+  for (const axis of AXES) {
+    const row = document.createElement("tr");
+
+    const what = document.createElement("th");
+    what.scope = "row";
+    what.textContent = axis.label;
+    row.appendChild(what);
+
+    for (const language of [first, second]) {
+      const cell = document.createElement("td");
+      cell.textContent = language.on[axis.id] ?? "—";
+      row.appendChild(cell);
+    }
+
+    /* Worth seeing at a glance which rows are the disagreements. */
+    if (first.id !== second.id && first.on[axis.id] === second.on[axis.id]) {
+      row.classList.add("agreed");
+    }
+    body.appendChild(row);
+  }
+}
+
+const leftPick = document.getElementById("left");
+const rightPick = document.getElementById("right");
+if (leftPick instanceof HTMLSelectElement && rightPick instanceof HTMLSelectElement) {
+  fillPicker(leftPick, "quench");
+  fillPicker(rightPick, "test");
+  const again = (): void => {
+    compare(leftPick, rightPick);
+  };
+  leftPick.addEventListener("change", again);
+  rightPick.addEventListener("change", again);
+  again();
+}

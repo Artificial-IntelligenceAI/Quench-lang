@@ -427,3 +427,91 @@ html {
   overscroll-behavior: none;
   background-color: var(--base);
 }
+
+/* --- Code ---------------------------------------------------------------- */
+
+.sheet pre {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--rule);
+  background-color: color-mix(in srgb, var(--base) 60%, transparent);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.sheet pre code { font-family: var(--mono); }
+
+/* What the program printed, rather than the program. */
+.sheet pre.output {
+  background-color: transparent;
+  border-style: dashed;
+  color: var(--ink-dim);
+}
+
+/* --- Picking two languages ---------------------------------------------- */
+
+.versus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 22px;
+}
+
+.versus select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background-color: color-mix(in srgb, var(--base) 55%, transparent);
+  cursor: pointer;
+}
+
+.versus select:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+/* Centred on the pickers rather than sat on their baseline, now that there are
+   no labels above them to push things out of line. */
+.against {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-dim);
+}
+
+.compare { width: 100%; border-collapse: collapse; margin: 0 0 18px; font-size: 14px; }
+
+.compare th, .compare td {
+  text-align: left;
+  vertical-align: top;
+  padding: 11px 14px 11px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.compare thead th {
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.compare tbody th {
+  width: 26%;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+
+.compare td:last-child, .compare th:last-child { padding-right: 0; }
+
+/* Where the two answers are the same, there is nothing to look at. */
+.compare .agreed td { opacity: 0.55; }
+
+.footnote { font-size: 13px; color: var(--ink-dim); }
+
+@media (max-width: 620px) {
+  .compare tbody th { width: auto; }
+  .compare { font-size: 13px; }
+}
