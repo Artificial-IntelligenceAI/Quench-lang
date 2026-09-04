@@ -1,0 +1,154 @@
+{
+  "readFrom": {
+    "commit": "7a7154f",
+    "date": "2026-09-04",
+    "files": [
+      "crates/quench-lex/src/token.rs",
+      "crates/quench-parse/src/lib.rs",
+      "crates/quench-parse/src/ast.rs",
+      "crates/quench-check/src/lib.rs"
+    ]
+  },
+  "reserved": 0,
+  "symbols": 22,
+  "tokenKinds": 28,
+  "words": 54,
+  "confirmed": 54,
+  "missing": [],
+  "categories": [
+    {
+      "id": "statements",
+      "label": "Statements",
+      "count": 10,
+      "words": [
+        "var",
+        "set",
+        "add",
+        "print",
+        "call",
+        "give",
+        "if",
+        "else",
+        "loop",
+        "break"
+      ],
+      "missing": []
+    },
+    {
+      "id": "topLevel",
+      "label": "Top level",
+      "count": 3,
+      "words": [
+        "fn",
+        "const",
+        "START"
+      ],
+      "missing": []
+    },
+    {
+      "id": "chainLinks",
+      "label": "Chain links",
+      "count": 9,
+      "words": [
+        "mut",
+        "immut",
+        "arr",
+        "grow",
+        "temp",
+        "perm",
+        "range",
+        "while",
+        "nothing"
+      ],
+      "missing": []
+    },
+    {
+      "id": "visibility",
+      "label": "Visibility",
+      "count": 3,
+      "words": [
+        "file",
+        "program",
+        "export"
+      ],
+      "missing": []
+    },
+    {
+      "id": "types",
+      "label": "Types",
+      "count": 16,
+      "words": [
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "b16",
+        "b32",
+        "b64",
+        "d32",
+        "d64",
+        "e",
+        "bool",
+        "str"
+      ],
+      "missing": []
+    },
+    {
+      "id": "operators",
+      "label": "Operators",
+      "count": 5,
+      "words": [
+        "x",
+        "mod",
+        "and",
+        "or",
+        "not"
+      ],
+      "missing": []
+    },
+    {
+      "id": "beforeAValue",
+      "label": "Before a value",
+      "count": 2,
+      "words": [
+        "share",
+        "copy"
+      ],
+      "missing": []
+    },
+    {
+      "id": "literals",
+      "label": "Literals",
+      "count": 2,
+      "words": [
+        "true",
+        "false"
+      ],
+      "missing": []
+    },
+    {
+      "id": "streams",
+      "label": "Streams",
+      "count": 2,
+      "words": [
+        "stdout",
+        "stderr"
+      ],
+      "missing": []
+    },
+    {
+      "id": "provided",
+      "label": "Provided",
+      "count": 2,
+      "words": [
+        "count",
+        "stitch"
+      ],
+      "missing": []
+    }
+  ]
+}

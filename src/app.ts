@@ -65,82 +65,80 @@ const stored = remembered(THEME_KEY);
 applyTheme(isTheme(stored) ? stored : "glass");
 
 /* --- The language, counted -------------------------------------------------
-   Every number below is checked against the source on main at load, so nothing
-   here can quietly stop being true while the page keeps saying it. What cannot
-   be confirmed is shown as a dash rather than guessed. */
+   The numbers come from `data/language.json`, written by tools/count-language.py
+   from the compiler's own source. The page used to do this itself, which meant
+   every visitor fetched 226 KB of Rust so that three integers could be printed —
+   about six times the weight of the entire site, on every load.
 
-const RAW = "https://raw.githubusercontent.com/Artificial-IntelligenceAI/Quench-lang/main/crates/";
+   It is no longer worked out while you watch, so it says which commit it was
+   working from instead. A number that has gone stale is then visible rather than
+   quietly wrong, which was the only thing doing it live ever bought. */
 
-const READS = [
-  "quench-lex/src/token.rs",
-  "quench-parse/src/lib.rs",
-  "quench-parse/src/ast.rs",
-  "quench-check/src/lib.rs",
-] as const;
-
-/** The words the language answers to, grouped by where a word means something.
-
-    There is no single list inside the compiler to read — the lexer keeps none by
-    design, and the parser, the tree and the checker each recognise their own — so
-    this is the list, and the page checks it against the source rather than asking
-    to be believed. None of these is reserved: every one of them is still available
-    as a name, because a name wears marks and a bare word does not. */
-const WORDS: Readonly<Record<string, readonly string[]>> = {
-  statements: ["var", "set", "add", "print", "call", "give", "if", "else", "loop", "break"],
-  topLevel: ["fn", "const", "START"],
-  chainLinks: ["mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing"],
-  visibility: ["file", "program", "export"],
-  types: ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-          "b16", "b32", "b64", "d32", "d64", "e", "bool", "str"],
-  operators: ["x", "mod", "and", "or", "not"],
-  beforeAValue: ["share", "copy"],
-  literals: ["true", "false"],
-  streams: ["stdout", "stderr"],
-  provided: ["count", "stitch"],
-};
-
-const EVERY_WORD: readonly string[] = Object.values(WORDS).flat();
+interface Category {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number;
+  readonly words: readonly string[];
+  readonly missing: readonly string[];
+}
 
 interface Counted {
+  readonly readFrom: { readonly commit: string; readonly date: string };
   readonly reserved: number | null;
+  readonly symbols: number | null;
   readonly words: number;
   readonly confirmed: number;
-  readonly symbols: number | null;
+  readonly missing: readonly string[];
+  readonly categories: readonly Category[];
 }
 
-async function source(path: string): Promise<string> {
-  const response = await fetch(RAW + path);
-  if (!response.ok) {
-    throw new Error(`${path} answered ${response.status}`);
+/** Fills the picker from whatever categories the file happens to carry, and shows
+    the one chosen. Nothing about the groups is written down here — add a category
+    to the generator and it appears, with no change to this. */
+function wirePicker(counted: Counted): void {
+  const picker = document.getElementById("category");
+  const total = document.getElementById("category-count");
+  const list = document.getElementById("category-words");
+  if (!(picker instanceof HTMLSelectElement) || total === null || list === null) {
+    return;
   }
-  return response.text();
-}
 
-async function countTheLanguage(): Promise<Counted> {
-  const read = await Promise.all(READS.map(source));
-  const all = read.join("\n");
-  const token = read[0] ?? "";
-
-  /* The zero is checked, not asserted. Should the lexer ever grow a keyword
-     table, this stops saying nought and starts saying nothing at all. */
-  const reservesNone = /reserves no words|reserves none/i.test(token);
-
-  /* A symbol is a token kind whose name in an error message is its own spelling
-     in backticks — which is exactly what separates `[` from "a written value". */
-  const described = [...token.matchAll(/Kind::(\w+)\s*=>\s*"([^"]+)"/g)];
-  const symbols = described.filter(([, , text]) => text?.startsWith("`") === true).length;
-
-  /* Quoted or backticked: most words appear as string literals, but the two
-     streams are only ever named in the tree's documentation. */
-  const confirmed = EVERY_WORD.filter((word) =>
-    new RegExp(`["\`]${word}["\`]`).test(all)).length;
-
-  return {
-    reserved: reservesNone ? 0 : null,
-    words: EVERY_WORD.length,
-    confirmed,
-    symbols: symbols === 0 ? null : symbols,
+  const everything: Category = {
+    id: "everything",
+    label: "Everything",
+    count: counted.words,
+    words: counted.categories.flatMap((category) => [...category.words]),
+    missing: [...counted.missing],
   };
+  const groups = [everything, ...counted.categories];
+
+  picker.replaceChildren();
+  for (const group of groups) {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = group.label;
+    picker.appendChild(option);
+  }
+
+  const draw = (): void => {
+    const chosen = groups.find((group) => group.id === picker.value) ?? everything;
+    total.textContent = chosen.count === 1 ? "1 word" : `${String(chosen.count)} words`;
+    list.replaceChildren();
+    for (const word of chosen.words) {
+      const item = document.createElement("li");
+      const code = document.createElement("code");
+      code.textContent = word;
+      item.appendChild(code);
+      if (chosen.missing.includes(word)) {
+        item.classList.add("gone");
+        item.title = "No longer found in the source";
+      }
+      list.appendChild(item);
+    }
+  };
+
+  picker.addEventListener("change", draw);
+  draw();
 }
 
 function show(id: string, value: number | null): void {
@@ -158,22 +156,31 @@ function say(message: string): void {
 }
 
 /* Only the start page carries the panels. The other pages share this script and
-   have no numbers on them, so they do not go asking for the source. */
+   have no numbers on them, so they do not go asking for the file. */
 if (document.getElementById("reserved") !== null) {
-  void countTheLanguage().then(
-    (counted) => {
-      show("reserved", counted.reserved);
-      show("words", counted.words);
-      show("symbols", counted.symbols);
-      const drift = counted.confirmed === counted.words
-        ? "all of them found in it"
-        : `${counted.words - counted.confirmed} of them no longer in it`;
-      say(`Read from the source on main, just now: ${String(counted.words)} words, ${drift}.`);
-    },
-    (reason: unknown) => {
-      say(`Could not reach the source, so nothing above is claimed: ${String(reason)}`);
-    },
-  );
+  void fetch("data/language.json")
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`answered ${String(response.status)}`);
+      }
+      return response.json() as Promise<Counted>;
+    })
+    .then(
+      (counted) => {
+        show("reserved", counted.reserved);
+        show("words", counted.words);
+        show("symbols", counted.symbols);
+        const drift = counted.missing.length === 0
+          ? "all of them found in it"
+          : `${String(counted.missing.length)} of them no longer in it`;
+        say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
+          + `${counted.readFrom.date}: ${String(counted.words)} words, ${drift}.`);
+        wirePicker(counted);
+      },
+      (reason: unknown) => {
+        say(`Could not read the counts, so nothing above is claimed: ${String(reason)}`);
+      },
+    );
 }
 
 /* --- Copying a number --------------------------------------------------- */
