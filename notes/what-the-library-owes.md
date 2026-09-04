@@ -100,9 +100,9 @@ below.
 [what a float is allowed to do](what-a-float-is-allowed-to-do.md). The same argument
 sorts the whole of a maths library into two piles, and the line is sharp:
 
-**IEEE 754 requires these to be correctly rounded.** Every engine must agree, so they
-cost the oracle nothing: `sqrt`, `fma`, `abs`, `floor`, `ceil`, `round`, `trunc`,
-`copysign`, `remainder`. (`min` and `max` are specified too, but 754-2019 has four of
+**IEEE 754 requires these to be correctly rounded**, and all of them are built: `sqrt`,
+`fma`, `abs`, `floor`, `ceil`, `round`, `trunc`, `copysign`, `min`, `max`, `remainder`.
+Every engine must agree, so they cost the oracle nothing. (`min` and `max` are specified too, but 754-2019 has four of
 them because the 2008 pair handled not-a-number badly, so one has to be picked
 deliberately.)
 

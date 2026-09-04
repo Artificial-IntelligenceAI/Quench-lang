@@ -2028,6 +2028,28 @@ START {
 }
 
 #[test]
+fn remainder_takes_the_nearest_quotient_and_mod_takes_the_near_one() {
+    // The difference from `%`, and from Quench's `mod`: this one takes the quotient to
+    // the *nearest* integer, so what is left is never more than half the divisor and can
+    // come out with the opposite sign to what went in.
+    assert_eq!(
+        said("START {
+    var.immut.b64 ['five'] = [*5.0*];
+    var.immut.b64 ['seven'] = [*7.0*];
+    var.immut.b64 ['two'] = [*2.0*];
+    print.stdout[call stitch[
+        call remainder['five', 'two'] str:* *
+        call remainder['seven', 'two'] str:* *
+        call remainder['five', 'two']
+    ]];
+}
+"),
+        "1.0 -1.0 1.0",
+        "seven over two is four, not three, so one is owed rather than left",
+    );
+}
+
+#[test]
 fn round_breaks_a_tie_to_the_even_one() {
     // IEEE says `roundToIntegralTiesToEven`. Rust's own `f64::round` breaks ties away
     // from zero, so writing this in terms of it would have been quietly wrong in both

@@ -9,11 +9,12 @@
 //! it, so three engines calling three C libraries is three answers. They arrive when
 //! somebody writes them once, here, the way `Exact` and `Decimal` are written once.
 //!
-//! `remainder` is absent for a smaller reason: it is required, but computing it as
-//! `x - y × round(x / y)` is wrong whenever `x / y` overflows or loses precision, and a
-//! correct implementation is repeated subtraction with exponent bookkeeping. A maths
-//! function that is subtly wrong in both engines at once is the one bug this project
-//! cannot see, so it waits for somebody to write it properly.
+//! `remainder` is here now, and it is the odd one: its answer is *exact*, never rounded.
+//! `x - y × n`, where `n` is the integer nearest `x / y` with ties going to the even
+//! one, is representable in the same format as `x` — always, with no rounding anywhere.
+//! Which is why it can be checked rather than believed: `tests/remainders.rs` works the
+//! same answer out in rational arithmetic, where nothing rounds at all, and demands the
+//! two agree.
 
 /// One operation of `sqrt`, `abs`, `floor`, `ceil`, `round` or `trunc`.
 ///
@@ -35,7 +36,7 @@ pub enum Alone {
     Truncate,
 }
 
-/// One operation of `copysign`, `min` or `max`.
+/// One operation of `copysign`, `min`, `max` or `remainder`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Paired {
     /// The magnitude of the first and the sign of the second.
@@ -49,6 +50,15 @@ pub enum Paired {
     Minimum,
     /// `maximumNumber`, the same the other way up.
     Maximum,
+    /// IEEE `remainder`: `x − y × n`, where `n` is the integer nearest `x / y` and a tie
+    /// goes to the even one. Not `%`, which takes `n` toward zero and can give an answer
+    /// as large as `y`; this one is never larger than half of `y`, and can differ from
+    /// `x` in sign.
+    ///
+    /// Exact. There is no rounding in it, which is unusual enough to be worth saying:
+    /// every other float operation here answers with the nearest representable thing,
+    /// and this one answers with the thing.
+    Remainder,
 }
 
 pub fn alone64(op: Alone, x: f64) -> f64 {
@@ -78,6 +88,7 @@ pub fn paired64(op: Paired, a: f64, b: f64) -> f64 {
         Paired::CopySign => a.copysign(b),
         Paired::Minimum => smaller64(a, b),
         Paired::Maximum => larger64(a, b),
+        Paired::Remainder => remainder64(a, b),
     }
 }
 
@@ -86,6 +97,7 @@ pub fn paired32(op: Paired, a: f32, b: f32) -> f32 {
         Paired::CopySign => a.copysign(b),
         Paired::Minimum => smaller32(a, b),
         Paired::Maximum => larger32(a, b),
+        Paired::Remainder => remainder32(a, b),
     }
 }
 
@@ -97,6 +109,54 @@ pub fn fused64(a: f64, b: f64, c: f64) -> f64 {
 
 pub fn fused32(a: f32, b: f32, c: f32) -> f32 {
     a.mul_add(b, c)
+}
+
+/// `x − y × n` with `n` the nearest integer to `x / y`, ties to even.
+///
+/// Built on `%`, which is `fmod` and is itself exact: it takes `n` toward zero, so what
+/// is left is between nought and `y`. Nudging that into the half of `y` either side of
+/// nought is one comparison and one subtraction, and the subtraction is exact because
+/// both sides are within a factor of two of each other -- Sterbenz's lemma, which is the
+/// reason this can be written in floats at all rather than in integers.
+fn remainder64(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() || x.is_infinite() || y == 0.0 {
+        return f64::NAN;
+    }
+    if y.is_infinite() {
+        return x;
+    }
+    let left = x % y;
+    let size = y.abs();
+    let over = left.abs();
+    // `size - over` rather than `2 × over` or `size / 2`: doubling can overflow and
+    // halving can lose a subnormal, and this cannot do either.
+    let rest = size - over;
+    if over > rest || (over == rest && odd_quotient(x, y, left)) {
+        return if left > 0.0 { left - size } else { left + size };
+    }
+    left
+}
+
+fn remainder32(x: f32, y: f32) -> f32 {
+    // Worked out in the wider format and handed back narrow. Exact either way: the
+    // answer is representable in binary32 whenever the operands are, so widening cannot
+    // move it and narrowing cannot round it.
+    remainder64(f64::from(x), f64::from(y)) as f32
+}
+
+/// Whether the `n` that `%` implied was odd, which is what settles a tie.
+///
+/// `(x − left) / y` is that `n` exactly when the division is exact, and it is: `x − left`
+/// is a whole multiple of `y` by construction. What can go wrong is the multiple being
+/// too large to hold, so only the last bit is asked for, by taking the whole thing
+/// modulo two.
+fn odd_quotient(x: f64, y: f64, left: f64) -> bool {
+    let whole = (x - left) / y;
+    // Beyond 2^53 every representable float is even, so a quotient that large is even.
+    if whole.abs() >= 9_007_199_254_740_992.0 {
+        return false;
+    }
+    (whole as i64) % 2 != 0
 }
 
 // Written out rather than deferred to `f64::min`, because Rust's returns the *other*

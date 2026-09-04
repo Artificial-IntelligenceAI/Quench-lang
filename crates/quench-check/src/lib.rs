@@ -246,6 +246,7 @@ pub const PROVIDED: &[(&str, Provides)] = &[
     ("copysign", Provides::Paired(0)),
     ("min", Provides::Paired(1)),
     ("max", Provides::Paired(2)),
+    ("remainder", Provides::Paired(3)),
     ("fma", Provides::Fused),
 ];
 

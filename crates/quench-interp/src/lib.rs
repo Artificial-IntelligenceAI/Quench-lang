@@ -181,10 +181,11 @@ const ALONE: [quench_num::Alone; 6] = [
     quench_num::Alone::Truncate,
 ];
 
-const PAIRED: [quench_num::Paired; 3] = [
+const PAIRED: [quench_num::Paired; 4] = [
     quench_num::Paired::CopySign,
     quench_num::Paired::Minimum,
     quench_num::Paired::Maximum,
+    quench_num::Paired::Remainder,
 ];
 
 /// Which decimal format a digit count names. The lowering only ever writes the two.

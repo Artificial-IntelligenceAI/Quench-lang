@@ -239,12 +239,14 @@ Both print the same thing, which is not a coincidence — it is
   for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
   they cannot round differently.
 - **The maths IEEE 754 requires, and no more.** `sqrt`, `abs`, `floor`, `ceil`,
-  `round`, `trunc`, `copysign`, `min`, `max`, `fma`. The standard *requires* these to be
+  `round`, `trunc`, `copysign`, `min`, `max`, `fma`, `remainder`. The standard *requires* these to be
   correctly rounded, so every engine gives identical bits and there is nothing for the
   oracle to catch. `round` breaks ties to the **even** one — `*2.5*` is `2` and `*3.5*`
   is `4` — because that is `roundToIntegralTiesToEven` and not what most languages'
   `round` does. `min` and `max` are 754-2019's `minimumNumber` and `maximumNumber`: a
-  not-a-number loses to a real number rather than poisoning it.
+  not-a-number loses to a real number rather than poisoning it. `remainder` is the odd
+  one: its answer is **exact**, never rounded, which is why it can be checked against
+  arithmetic that does not round at all rather than trusted.
   **`sin`, `cos`, `log`, `exp`, `pow` and `atan2` are deliberately absent** — IEEE only
   *recommends* correct rounding for those and no library delivers it, so three engines
   calling three C libraries would be three answers. They arrive when somebody writes

@@ -302,7 +302,7 @@ pub fn program_under(
                     }
                     1 => {
                         let y = rng.pick(&floats);
-                        let which = b.const_i64(rng.upto(3) as i64);
+                        let which = b.const_i64(rng.upto(4) as i64);
                         b.call_host_giving(Host::FloatPaired, &[x, y, which, width], float_ty)
                     }
                     _ => {
