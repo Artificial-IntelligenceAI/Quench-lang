@@ -42,6 +42,7 @@ READS = [
     "crates/quench-parse/src/lib.rs",
     "crates/quench-parse/src/ast.rs",
     "crates/quench-check/src/lib.rs",
+    "crates/quench-qir/src/lib.rs",
 ]
 
 # Groups the compiler can be asked for directly. These are not written down here
@@ -53,33 +54,41 @@ READS = [
 # is blind to one being added. `provided` went from 2 to 31 without a word of the
 # old list becoming untrue, and nothing here could have seen it.
 DERIVED = [
-    (
-        "provided", "Provided",
-        "crates/quench-check/src/lib.rs",
-        r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];",
-        r'\("([^"]+)"',
-    ),
-    (
-        "types", "Types",
-        "crates/quench-check/src/lib.rs",
-        r"fn simple\(word: &str\) -> Option<Ty> \{(.*?)\n        \}",
-        r'"([^"]+)"\s*=>\s*Some',
-    ),
+    # (id, label, file, region or None for the whole file, how a name is spelled)
+    ("statements", "Statements", "crates/quench-parse/src/lib.rs",
+     r"pub const STATEMENTS[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
+    ("topLevel", "Top level", "crates/quench-parse/src/lib.rs",
+     r"pub const TOP_LEVEL[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
+    ("visibility", "Visibility", "crates/quench-check/src/lib.rs",
+     r"fn from_word\(word: &str\) -> Option<Visibility> \{(.*?)\n        \}",
+     r'"([^"]+)"\s*=>\s*Some'),
+    ("types", "Types", "crates/quench-check/src/lib.rs",
+     r"fn simple\(word: &str\) -> Option<Ty> \{(.*?)\n        \}",
+     r'"([^"]+)"\s*=>\s*Some'),
+    ("operators", "Operators", "crates/quench-parse/src/lib.rs",
+     r"pub const OPERATORS[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
+    ("beforeAValue", "Before a value", "crates/quench-parse/src/lib.rs",
+     r"pub const BEFORE_A_VALUE[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
+    ("streams", "Streams", "crates/quench-qir/src/lib.rs",
+     None, r'Stream::(?:Out|Err) => "([^"]+)"'),
+    ("provided", "Provided", "crates/quench-check/src/lib.rs",
+     r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];", r'\("([^"]+)"'),
 ]
 
-# Groups with no single place in the compiler to read. The parser, the tree and the
-# checker each recognise their own, so these stay written down — and every word is
-# checked against the source, which catches a removal but cannot catch an addition.
-# If a canonical list ever appears for one of these, it belongs in DERIVED instead.
+# What is left has no single place in the compiler to read, and the language side
+# has declined to invent one — a constant that agrees with nothing is the very
+# thing both of us are trying to stop writing. These keep the weak check: it
+# notices a word leaving the source and is blind to one arriving.
 LISTED = [
-    ("statements", "Statements", ["var", "set", "add", "print", "call", "give", "if", "else", "loop", "break"]),
-    ("topLevel", "Top level", ["fn", "const", "START"]),
+    # Matched in three different readers — the declaration, the loop and the
+    # function signature — none of which could hold the others without lying
+    # about where the word means something.
     ("chainLinks", "Chain links", ["mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing"]),
-    ("visibility", "Visibility", ["file", "program", "export"]),
-    ("operators", "Operators", ["x", "mod", "and", "or", "not"]),
-    ("beforeAValue", "Before a value", ["share", "copy"]),
+    # Continue an `if` rather than beginning anything, so they are in no list of
+    # statements. `else-if` is one word on purpose: chaining and nesting are then
+    # different syntax rather than the same syntax read two ways.
+    ("continuing", "Continuing an if", ["else", "else-if"]),
     ("literals", "Literals", ["true", "false"]),
-    ("streams", "Streams", ["stdout", "stderr"]),
 ]
 
 
@@ -118,11 +127,16 @@ def main() -> int:
 
     for cid, label, path, block, name in DERIVED:
         text = (QUENCH / path).read_text()
-        region = re.search(block, text, re.S)
-        if region is None:
-            print(f"could not find the {cid} list in {path}", file=sys.stderr)
+        if block is not None:
+            region = re.search(block, text, re.S)
+            if region is None:
+                print(f"could not find the {cid} list in {path}", file=sys.stderr)
+                return 1
+            text = region.group(1)
+        words = re.findall(name, text)
+        if not words:
+            print(f"the {cid} list in {path} came out empty", file=sys.stderr)
             return 1
-        words = re.findall(name, region.group(1))
         categories.append({
             "id": cid, "label": label, "count": len(words), "words": words,
             "missing": [], "readFrom": path,
@@ -134,8 +148,8 @@ def main() -> int:
             "missing": [w for w in group if not found(w)], "readFrom": None,
         })
 
-    order = ["statements", "topLevel", "chainLinks", "visibility", "types",
-             "operators", "beforeAValue", "literals", "streams", "provided"]
+    order = ["statements", "topLevel", "chainLinks", "continuing", "visibility",
+             "types", "operators", "beforeAValue", "literals", "streams", "provided"]
     categories.sort(key=lambda c: order.index(c["id"]))
 
     every_word = [w for c in categories for w in c["words"]]
