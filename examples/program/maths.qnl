@@ -1,0 +1,18 @@
+# A file is a module named after itself, so everything here is reached as `'maths'.…`.
+
+# `export` and `program` still cannot be told apart -- that needs a second *program*
+# using this one as a library. `file` finally can: nothing outside this file may name
+# `'halved'`, and until there was a second file there was nowhere for that to be false.
+fn.file.b64 ['halved'] [immut.b64 'x'] {
+    give ['x' / *2.0*];
+}
+
+fn.export.b64 ['sin'] [immut.b64 'x'] {
+    give [call 'halved'['x']];
+}
+
+const.export.i64 ['LIMIT'] = [*10*];
+
+module.export ['exact'] {
+    fn.export.e ['third'] [] { give [e:*1/3*]; }
+}

@@ -54,6 +54,54 @@ pub struct Position {
     pub byte_column: usize,
 }
 
+/// Every file of one program, laid end to end so that one [`Span`] reaches any of them.
+///
+/// A span is a byte range and carries no file, which is what lets it be `Copy` and be
+/// handed around by the hundred. Rather than widen it — every site in the compiler makes
+/// one — the files are concatenated and a span is a range into *that*, so a diagnostic
+/// may point at two files at once and nothing upstream had to learn a second kind of
+/// span.
+pub struct Sources<'a> {
+    /// Each file and the offset it begins at, in order.
+    files: Vec<(usize, &'a SourceFile)>,
+}
+
+impl<'a> Sources<'a> {
+    /// One file, which is what every program was until there could be several.
+    pub fn one(file: &'a SourceFile) -> Sources<'a> {
+        Sources { files: vec![(0, file)] }
+    }
+
+    /// Files in the order they were laid out, each with the offset it begins at.
+    pub fn of(files: Vec<(usize, &'a SourceFile)>) -> Sources<'a> {
+        debug_assert!(!files.is_empty(), "a program is at least one file");
+        debug_assert!(
+            files.windows(2).all(|two| two[0].0 <= two[1].0),
+            "the files are in the order they were laid out"
+        );
+        Sources { files }
+    }
+
+    /// Which file an offset is in — its place in the list, the file, and where the
+    /// offset sits inside it.
+    pub fn at(&self, offset: usize) -> (usize, &'a SourceFile, usize) {
+        let which = self.files.partition_point(|(base, _)| *base <= offset).saturating_sub(1);
+        let (base, file) = self.files[which];
+        (which, file, offset.saturating_sub(base))
+    }
+
+    /// The same, for a whole span. A span never straddles two files: everything that
+    /// makes one takes both ends from one file's tokens.
+    pub fn local(&self, span: Span) -> (usize, &'a SourceFile, Span) {
+        let (which, file, start) = self.at(span.start);
+        (which, file, Span::new(start, start + span.len()))
+    }
+
+    pub fn how_many(&self) -> usize {
+        self.files.len()
+    }
+}
+
 /// One source file, held with an index of where its lines begin.
 pub struct SourceFile {
     path: PathBuf,

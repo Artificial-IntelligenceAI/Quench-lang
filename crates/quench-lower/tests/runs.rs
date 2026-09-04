@@ -2462,10 +2462,11 @@ START {
         out.funcs.iter().map(|f| &f.name).collect::<Vec<_>>()
     );
     let names: Vec<&str> = out.funcs.iter().map(|f| f.name.as_str()).collect();
-    for made in ["echo (str)", "echo (i64)", "echo (b64)"] {
+    // Qualified, because a file is a module too -- `main` here, since nothing named it.
+    for made in ["main.echo (str)", "main.echo (i64)", "main.echo (b64)"] {
         assert!(names.contains(&made), "no copy called `{made}`: {names:?}");
     }
-    assert!(!names.contains(&"echo"), "the pattern itself was kept: {names:?}");
+    assert!(!names.contains(&"main.echo"), "the pattern itself was kept: {names:?}");
 }
 
 #[test]

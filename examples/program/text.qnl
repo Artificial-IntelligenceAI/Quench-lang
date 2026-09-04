@@ -1,0 +1,5 @@
+const.export.str ['MARK'] = [*!*];
+
+fn.export.str ['shout'] [immut.str 'what'] {
+    give ['what' 'MARK'];
+}

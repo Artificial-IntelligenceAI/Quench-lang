@@ -224,6 +224,27 @@ Both print the same thing, which is not a coincidence — it is
   implementation detail of the module around it. A name never reaches further than the
   module around it does, so `'maths'.'trig'.'x'` asks three questions rather than one.
 
+  **A program can be several files**, and `[program] files` in `QNL-Config.toml` says
+  which — the manifest is the authority on what the program *is*, and `import` in a file
+  says which of them *it* uses, so a reader sees where a name came from without leaving
+  the line. A file is a module named after itself, so two files may each hold a `'size'`.
+
+  ```toml
+  [program]
+  files = ["main.qnl", "maths.qnl"]
+  ```
+
+  Then `main.qnl` opens with `import ['maths'];` and reaches into it with
+  `call 'maths'.'sin'[*8.0*]`. There is no block for that here because a file which
+  imports is not a program on its own, and every `quench` block in this file is compiled
+  on its own — the whole thing is [examples/program](examples/program), which the test
+  suite runs both ways and compares.
+
+  That is what finally makes **`file` mean something**: until there could be a second
+  file there was nowhere for it to be false. `program` and `export` still cannot be told
+  apart, and now for a reason one step further out — telling *them* apart wants a second
+  **program** using this one as a library.
+
   A path is **marks, dots, marks** — `call 'maths'.'trig'.'quarter turn'[…]`, and
   `['text'.'MARK']` for a constant in another module — because
   the rule is the one `call` already had: a bare word is Quench's, a marked name is
@@ -520,10 +541,10 @@ Both print the same thing, which is not a coincidence — it is
   want it, because no check can be made honest against a world that changes underneath
   it. `START` returns an `i64` exit status for now.
 - Whether **`mut`** keeps that spelling, given visibility chose words over initials.
-- **How `import` is written, and what a program is.** Modules inside a file are built;
-  reaching across files is not, and it is the bigger half — nothing in the compiler
-  reads more than one file, so a program has no way to say which files it *is*, and
-  that is the only thing that would make `file` and `program` differ.
+- **Whether a library can be something other than source.** An import reads `.qnl`,
+  because a generic is a pattern and its body has to be at the call site. A `.qnlo`
+  artefact cannot carry one, so shipping a compiled library is its own question.
+- **A shorter name for a path.** Something binding `'maths'.'exact'` to a local alias.
 
 ## Types, iteration 1
 

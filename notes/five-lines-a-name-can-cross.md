@@ -1,8 +1,6 @@
 # Five lines a name can cross
 
-**Built, except `import`.** Modules, the five words, nesting and paths all work; what
-does not exist is reaching across *files*, which is the second half and has its own
-section at the bottom. Successor to
+**Built.** Modules, the five words, nesting, paths, and `import` across files. Successor to
 [three lines a name can cross](three-lines-a-name-can-cross.md), whose last section
 said this note would have to exist.
 
@@ -170,21 +168,60 @@ it. Only a *constant* is ever named this way: a variable lives inside a function
 has no module to be in, and a function is reached with `call`, which has a path of its
 own.
 
-## `import` is a different feature, and it is the big one
+## `import`, and what a program is
 
-Three things get called "modules" and only the first is settled here.
+Three things were getting called "modules". Two are built.
 
-- **Grouping inside a file.** This note, and **built**.
-- **Naming across files.** What `import` means, and what was asked for. The syntax is
-  the small part: nothing in the compiler reads more than one file, so a program has no
-  way to say which files it *is*, no resolution across them, and no rule for two files
-  declaring one name. It is also the only thing that makes `file` and `program` differ —
-  they are checked and recorded today against a boundary that does not exist.
-- **A shorter name.** Something that binds `'maths'.'trig'` to a local alias, because
-  writing the path every time is tedious. Sugar, on either of the other two, and not
-  decided.
+**What the program is** comes from `QNL-Config.toml`, not from the source:
 
-### What `import` will run into
+```toml
+[program]
+files = ["main.qnl", "maths.qnl", "text.qnl"]
+```
+
+**What a file uses** comes from the file:
+
+```quench
+import ['maths'];
+
+START {
+    print.stdout[call 'maths'.'sin'[*8.0*] \n];
+}
+```
+
+Two mechanisms deliberately, and the split is the whole of the decision: the manifest is
+the authority on *membership*, and `import` is a use-site record of *where a name came
+from*. The alternative — every file sees every other, which is how Go works inside a
+package — is fewer moving parts and gives up the thing `call` was made mandatory for.
+
+**A file is a module named after itself.** `maths.qnl` is `maths`, so two files may each
+hold a `'size'` and nothing collides, and a module *inside* an imported file is one more
+link: `call 'maths'.'exact'.'third'[]`. Which does mean a module comes from two places, a
+block and a file, exactly as it does in Rust.
+
+The name is the one thing about a module not written where a reader is — it comes from
+the filename — and that is the argument for `import` naming it at the top of every file
+that uses it.
+
+### `file` finally means something
+
+Until there could be a second file there was nowhere for `file` to be false, and the
+three-lines note said so at the time. Now `fn.file.b64 ['halved']` in `maths.qnl` is
+unreachable from `main.qnl`, and that is a real refusal rather than a recorded intention.
+
+`program` and `export` still cannot be told apart, and the reason is the same one moved
+along: telling *them* apart wants a second **program** using this one as a library, and
+there is no such thing yet.
+
+### What is still not built
+
+**A shorter name.** Something binding `'maths'.'exact'` to a local alias, because writing
+the path every time is tedious. Sugar, and not decided.
+
+**A library that is not source.** An import reads `.qnl` and nothing else, for the reason
+below.
+
+### What `import` ran into
 
 An exported **generic** function is a pattern, not a function, and the copies are made
 where it is called — see [a hole is not a name](a-hole-is-not-a-name.md). So an exported
@@ -192,5 +229,19 @@ where it is called — see [a hole is not a name](a-hole-is-not-a-name.md). So a
 signature. Every monomorphising language hits this: C++ puts templates in headers, Rust
 ships MIR inside an rlib.
 
-It decides what an exported library physically *is*, so it wants answering before
-`import` is designed rather than after.
+Which decided what an import reads. Every file of a program is **source**, laid end to
+end and checked as one, so a pattern's body is always there. A `.qnlo` artefact cannot
+carry one — a hole is erased before QIR exists — so importing an artefact is a separate
+question and not this one.
+
+### And what it cost, which was less than expected
+
+A `Span` is a byte range and carries no file, which is what lets it be `Copy` and be
+handed around by the hundred. Widening it would have touched every site in the compiler.
+So the files are **concatenated** and a span is a range into that, with a source map
+turning one back into a file, a line and a column when a diagnostic is rendered. One lex,
+one parse, and every item attributed to a file by where it sits.
+
+Nothing below the checker learned anything. A function arrives at the lowering with a
+longer name — `maths.sin` — and there is no other difference, which is the third time
+that sentence has been true: modules, holes, and now files.

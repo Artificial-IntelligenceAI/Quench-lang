@@ -34,6 +34,12 @@ pub enum Item {
     Func(Func),
     /// `module ['maths'] { … }` — a named box of declarations, which may hold others.
     Module(Module),
+    /// `import ['maths'];` — another file of this program, made nameable here.
+    ///
+    /// The span is the name. Which files a program *is* comes from `[program] files` in
+    /// `QNL-Config.toml`; this says which of them this file uses, so a reader sees where
+    /// a name came from without leaving the file.
+    Import { word: Span, name: Span, span: Span },
 }
 
 /// `module ['maths'] { … }`
@@ -58,6 +64,7 @@ impl Item {
             Item::Const(c) => c.span,
             Item::Func(f) => f.span,
             Item::Module(m) => m.span,
+            Item::Import { span, .. } => *span,
         }
     }
 }

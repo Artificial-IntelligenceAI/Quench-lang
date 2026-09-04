@@ -37,7 +37,19 @@ pub fn lower(source: &str) -> Lowered {
 /// two settings. The choice is made here and written into the IR as an instruction, so
 /// nothing below this has to know a setting existed.
 pub fn lower_under(source: &str, settings: Settings) -> Lowered {
-    let mut checked = quench_check::check(source);
+    lower_across(source, &[quench_check::Part { at: 0, name: "main".to_string() }], settings)
+}
+
+/// The same, for a program of several files laid end to end.
+///
+/// Nothing below the checker learns about files: what comes back is one module of
+/// functions with longer names, exactly as a program of one file always was.
+pub fn lower_across(
+    source: &str,
+    parts: &[quench_check::Part],
+    settings: Settings,
+) -> Lowered {
+    let mut checked = quench_check::check_across(source, parts);
 
     if !checked.has_start() {
         // Not something the parser could report: a file of declarations is a fine thing

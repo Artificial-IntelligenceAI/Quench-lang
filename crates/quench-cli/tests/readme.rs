@@ -90,7 +90,11 @@ fn refused(source: &str) -> Option<String> {
 /// The same, forgiving a name the snippet was never going to declare.
 fn refused_on_shape(source: &str) -> Option<String> {
     let out = quench_lower::lower(source);
-    if out.errors.iter().all(|e| e.code == "E0413") {
+    // A snippet claims a *shape*, so the things a shape cannot carry are forgiven: a
+    // name it never declared (E0413), and a file it never had. `import ['maths'];` is a
+    // true line about a program whose other files are not in the line -- which files a
+    // program has comes from `QNL-Config.toml`, and one snippet is not a program.
+    if out.errors.iter().all(|e| e.code == "E0413" || e.code == "E0516") {
         return None;
     }
     Some(quench_diag::report(&SourceFile::new("src/main.qnl", source), &out.errors))
@@ -185,7 +189,11 @@ fn an_inline_snippet_that_is_a_whole_statement_is_one() {
             continue;
         }
         // A top-level thing stands alone; a statement needs somewhere to stand.
-        let source = if trimmed.starts_with("fn.") || trimmed.starts_with("const.") {
+        let source = if trimmed.starts_with("fn.")
+            || trimmed.starts_with("const.")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("module.")
+        {
             format!("{trimmed}\nSTART {{ }}\n")
         } else {
             format!("START {{\n    {trimmed}\n}}\n")

@@ -165,9 +165,11 @@ Each of these is waiting on something, and the something is named.
 | Sorting, searching, reversing | somebody writing them — they are Quench source now |
 | Maps | two holes at once, hashing, and a decided iteration order |
 | Matrices | somebody writing them |
+| A library that is not source | an artefact that can carry a generic, which QIR cannot |
 | ~~Generics~~ | **built** — `any` and `number`, one hole per function, `(any)` for a length |
-| ~~Modules~~ | **built inside a file** — a block, nesting, five visibility words |
-| The maths behind `import` | `import`, which is reaching across *files* |
+| ~~Modules~~ | **built** — a block, nesting, five visibility words |
+| ~~`import`~~ | **built** — `[program] files` says what a program is, `import` what a file uses |
+| The maths behind `import` | nothing — somebody deciding to move it |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
 

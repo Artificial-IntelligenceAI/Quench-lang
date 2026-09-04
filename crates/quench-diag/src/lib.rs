@@ -28,5 +28,5 @@ pub mod render;
 pub mod source;
 
 pub use diag::{Diagnostic, Label, LabelStyle};
-pub use render::{report, GREETING};
-pub use source::{Position, SourceFile, Span};
+pub use render::{report, report_across, GREETING};
+pub use source::{Position, SourceFile, Sources, Span};

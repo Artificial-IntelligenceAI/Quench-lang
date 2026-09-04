@@ -4,13 +4,13 @@ use quench_conf::{read, Division, Engine, Settings};
 use quench_diag::SourceFile;
 
 fn errors(text: &str) -> String {
-    let (_, errors) = read(text);
+    let errors = read(text).errors;
     quench_diag::report(&SourceFile::new("QNL-Config.toml", text), &errors)
 }
 
 #[test]
 fn a_file_that_says_nothing_leaves_everything_alone() {
-    let (settings, errors) = read("");
+    let quench_conf::Config { settings, errors, .. } = read("");
     assert!(errors.is_empty());
     assert_eq!(settings, Settings::default());
     assert_eq!(settings.division, Division::Truncated, "what every processor does");
@@ -18,7 +18,7 @@ fn a_file_that_says_nothing_leaves_everything_alone() {
 
 #[test]
 fn it_reads_what_it_is_given() {
-    let (settings, errors) =
+    let quench_conf::Config { settings, errors, .. } =
         read("[defaults]\ndivision = \"floored\"\n\n[run]\nengine = \"interpreter\"\n");
     assert!(errors.is_empty());
     assert_eq!(settings.division, Division::Floored);
@@ -27,7 +27,7 @@ fn it_reads_what_it_is_given() {
 
 #[test]
 fn comments_and_blank_lines_are_not_settings() {
-    let (settings, errs) =
+    let quench_conf::Config { settings, errors: errs, .. } =
         read("# how this project divides\n[defaults]\n\ndivision = \"floored\"  # toward -inf\n");
     assert!(errs.is_empty(), "{errs:#?}");
     assert_eq!(settings.division, Division::Floored);
@@ -74,7 +74,7 @@ fn a_line_that_is_neither_says_so() {
 
 #[test]
 fn it_reports_everything_wrong_and_not_the_first_thing() {
-    let (_, errs) = read("[nope]\n[defaults]\ndivision = \"sideways\"\nwobble = \"1\"\n");
+    let errs = read("[nope]\n[defaults]\ndivision = \"sideways\"\nwobble = \"1\"\n").errors;
     let codes: Vec<&str> = errs.iter().map(|e| e.code.as_str()).collect();
     assert_eq!(codes, ["E0701", "E0705", "E0704"], "{errs:#?}");
 }
@@ -89,25 +89,25 @@ fn the_error_points_at_the_line_it_is_about() {
 
 #[test]
 fn logic_says_whether_the_right_side_is_asked() {
-    let (settings, errors) = quench_conf::read("[defaults]\nlogic = \"asks-both\"\n");
+    let quench_conf::Config { settings, errors, .. } = quench_conf::read("[defaults]\nlogic = \"asks-both\"\n");
     assert!(errors.is_empty(), "{errors:#?}");
     assert_eq!(settings.logic, quench_conf::Logic::AsksBoth);
 
-    let (settings, errors) = quench_conf::read("[defaults]\nlogic = \"stops-early\"\n");
+    let quench_conf::Config { settings, errors, .. } = quench_conf::read("[defaults]\nlogic = \"stops-early\"\n");
     assert!(errors.is_empty(), "{errors:#?}");
     assert_eq!(settings.logic, quench_conf::Logic::StopsEarly);
 
     // Stopping early is the default, because it is what makes a guard a guard.
     assert_eq!(quench_conf::Settings::default().logic, quench_conf::Logic::StopsEarly);
 
-    let (_, errors) = quench_conf::read("[defaults]\nlogic = \"lazy\"\n");
+    let errors = quench_conf::read("[defaults]\nlogic = \"lazy\"\n").errors;
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].code, "E0705");
 }
 
 #[test]
 fn no_number_says_what_a_float_does_when_it_has_none() {
-    let (settings, errors) = quench_conf::read("[defaults]\nno-number = \"stops\"\n");
+    let quench_conf::Config { settings, errors, .. } = quench_conf::read("[defaults]\nno-number = \"stops\"\n");
     assert!(errors.is_empty(), "{errors:#?}");
     assert_eq!(settings.no_number, quench_conf::NoNumber::Stops);
 
@@ -115,7 +115,7 @@ fn no_number_says_what_a_float_does_when_it_has_none() {
     // and `not-a-number` are values of that type rather than accidents of it.
     assert_eq!(quench_conf::Settings::default().no_number, quench_conf::NoNumber::CarriesOn);
 
-    let (_, errors) = quench_conf::read("[defaults]\nno-number = \"ieee\"\n");
+    let errors = quench_conf::read("[defaults]\nno-number = \"ieee\"\n").errors;
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].code, "E0705");
 }
@@ -129,18 +129,26 @@ fn every_setting_the_reader_knows_is_a_setting_it_lists() {
     // what the parser actually does.
     for (section, key) in quench_conf::KEYS {
         let text = format!("[{section}]\n{key} = \"an-answer-nobody-offers\"\n");
-        let (_, errors) = quench_conf::read(&text);
+        let errors = quench_conf::read(&text).errors;
         let codes: Vec<&str> = errors.iter().map(|e| e.code.as_str()).collect();
+        // The claim is that the reader *knows* the key -- so it complains about the
+        // value rather than about the key. Which code it uses for a bad value is the
+        // value's business: one of a fixed set is E0705, and `files` takes a list and
+        // says so its own way.
+        assert!(
+            !codes.contains(&"E0704"),
+            "`{key}` in `[{section}]` is listed and the reader does not know it: {codes:?}"
+        );
         assert_eq!(
-            codes,
-            ["E0705"],
-            "`{key}` in `[{section}]` should be a known key with a bad value, and was {codes:?}"
+            codes.len(),
+            1,
+            "`{key}` in `[{section}]` should complain once about the value, and said {codes:?}"
         );
     }
 
     // And the other way: a key that is not in the list is refused, and the refusal names
     // the ones that are.
-    let (_, errors) = quench_conf::read("[defaults]\nwobble = \"yes\"\n");
+    let errors = quench_conf::read("[defaults]\nwobble = \"yes\"\n").errors;
     let rendered = format!("{:?}", errors);
     assert!(rendered.contains("E0704"), "{rendered}");
     for (section, key) in quench_conf::KEYS {
@@ -148,4 +156,28 @@ fn every_setting_the_reader_knows_is_a_setting_it_lists() {
             assert!(rendered.contains(key), "the refusal did not mention `{key}`: {rendered}");
         }
     }
+}
+
+#[test]
+fn a_program_says_which_files_it_is_made_of() {
+    let read = quench_conf::read("[program]\nfiles = [\"main.qnl\", \"maths.qnl\"]\n");
+    assert!(read.errors.is_empty(), "{:#?}", read.errors);
+    assert_eq!(read.files, ["main.qnl", "maths.qnl"]);
+
+    // Empty means the file said nothing, which means the program is the one file it was
+    // given -- so a list written empty is a mistake rather than a way to say that.
+    let none = quench_conf::read("");
+    assert!(none.files.is_empty());
+
+    for wrong in ["files = []", "files = \"main.qnl\"", "files = [main.qnl]", "files = [\"\"]"] {
+        let text = format!("[program]\n{wrong}\n");
+        let codes: Vec<String> =
+            quench_conf::read(&text).errors.iter().map(|e| e.code.clone()).collect();
+        assert_eq!(codes, ["E0706"], "`{wrong}` should be refused: {codes:?}");
+    }
+
+    // And the section is a section now, which the sentence naming them has to know.
+    let unknown = quench_conf::read("[nope]\n").errors;
+    let rendered = quench_diag::report(&SourceFile::new("QNL-Config.toml", "[nope]\n"), &unknown);
+    assert!(rendered.contains("`[program]`"), "{rendered}");
 }

@@ -234,6 +234,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("defaults", "min-max"),
     ("build", "optimise"),
     ("run", "engine"),
+    ("program", "files"),
 ];
 
 /// The keys of one section, written out for a reader.
@@ -252,8 +253,24 @@ fn keys_of(section: &str) -> String {
 
 /// Read a `QNL-Config.toml`, reporting everything wrong with it rather than the first
 /// thing. A setting that is not understood leaves its default in place.
-pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
+/// What `QNL-Config.toml` said.
+///
+/// `files` is kept apart from `settings` deliberately. Every setting is a choice about
+/// what a program *means* or how it is delivered, and the oracle multiplies by the
+/// first kind — see `notes/every-knob-is-a-multiplier.md`. What the program is *made
+/// of* is neither, and putting it in `Settings` would both break that type's `Copy` and
+/// invite it to be counted among the knobs.
+pub struct Config {
+    pub settings: Settings,
+    /// `[program] files`. Empty when the file did not say, which means the program is
+    /// the one file it was given.
+    pub files: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+}
+
+pub fn read(text: &str) -> Config {
     let mut settings = Settings::default();
+    let mut files: Vec<String> = Vec::new();
     let mut errors = Vec::new();
     let mut section = String::new();
     let mut at = 0usize;
@@ -279,11 +296,11 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
 
         if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             let name = name.trim();
-            if !matches!(name, "defaults" | "run" | "build") {
+            if !matches!(name, "defaults" | "run" | "build" | "program") {
                 errors.push(
                     Diagnostic::new("E0701", format!("`[{name}]` is not a section this reads."))
                         .primary(span_of(trimmed), "here")
-                        .rule("the sections are `[defaults]` for what a program means, `[build]` for what gets delivered, and `[run]` for how it runs")
+                        .rule("the sections are `[defaults]` for what a program means, `[build]` for what gets delivered, `[run]` for how it runs, and `[program]` for what the program is made of")
                         .fix("remove it, or move its settings into a section that exists"),
                 );
             }
@@ -349,6 +366,16 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                     &["none", "speed", "speed-and-size"],
                 )),
             },
+            ("program", "files") => match listed_files(value) {
+                Some(named) if !named.is_empty() => files = named,
+                _ => errors.push(
+                    Diagnostic::new("E0706", "`files` is the list of files the program is made of.")
+                        .primary(span_of(value.trim()), "here")
+                        .rule("it is written as a list of quoted names, and there is at least one")
+                        .tip("the order does not matter; a file says what it uses with `import`.")
+                        .fix("`files = [\"main.qnl\", \"maths.qnl\"]`"),
+                ),
+            },
             ("run", "engine") => match value {
                 "dev-jit" => settings.engine = Engine::DevJit,
                 "interpreter" => settings.engine = Engine::Interpreter,
@@ -370,7 +397,26 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
         }
     }
 
-    (settings, errors)
+    Config { settings, files, errors }
+}
+
+/// `["main.qnl", "maths.qnl"]` — the one setting whose value is a list.
+///
+/// Hand-read like the rest of the file, and deliberately strict: a name is between
+/// quotes, and anything else is refused rather than guessed at.
+fn listed_files(value: &str) -> Option<Vec<String>> {
+    let inside = value.trim().strip_prefix('[')?.strip_suffix(']')?;
+    if inside.trim().is_empty() {
+        return Some(Vec::new());
+    }
+    inside
+        .split(',')
+        .map(|part| {
+            let part = part.trim();
+            let name = part.strip_prefix('"')?.strip_suffix('"')?;
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
 }
 
 fn bad_value(span: Span, key: &str, given: &str, allowed: &[&str]) -> Diagnostic {

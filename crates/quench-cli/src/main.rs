@@ -141,6 +141,70 @@ fn counted_words() -> String {
     )
 }
 
+/// Every file of one program, laid end to end.
+struct Program {
+    /// The whole text, with the files in order and a newline between them.
+    whole: String,
+    /// Each file: where it begins in `whole`, the file itself, and its module name.
+    files: Vec<(usize, SourceFile, String)>,
+    parts: Vec<quench_check::Part>,
+}
+
+/// Read every file the program is made of.
+///
+/// `[program] files` says what those are. When it says nothing, the program is the one
+/// file it was given -- which is what every program was until it could be more.
+fn gather(path: &str, listed: &[String]) -> Result<Program, String> {
+    let named: Vec<String> = if listed.is_empty() {
+        vec![path.to_string()]
+    } else {
+        if !listed.iter().any(|file| same_file(file, path)) {
+            return Err(format!(
+                "`{path}` is not one of the files `[program] files` lists.\n\
+                 it lists {}.",
+                listed.join(", ")
+            ));
+        }
+        listed.to_vec()
+    };
+
+    let mut whole = String::new();
+    let mut files = Vec::new();
+    let mut parts = Vec::new();
+    for name in &named {
+        // The module a file gives its declarations is its own name without the ending.
+        // Which is the one thing about a module that is not written where a reader is,
+        // and is why `import` names it at the top of every file that uses it.
+        let stem = std::path::Path::new(name)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_else(|| name.clone());
+        if let Some(other) = parts.iter().find(|part: &&quench_check::Part| part.name == stem) {
+            let _ = other;
+            return Err(format!(
+                "two files of this program are both called `{stem}`.\n\
+                 a file is a module named after itself, so two of a name is two modules of a name."
+            ));
+        }
+        let text = std::fs::read_to_string(name)
+            .map_err(|why| format!("cannot read {name}: {why}"))?;
+        let at = whole.len();
+        whole.push_str(&text);
+        // A newline between, so the last line of one file and the first of the next are
+        // two lines however the file ended.
+        whole.push('\n');
+        files.push((at, SourceFile::new(name, text), stem.clone()));
+        parts.push(quench_check::Part { at, name: stem });
+    }
+    Ok(Program { whole, files, parts })
+}
+
+/// Whether two written paths name the same file, as far as a person meant them to.
+fn same_file(one: &str, other: &str) -> bool {
+    one == other
+        || std::path::Path::new(one).file_name() == std::path::Path::new(other).file_name()
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Asked for on its own, because a word list kept anywhere but here is a second copy
@@ -166,34 +230,36 @@ fn main() -> ExitCode {
         return run_artefact(what, path);
     }
 
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(why) => {
-            eprintln!("cannot read {path}: {why}");
-            return ExitCode::FAILURE;
-        }
-    };
-
     // A `QNL-Config.toml` beside the source decides things the source does not say --
     // how division rounds, most of all -- so it is read before anything is compiled.
-    let (settings, config_errors) = match std::fs::read_to_string("QNL-Config.toml") {
+    // It also says what the program is *made of*, which is why it comes first.
+    let (settings, listed) = match std::fs::read_to_string("QNL-Config.toml") {
         Ok(text) => {
-            let (settings, errors) = quench_conf::read(&text);
-            if !errors.is_empty() {
+            let read = quench_conf::read(&text);
+            if !read.errors.is_empty() {
                 let file = SourceFile::new("QNL-Config.toml", &text);
-                eprint!("{}", quench_diag::report(&file, &errors));
+                eprint!("{}", quench_diag::report(&file, &read.errors));
                 return ExitCode::FAILURE;
             }
-            (settings, errors)
+            (read.settings, read.files)
         }
         Err(_) => (quench_conf::Settings::default(), Vec::new()),
     };
-    let _ = config_errors;
 
-    let lowered = quench_lower::lower_under(&source, settings);
+    let program = match gather(path, &listed) {
+        Ok(program) => program,
+        Err(why) => {
+            eprintln!("{why}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let sources = quench_diag::Sources::of(
+        program.files.iter().map(|(at, file, _)| (*at, file)).collect(),
+    );
+
+    let lowered = quench_lower::lower_across(&program.whole, &program.parts, settings);
     if !lowered.ok() {
-        let file = SourceFile::new(path, &source);
-        eprint!("{}", quench_diag::report(&file, &lowered.errors));
+        eprint!("{}", quench_diag::report_across(&sources, &lowered.errors));
         return ExitCode::FAILURE;
     }
     let Some(module) = lowered.module else { return ExitCode::FAILURE };

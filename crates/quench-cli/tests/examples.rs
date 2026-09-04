@@ -103,3 +103,26 @@ fn the_readme_shows_the_example_it_names() {
         "the README shows one program and `examples/hello.qnl` holds another"
     );
 }
+
+#[test]
+fn the_program_of_several_files_runs_and_says_the_same_thing_both_ways() {
+    // `examples/program` is not one file, so the glob above cannot reach it -- and an
+    // example nothing runs is what this whole file exists to stop. It is run the way a
+    // person would: from its own directory, where its `QNL-Config.toml` is.
+    let at = directory().join("program");
+    assert!(at.join("QNL-Config.toml").exists(), "the multi-file example has gone missing");
+
+    let said = |how: &str| -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_quench"))
+            .args([how, "main.qnl"])
+            .current_dir(&at)
+            .output()
+            .expect("`quench` runs");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).expect("text")
+    };
+
+    let compiled = said("run");
+    assert_eq!(compiled, "4.0\nhi!\n10 !\n1/3\n");
+    assert_eq!(said("walk"), compiled, "the engines printed different things");
+}

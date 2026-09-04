@@ -49,7 +49,7 @@ pub const AFTER_A_BLOCK: &[&str] = &["else-if", "else"];
 pub const BEFORE_A_VALUE: &[&str] = &["not", "share", "copy"];
 
 /// What a file holds at the top.
-pub const TOP_LEVEL: &[&str] = &["fn", "const", "module", "START"];
+pub const TOP_LEVEL: &[&str] = &["fn", "const", "module", "import", "START"];
 
 /// A list of words as a reader should see it.
 pub fn listed(words: &[&str]) -> String {
@@ -239,8 +239,19 @@ impl<'a> Parser<'a> {
             // the same code and gets the same errors.
             "const" => Some(self.var().map(ast::Item::Const)),
             "module" => Some(self.module().map(ast::Item::Module)),
+            "import" => Some(self.import()),
             _ => None,
         }
+    }
+
+    /// `import ['maths'];`
+    fn import(&mut self) -> Option<ast::Item> {
+        let word = self.bump().span;
+        self.expect(Kind::OpenList, "an import")?;
+        let name = self.expect(Kind::Name, "an import")?;
+        self.expect(Kind::CloseList, "an import")?;
+        let end = self.expect(Kind::Semicolon, "an import")?;
+        Some(ast::Item::Import { word, name, span: word.to(end) })
     }
 
     /// `module ['maths'] { … }`

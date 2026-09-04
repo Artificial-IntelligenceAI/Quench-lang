@@ -1,0 +1,15 @@
+# `import` does not decide what the program is -- `[program] files` did that. It says
+# which of those files *this* file uses, so a reader sees where a name came from without
+# leaving the line.
+import ['maths'];
+import ['text'];
+
+START {
+    print.stdout[call 'maths'.'sin'[*8.0*] \n];
+    print.stdout[call 'text'.'shout'[*hi*] \n];
+
+    # A constant crosses a file the same way, and a module inside an imported file is
+    # just one more link.
+    print.stdout['maths'.'LIMIT' str:* * 'text'.'MARK' \n];
+    print.stdout[call 'maths'.'exact'.'third'[] \n];
+}

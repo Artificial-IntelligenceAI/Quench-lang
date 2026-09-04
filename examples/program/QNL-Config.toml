@@ -1,0 +1,4 @@
+# What the program is made of. A file says what it *uses* with `import`; this says what
+# there is to use. See `notes/five-lines-a-name-can-cross.md`.
+[program]
+files = ["main.qnl", "maths.qnl", "text.qnl"]

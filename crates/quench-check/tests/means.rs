@@ -1391,3 +1391,99 @@ START {
     let mixed = errors("module.file ['t'] { const.export.i64 ['S'] = [*7*]; } START { print.stdout['t'.S]; }");
     assert!(mixed.contains("this path is marked in one place and bare in another."), "{mixed}");
 }
+
+/// A program of several files, laid end to end the way the compiler lays them out.
+fn across(files: &[(&str, &str)]) -> (String, Vec<quench_check::Part>) {
+    let mut whole = String::new();
+    let mut parts = Vec::new();
+    for (name, text) in files {
+        parts.push(quench_check::Part { at: whole.len(), name: (*name).to_string() });
+        whole.push_str(text);
+        whole.push('\n');
+    }
+    (whole, parts)
+}
+
+fn spanning(files: &[(&str, &str)]) -> Vec<String> {
+    let (whole, parts) = across(files);
+    quench_check::check_across(&whole, &parts).errors.iter().map(|e| e.message.clone()).collect()
+}
+
+fn crosses(files: &[(&str, &str)]) -> bool {
+    let (whole, parts) = across(files);
+    quench_check::check_across(&whole, &parts).ok()
+}
+
+#[test]
+fn a_name_crosses_a_file_when_the_file_says_it_uses_it() {
+    assert!(crosses(&[
+        ("maths", "fn.export.b64 ['sin'] [immut.b64 'x'] { give ['x']; }"),
+        ("main", "import ['maths'];\nSTART { print.stdout[call 'maths'.'sin'[*1.0*]]; }"),
+    ]));
+
+    // Without the import it does not, and the message says the fix rather than
+    // pretending the name does not exist.
+    let said = spanning(&[
+        ("maths", "fn.export.b64 ['sin'] [immut.b64 'x'] { give ['x']; }"),
+        ("main", "START { print.stdout[call 'maths'.'sin'[*1.0*]]; }"),
+    ]);
+    assert!(
+        said.iter().any(|m| m.contains("`'maths'` is a file of this program, and this file does not import it.")),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn file_finally_means_something() {
+    // Until a program could be more than one file there was nowhere for this to be
+    // false. `program` and `export` still cannot be told apart -- that wants a second
+    // *program* using this one as a library.
+    let said = spanning(&[
+        ("maths", "fn.file.b64 ['hidden'] [immut.b64 'x'] { give ['x']; }"),
+        ("main", "import ['maths'];\nSTART { print.stdout[call 'maths'.'hidden'[*1.0*]]; }"),
+    ]);
+    assert!(said.iter().any(|m| m.contains("says `file`")), "{said:?}");
+
+    for word in ["program", "export"] {
+        assert!(
+            crosses(&[
+                ("maths", &format!("fn.{word}.b64 ['x'] [immut.b64 'n'] {{ give ['n']; }}")),
+                ("main", "import ['maths'];\nSTART { print.stdout[call 'maths'.'x'[*1.0*]]; }"),
+            ]),
+            "`{word}` should cross a file"
+        );
+    }
+}
+
+#[test]
+fn an_import_names_a_file_of_this_program_once_and_is_not_this_file() {
+    let missing = spanning(&[("main", "import ['nope'];\nSTART { print.stdout[str:*x*]; }")]);
+    assert!(missing.iter().any(|m| m.contains("`'nope'` is not a file of this program.")), "{missing:?}");
+
+    let itself = spanning(&[("main", "import ['main'];\nSTART { print.stdout[str:*x*]; }")]);
+    assert!(itself.iter().any(|m| m.contains("`'main'` is this file.")), "{itself:?}");
+
+    let twice = spanning(&[
+        ("maths", "fn.export.i64 ['x'] [] { give [*1*]; }"),
+        ("main", "import ['maths'];\nimport ['maths'];\nSTART { print.stdout[str:*x*]; }"),
+    ]);
+    assert!(twice.iter().any(|m| m.contains("`'maths'` is imported twice.")), "{twice:?}");
+
+    let inside = spanning(&[
+        ("maths", "fn.export.i64 ['x'] [] { give [*1*]; }"),
+        ("main", "module.file ['m'] { import ['maths']; }\nSTART { print.stdout[str:*x*]; }"),
+    ]);
+    assert!(
+        inside.iter().any(|m| m.contains("an `import` belongs to a file, not to a module inside one.")),
+        "{inside:?}"
+    );
+}
+
+#[test]
+fn two_files_may_each_hold_a_name() {
+    assert!(crosses(&[
+        ("a", "fn.export.i64 ['size'] [] { give [*1*]; }"),
+        ("b", "fn.export.i64 ['size'] [] { give [*2*]; }"),
+        ("main", "import ['a'];\nimport ['b'];\nSTART { print.stdout[call 'a'.'size'[] call 'b'.'size'[]]; }"),
+    ]));
+}

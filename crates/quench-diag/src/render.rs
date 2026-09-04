@@ -30,7 +30,7 @@
 //! and the layout below would render an error in any language at all.
 
 use crate::diag::{Diagnostic, LabelStyle};
-use crate::source::SourceFile;
+use crate::source::{SourceFile, Sources};
 use std::fmt::Write as _;
 
 /// The apology, printed once above however many errors follow it.
@@ -39,18 +39,24 @@ pub const GREETING: &str =
 
 /// Render one diagnostic, without the greeting or the count.
 pub fn diagnostic(source: &SourceFile, diag: &Diagnostic) -> String {
+    across(&Sources::one(source), diag)
+}
+
+/// One diagnostic, whose labels may sit in more than one file.
+pub fn across(sources: &Sources, diag: &Diagnostic) -> String {
     let mut out = String::new();
 
     // Where it is, in the two forms: one to read, one to paste.
     if let Some(label) = diag.primary_label() {
-        let at = source.position(label.span.start);
+        let (_, source, local) = sources.local(label.span);
+        let at = source.position(local.start);
         let _ = writeln!(
             out,
             "file: {}, line: {}, column: {} ({})",
             source.path().display(),
             at.line,
             at.column,
-            source.short_location(label.span.start),
+            source.short_location(local.start),
         );
         out.push('\n');
     }
@@ -59,8 +65,9 @@ pub fn diagnostic(source: &SourceFile, diag: &Diagnostic) -> String {
 
     if !diag.labels.is_empty() {
         out.push('\n');
-        if source.has_text() {
-            out.push_str(&snippet(source, diag));
+        let (_, first, _) = sources.local(diag.labels[0].span);
+        if first.has_text() {
+            out.push_str(&snippet(sources, diag));
         } else {
             // The line is known and the line cannot be shown. Say which, rather than
             // printing an empty frame and letting it look like an empty line.
@@ -82,12 +89,17 @@ pub fn diagnostic(source: &SourceFile, diag: &Diagnostic) -> String {
 
 /// Render a whole run: the greeting, every diagnostic, and the count.
 pub fn report(source: &SourceFile, diags: &[Diagnostic]) -> String {
+    report_across(&Sources::one(source), diags)
+}
+
+/// The same, for a program that is more than one file.
+pub fn report_across(sources: &Sources, diags: &[Diagnostic]) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{GREETING}");
 
     for diag in diags {
         out.push('\n');
-        out.push_str(&diagnostic(source, diag));
+        out.push_str(&across(sources, diag));
     }
 
     out.push('\n');
@@ -123,28 +135,44 @@ fn write_field(out: &mut String, label: &str, values: &[String]) {
 /// beneath. The first version printed the line again for every label, which is fine when
 /// they are on different lines and absurd when they are not — an error about two
 /// operators on one line said the same line three times.
-fn snippet(source: &SourceFile, diag: &Diagnostic) -> String {
+fn snippet(sources: &Sources, diag: &Diagnostic) -> String {
     let mut labels: Vec<_> = diag.labels.iter().collect();
     labels.sort_by_key(|l| l.span.start);
 
     // Wide enough for the largest line number, so the gutters line up.
     let widest = labels
         .iter()
-        .map(|l| source.line_of(l.span.start).to_string().len())
+        .map(|l| {
+            let (_, source, local) = sources.local(l.span);
+            source.line_of(local.start).to_string().len()
+        })
         .max()
         .unwrap_or(1);
 
     let mut out = String::new();
-    let mut showing = None;
+    let mut showing: Option<(usize, usize)> = None;
     for label in labels {
-        let line = source.line_of(label.span.start);
-        if showing != Some(line) {
-            let _ =
-                writeln!(out, "{:>widest$} | {}", line, source.line_text(line), widest = widest + 2);
-            showing = Some(line);
+        let (which, source, local) = sources.local(label.span);
+        let line = source.line_of(local.start);
+
+        // A diagnostic may point at two files at once -- something declared in one and
+        // named in another is the whole of what visibility is about -- so the file is
+        // said whenever it changes rather than once at the top.
+        if sources.how_many() > 1 && showing.map(|(file, _)| file) != Some(which) {
+            let _ = writeln!(out, "{:>widest$} | {}", "", source.path().display(), widest = widest + 2);
+        }
+        if showing != Some((which, line)) {
+            let _ = writeln!(
+                out,
+                "{:>widest$} | {}",
+                line,
+                source.line_text(line),
+                widest = widest + 2
+            );
+            showing = Some((which, line));
         }
 
-        let (indent, under) = source.caret_layout(label.span);
+        let (indent, under) = source.caret_layout(local);
         let mark = match label.style {
             LabelStyle::Primary => '^',
             LabelStyle::Secondary => '~',
