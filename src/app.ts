@@ -413,6 +413,19 @@ const LANGUAGES: readonly Language[] = [
       running: "Compiled ahead of time to one native binary with its runtime inside it. Cross-compiling is two environment variables at build time.",
     },
   },
+  {
+    id: "zig",
+    name: "Zig",
+    on: {
+      reserved: "Forty-six — but `@\"…\"` makes any string an identifier, so `@\"if\"` is a name, and so is `@\"a name with spaces\"`. The nearest thing to Quench's marks in a language that also has bare words.",
+      names: "A bare identifier, or `@\"anything at all\"` where the bare form will not do — keywords and spaces included.",
+      tenths: "False, and unlike Go it stays false at compile time: `comptime_float` is binary too. At runtime, `0.30000000000000004`.",
+      precedence: "`&` binds tighter than `==`, so C's trap is fixed. Mixing `and` with `or` needs no parentheses.",
+      output: "`std.debug.print` goes to standard error, and nothing in the name says so. Standard output is a separate and wordier thing.",
+      conversion: "Widening is implicit; narrowing is refused. An `i64` put into an `i32` is `expected type 'i32', found 'i64'` until `@intCast` is written.",
+      running: "Compiled ahead of time to a native binary, with no garbage collector and no runtime to speak of. `comptime` runs code during the compile. Cross-compiling is a first-class feature.",
+    },
+  },
 ];
 
 function languageBy(id: string): Language | undefined {
