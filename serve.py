@@ -5,10 +5,15 @@
 guessing how long a file stays fresh — and a stylesheet edited a second ago is
 served from memory for minutes afterwards. Editing the CSS and seeing the old
 page is not a thing worth debugging twice, so nothing here is cacheable.
+
+Threaded, like the standard library's own command line is. A browser asks for the
+page, the stylesheet and the script at once; a server that answers one at a time
+leaves the rest waiting, and with nothing cached that happens on every single
+load rather than only the first.
 """
 
 import sys
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
 class NoCache(SimpleHTTPRequestHandler):
@@ -22,4 +27,4 @@ class NoCache(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
     print(f"serving this directory on http://localhost:{port} — nothing cached")
-    HTTPServer(("127.0.0.1", port), NoCache).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", port), NoCache).serve_forever()
