@@ -19,7 +19,40 @@
 //! argument bar the ones named in each function below, so the true value is never exactly
 //! a halfway point and enough precision always separates it from one.
 
+use std::cell::RefCell;
+
 use crate::Wide;
+
+thread_local! {
+    /// The constants, kept once per width they are asked for.
+    ///
+    /// Worth saying why this is not premature: `ln 2` and π are each a series of their
+    /// own, and computing one costs about what the function asking for it costs. Before
+    /// this, three quarters of every `exp` was spent working out `ln 2` again, and three
+    /// quarters of every `sin` working out π again — the same answer, to the same width,
+    /// from the same series, thousands of times over.
+    static REMEMBERED: RefCell<Vec<(&'static str, u64, Wide)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A constant at a width, worked out once and kept.
+///
+/// Widths double as Ziv retries, so there are only ever a handful of entries and a walk
+/// through them is faster than anything cleverer would be.
+fn remembered(name: &'static str, bits: u64, make: impl FnOnce() -> Wide) -> Wide {
+    let had = REMEMBERED.with(|kept| {
+        kept.borrow()
+            .iter()
+            .find(|(which, width, _)| *which == name && *width == bits)
+            .map(|(_, _, value)| value.clone())
+    });
+    if let Some(had) = had {
+        return had;
+    }
+    // Made outside the borrow, because working one out can ask for another.
+    let made = make();
+    REMEMBERED.with(|kept| kept.borrow_mut().push((name, bits, made.clone())));
+    made
+}
 
 /// The working width to start at, and how far to go before giving up.
 ///
@@ -296,6 +329,10 @@ fn split(x: &Wide, bits: u64) -> (Wide, i64) {
 /// constant nobody checked, and this one has to be right to however many bits the answer
 /// turns out to need.
 fn ln_two(bits: u64) -> Wide {
+    remembered("ln 2", bits, || ln_two_made(bits))
+}
+
+fn ln_two_made(bits: u64) -> Wide {
     let work = bits + 16;
     let third = Wide::whole(1, work).div(&Wide::whole(3, work));
     let square = third.mul(&third);
@@ -526,7 +563,7 @@ fn arctan(x: &Wide, bits: u64) -> Wide {
     }
 
     let sixteenth = one.div(&Wide::whole(16, bits));
-    let step = atan_series(&sixteenth, bits);
+    let step = remembered("atan 1/16", bits, || atan_series(&sixteenth, bits));
     let mut bites = 0i64;
     while t.cmp_abs(&sixteenth) == std::cmp::Ordering::Greater {
         t = t.sub(&sixteenth).div(&one.add(&sixteenth.mul(&t)));
@@ -563,6 +600,10 @@ fn atan_series(t: &Wide, bits: u64) -> Wide {
 /// many bits the argument turns out to need — which for a sine of a very large number is
 /// a great many.
 fn pi(bits: u64) -> Wide {
+    remembered("pi", bits, || pi_made(bits))
+}
+
+fn pi_made(bits: u64) -> Wide {
     let work = bits + 32;
     let one = Wide::whole(1, work);
     let fifth = one.div(&Wide::whole(5, work));
