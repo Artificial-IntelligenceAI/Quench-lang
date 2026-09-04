@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "edca900",
+    "commit": "5e49df5",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,9 +13,9 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 89,
-  "placesAWordMeansSomething": 90,
-  "confirmed": 89,
+  "words": 90,
+  "placesAWordMeansSomething": 91,
+  "confirmed": 90,
   "missing": [],
   "categories": [
     {
@@ -39,11 +39,12 @@
     {
       "id": "topLevel",
       "label": "Top level",
-      "count": 4,
+      "count": 5,
       "words": [
         "fn",
         "const",
         "module",
+        "import",
         "START"
       ],
       "missing": [],
