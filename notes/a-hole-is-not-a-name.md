@@ -1,7 +1,7 @@
 # A hole is not a name
 
 ```quench
-fn.file.any ['first of'] [immut.arr.any (3) 'xs'] {
+fn.file.any ['first of'] [immut.arr.any (any) 'xs'] {
     give ['xs'[*1*]];
 }
 ```
@@ -34,8 +34,8 @@ checking whether the second describes it.
 Bare, like `arr` and `nothing`, because it is Quench's word and not the writer's:
 
 ```quench
-fn.file.i64 ['first number'] [immut.arr.i64 (3) 'xs'] { give ['xs'[*1*]]; }
-fn.file.any ['first of']     [immut.arr.any (3) 'xs'] { give ['xs'[*1*]]; }
+fn.file.i64 ['first number'] [immut.arr.i64 (3)   'xs'] { give ['xs'[*1*]]; }
+fn.file.any ['first of']     [immut.arr.any (any) 'xs'] { give ['xs'[*1*]]; }
 ```
 
 Nothing invented, nothing to look up, and no fourth kind of bracket in a language that
@@ -121,15 +121,40 @@ does not exist when the call is first seen. Discover every `(pattern, type)` the
 reaches, making copies as it goes and walking each copy for more; then, when they all
 exist, rewrite the calls.
 
-## What is not built
+## A length is a hole too
 
-**An array of unknown length.** A size is part of the type, so `arr.i64 (3)` is not an
-`arr.i64 (grow)`, and a function taking an array must name its length. That was true
-before generics and is not a consequence of them — but it is what stops `largest` from
-being written once for arrays of every size, which is most of what a library would want
-it for. It wants a hole in the *size* position, and it wants its own word, because
-`grow` already means something else: a growing array may be added to, and a function
-handed an array of unknown length must not assume it may.
+A size is part of the type, so an `arr.i64 (3)` was not an `arr.i64 (grow)` and a
+function taking an array had to name its length — which would have made `largest` a
+function per length, and no use to anybody. That was true before holes and is not a
+consequence of them, but it is the wall they walked into.
+
+So the size position gets the same word:
+
+```quench
+fn.file.number ['largest'] [immut.arr.number (any) 'xs'] { … }
+```
+
+One `largest` per element type and **none per length**. It takes an `arr.i64 (3)`, an
+`arr.i64 (5)` and an `arr.i64 (grow)`, because `any` claims to know nothing about the
+length and none of them contradicts it. Nothing goes the other way: a slot declared
+`(3)` may not be handed a length nobody counted.
+
+`any` is deliberately **not** `grow`, and the difference is what each one grants:
+
+| | `grow` | `any` |
+| --- | --- | --- |
+| what it says | there is no number *yet* | the number was never told to me |
+| may be `add`ed to | yes | **no** |
+| may be written as a literal | yes, `[[]]` and then filled | no — one of these arrived |
+| `count` | asked while it runs | asked while it runs |
+
+The `add` row is the whole reason they are two words. An array handed in may be one that
+grows or one that does not, and a function assuming the first would be writing off the
+end of the second.
+
+Only the first size may say it, which is the rule `grow` already followed and for the
+same reason: finding an element is `(i - 1) x stride + j`, a stride is the sizes *under*
+a dimension, and the outermost is the one whose size the arithmetic never asks for.
 
 **Two holes at once.** Maps want a key and a value. That is when a hole needs a name,
 and then the question this note opens with comes back with a better answer than `'T'`.

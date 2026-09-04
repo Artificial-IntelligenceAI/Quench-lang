@@ -68,11 +68,11 @@ pub enum Ty {
     /// makes indexing arithmetic. Two `arr` links are two allocations, with handles in
     /// the outer one.
     ///
-    /// `grows` is the first size having said `grow` rather than a number, and only the
+    /// `length` is what the first size said when it was not a number, and only the
     /// first may: indexing is `(i - 1) x stride + j`, and a stride is the sizes *under*
     /// a dimension. The outermost has nothing above it to be a stride for, so it is the
     /// one dimension whose size the arithmetic never needs.
-    Arr { of: Box<Ty>, shape: Vec<usize>, grows: bool },
+    Arr { of: Box<Ty>, shape: Vec<usize>, length: Length },
 }
 
 impl Ty {
@@ -98,10 +98,10 @@ impl Ty {
             Ty::Arr { .. } => {
                 let (mut links, mut sizes) = (0, Vec::new());
                 let mut walking = self;
-                while let Ty::Arr { of, shape, grows } = walking {
+                while let Ty::Arr { of, shape, length } = walking {
                     links += 1;
-                    if *grows {
-                        sizes.push("grow".to_string());
+                    if let Some(word) = length.word() {
+                        sizes.push(word.to_string());
                     }
                     sizes.extend(shape.iter().map(usize::to_string));
                     walking = of;
@@ -127,13 +127,39 @@ impl Ty {
         }
     }
 
+    /// Whether a value of `found` may be given where this is what was declared.
+    ///
+    /// Equality everywhere but one place. An `arr.i64 (any)` is what an `arr.i64 (3)`
+    /// and an `arr.i64 (grow)` both are, because `any` claims to know nothing about the
+    /// length and neither of them contradicts it. Nothing goes the other way: a slot
+    /// declared `(3)` may not be handed a length nobody counted.
+    pub fn accepts(&self, found: &Ty) -> bool {
+        match (self, found) {
+            (
+                Ty::Arr { of: wanted, shape, length: Length::Unknown },
+                Ty::Arr { of: brought, shape: sizes, length },
+            ) => {
+                // The first size is the one this says it was not told, so it is the one
+                // left out of the comparison -- and it is only *in* `sizes` when the
+                // other side said a number for it.
+                let rest: &[usize] =
+                    if length.known() { sizes.get(1..).unwrap_or(&[]) } else { sizes };
+                shape == rest && wanted.accepts(brought)
+            }
+            (Ty::Arr { of: wanted, shape, length }, Ty::Arr { of: brought, shape: sizes, length: brought_length }) => {
+                length == brought_length && shape == sizes && wanted.accepts(brought)
+            }
+            _ => self == found,
+        }
+    }
+
     /// Whether every allocation in this, from the top down, said how big it is.
     ///
     /// When one did not, nothing can say where one row of the thing above it ends —
     /// which is why such an array can only be written empty and filled afterwards.
     pub fn settled(&self) -> bool {
         match self {
-            Ty::Arr { of, grows, .. } => !grows && of.settled(),
+            Ty::Arr { of, length, .. } => length.known() && of.settled(),
             _ => true,
         }
     }
@@ -205,6 +231,45 @@ impl Visibility {
             "program" => Some(Visibility::Program),
             "export" => Some(Visibility::Export),
             _ => None,
+        }
+    }
+}
+
+/// What the first size of an array says, when it is not a number.
+///
+/// The other sizes are always numbers and always in `shape`, because finding an element
+/// is `(i - 1) x stride + j` and a stride is the sizes *under* a dimension — so the
+/// outermost is the one whose size the arithmetic never asks for, and the only one that
+/// can be left unsaid.
+///
+/// Two ways of not saying it, and they are not the same thing. See
+/// `notes/a-hole-is-not-a-name.md`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Length {
+    /// Every size is a number.
+    Said,
+    /// `grow` — there is no number yet, and this array may be added to.
+    Grows,
+    /// `any` — a length whoever wrote this was not told.
+    ///
+    /// It may be read, indexed and counted, and it may **not** be added to: an array
+    /// handed in may be one that grows or one that does not, and a function that assumed
+    /// the first would be writing off the end of the second.
+    Unknown,
+}
+
+impl Length {
+    /// Whether the number is known here, which is what lets `count` fold to one.
+    pub fn known(self) -> bool {
+        self == Length::Said
+    }
+
+    /// The word written where the number would have been.
+    pub fn word(self) -> Option<&'static str> {
+        match self {
+            Length::Said => None,
+            Length::Grows => Some("grow"),
+            Length::Unknown => Some("any"),
         }
     }
 }
@@ -308,6 +373,26 @@ enum Size {
     Fixed(usize),
     /// The span of the `grow`, for pointing at when it is in the wrong place.
     Grows(Span),
+    /// The span of the `any`, the same way.
+    Unknown(Span),
+}
+
+impl Size {
+    /// The word that stands where a number would, if it is not a number.
+    fn word(self) -> Option<&'static str> {
+        match self {
+            Size::Fixed(_) => None,
+            Size::Grows(_) => Some("grow"),
+            Size::Unknown(_) => Some("any"),
+        }
+    }
+
+    fn at(self) -> Option<Span> {
+        match self {
+            Size::Fixed(_) => None,
+            Size::Grows(at) | Size::Unknown(at) => Some(at),
+        }
+    }
 }
 
 /// Every word that may stand in a declaration's chain, and where each may stand.
@@ -510,12 +595,23 @@ fn boundaries(ty: &Ty) -> Vec<usize> {
     let mut stops = Vec::new();
     let mut at = 0;
     let mut walking = ty;
-    while let Ty::Arr { of, shape, grows } = walking {
-        at += shape.len() + usize::from(*grows);
+    while let Ty::Arr { of, shape, length } = walking {
+        at += shape.len() + usize::from(!length.known());
         stops.push(at);
         walking = of;
     }
     stops
+}
+
+/// Whether any allocation in this says `any` for its length.
+///
+/// Different from [`Ty::settled`], which a `grow` fails too: a growing array is one a
+/// program makes and fills, and an `any` one is only ever one it was handed.
+fn unsaid(ty: &Ty) -> bool {
+    match ty {
+        Ty::Arr { of, length, .. } => *length == Length::Unknown || unsaid(of),
+        _ => false,
+    }
 }
 
 /// The number type at the bottom of this, for saying which one it was.
@@ -1157,19 +1253,21 @@ impl<'a> Checker<'a> {
     /// the sizes *under* a dimension, so the outermost is the one dimension whose size
     /// the arithmetic never asks for — and the only one that can be left unsaid.
     fn one_allocation(&mut self, sizes: &[Size], of: Ty, arr: Span) -> Option<Ty> {
-        let grows = matches!(sizes.first(), Some(Size::Grows(_)));
-        let rest = if grows { &sizes[1..] } else { sizes };
-        if let Some(Size::Grows(at)) =
-            rest.iter().find(|size| matches!(size, Size::Grows(_)))
-        {
-            let at = *at;
+        let length = match sizes.first() {
+            Some(Size::Grows(_)) => Length::Grows,
+            Some(Size::Unknown(_)) => Length::Unknown,
+            _ => Length::Said,
+        };
+        let rest = if length.known() { sizes } else { &sizes[1..] };
+        if let Some(bad) = rest.iter().find(|size| size.word().is_some()) {
+            let (word, at) = (bad.word().expect("just found"), bad.at().expect("just found"));
             self.errors.push(
-                Diagnostic::new("E0480", "only the first size of an allocation can grow.")
+                Diagnostic::new("E0480", format!("only the first size of an allocation can say `{word}`."))
                     .primary(at, "here")
                     .secondary(arr, "this allocation")
                     .rule("finding an element is `(i - 1) x stride + j`, and a stride is the sizes under a dimension — so every size but the outermost has to be known")
                     .tip("`arr.arr.i64 (2 grow)` is two rows that each grow, which is what a growing inner dimension usually means.")
-                    .fix("`grow` first, or a number here"),
+                    .fix(format!("`{word}` first, or a number here")),
             );
             return None;
         }
@@ -1177,10 +1275,10 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|size| match size {
                 Size::Fixed(n) => *n,
-                Size::Grows(_) => unreachable!("just refused above"),
+                _ => unreachable!("just refused above"),
             })
             .collect();
-        Some(Ty::Arr { of: Box::new(of), shape: fixed, grows })
+        Some(Ty::Arr { of: Box::new(of), shape: fixed, length })
     }
 
     /// A written value read as one of the whole-number types.
@@ -1609,11 +1707,19 @@ impl<'a> Checker<'a> {
         }
         let mut sizes = Vec::new();
         for size in shape {
-            // The one size that is not a number: it says there is no number, because
-            // nobody knows one yet.
-            if self.text(*size) == "grow" {
-                sizes.push(Size::Grows(*size));
-                continue;
+            // The two sizes that are not numbers. `grow` says there is no number yet
+            // and this may be added to; `any` says the number was never told to whoever
+            // wrote this, which is a different thing and grants less.
+            match self.text(*size) {
+                "grow" => {
+                    sizes.push(Size::Grows(*size));
+                    continue;
+                }
+                "any" => {
+                    sizes.push(Size::Unknown(*size));
+                    continue;
+                }
+                _ => {}
             }
             match self.text(*size).parse::<usize>() {
                 Ok(0) => {
@@ -1630,8 +1736,8 @@ impl<'a> Checker<'a> {
                     self.errors.push(
                         Diagnostic::new("E0429", format!("`{}` is not a size.", self.text(*size)))
                             .primary(*size, "here")
-                            .rule("a size is a whole number written without marks, or `grow` where there is no number yet")
-                            .fix("write a whole number, or `grow`"),
+                            .rule("a size is a whole number written without marks, or `grow` where there is no number yet, or `any` where the number was never said")
+                            .fix("write a whole number, `grow`, or `any`"),
                     );
                     return None;
                 }
@@ -1653,7 +1759,7 @@ impl<'a> Checker<'a> {
         {
             let built = self.term(term)?;
             let found = self.type_of(&built, value.span)?;
-            if &found != ty {
+            if !ty.accepts(&found) {
                 self.errors.push(
                     Diagnostic::new("E0406", format!("this works out to {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
                         .primary(value.span, format!("{} `{}`", found.article(), found.name()))
@@ -1752,8 +1858,8 @@ impl<'a> Checker<'a> {
         }
 
         // An array: its elements, juxtaposed, flat however many dimensions it has.
-        if let Ty::Arr { of, shape, grows } = ty {
-            return self.array(value, of, shape, *grows, ty_span);
+        if let Ty::Arr { of, shape, length } = ty {
+            return self.array(value, of, shape, *length, ty_span);
         }
 
         // Exactly one thing that is not a written value -- an index, a call, brackets.
@@ -1790,7 +1896,7 @@ impl<'a> Checker<'a> {
                 [one] => {
                     let built = self.term(one)?;
                     let found = self.type_of(&built, one.span())?;
-                    if &found != ty {
+                    if !ty.accepts(&found) {
                         self.errors.push(
                             Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
                                 .primary(one.span(), format!("{} `{}`", found.article(), found.name()))
@@ -2005,9 +2111,25 @@ impl<'a> Checker<'a> {
         value: &ast::Value,
         of: &Ty,
         shape: &[usize],
-        grows: bool,
+        length: Length,
         ty_span: Span,
     ) -> Option<Value> {
+        // A length nobody here knows is a length nobody here can write elements for.
+        // An `(any)` array is one that arrived; `grow` is the word for one that starts
+        // empty and is filled. Asked of what lies under it as well, because `[[]]` on an
+        // `arr.arr.i64 (2 any)` would otherwise make two arrays nothing can ever fill.
+        if length == Length::Unknown || unsaid(of) {
+            self.errors.push(
+                Diagnostic::new("E0510", "an array whose length is `any` is one that arrived, not one written here.")
+                    .primary(value.span, "here")
+                    .secondary(ty_span, "declared `any` here")
+                    .rule("`any` says the number was never said, so nothing here knows how many elements to expect")
+                    .tip("`grow` is the word for an array that starts empty and is filled, and it may be added to.")
+                    .fix("say a number, or `grow`, or name an array that was handed in"),
+            );
+            return None;
+        }
+
         // A group cut out of a longer run is already the elements; only the whole
         // value wears the brackets that say so.
         let cut: Vec<ast::Term>;
@@ -2052,7 +2174,7 @@ impl<'a> Checker<'a> {
                 );
                 return None;
             }
-            let rows = if grows { 0 } else { shape.iter().product::<usize>() };
+            let rows = if length.known() { shape.iter().product::<usize>() } else { 0 };
             let Ty::Arr { of: under, .. } = of else {
                 unreachable!("only an array holds something that is not settled")
             };
@@ -2062,7 +2184,7 @@ impl<'a> Checker<'a> {
 
         // A growing allocation takes however many were written, so long as they fill
         // whole rows of whatever lies under it. A fixed one takes exactly its size.
-        if grows {
+        if !length.known() {
             if all == 0 || written.len() % all != 0 {
                 self.errors.push(
                     Diagnostic::new("E0481", format!(
@@ -2097,7 +2219,7 @@ impl<'a> Checker<'a> {
 
         // An array of arrays is built out of arrays, so the flat run is cut into
         // groups of what one inner allocation holds and each group becomes one.
-        if let Ty::Arr { of: inner, shape: inner_shape, grows: inner_grows } = of {
+        if let Ty::Arr { of: inner, shape: inner_shape, length: inner_length } = of {
             let mut rows = Vec::with_capacity(written.len() / each);
             for group in written.chunks(each) {
                 let piece = ast::Value {
@@ -2108,7 +2230,7 @@ impl<'a> Checker<'a> {
                         .map(|t| t.span().to(group.last().expect("not empty").span()))
                         .unwrap_or(ty_span),
                 };
-                let built = self.array(&piece, inner, inner_shape, *inner_grows, ty_span)?;
+                let built = self.array(&piece, inner, inner_shape, *inner_length, ty_span)?;
                 rows.push(built);
             }
             return Some(Value::Array { of: Box::new(of.clone()), elements: rows });
@@ -2468,18 +2590,19 @@ impl<'a> Checker<'a> {
         let mut levels = Vec::new();
         let mut walking = held.clone();
         let mut spent = 0;
-        while let Ty::Arr { of, shape, grows } = walking {
+        while let Ty::Arr { of, shape, length } = walking {
             if spent == indices.len() {
                 break;
             }
             let mut dimensions = shape.clone();
-            if grows {
-                // The growing one is outermost and takes an index like any other; what
-                // it does not do is take part in a stride.
+            let unsaid = !length.known();
+            if unsaid {
+                // The one whose size was not said is outermost and takes an index like
+                // any other; what it does not do is take part in a stride.
                 dimensions.insert(0, 0);
             }
             spent += dimensions.len();
-            levels.push((dimensions, grows));
+            levels.push((dimensions, unsaid));
             walking = *of;
         }
 
@@ -2690,7 +2813,7 @@ impl<'a> Checker<'a> {
         match self.type_of(&built, one.span)? {
             // Known here when the shape said a number, and asked while it runs when it
             // said `grow`. The first costs nothing and the second costs one call.
-            Ty::Arr { shape, grows: false, .. } => {
+            Ty::Arr { shape, length: Length::Said, .. } => {
                 Some(Value::Number {
                     value: shape.iter().product::<usize>() as i64,
                     bits: 64,
@@ -3249,7 +3372,7 @@ impl<'a> Checker<'a> {
         let Some(ty) = self.type_of(&reached, target.span()) else { return };
         let _ = held;
 
-        let Ty::Arr { of, shape, grows: true } = ty else {
+        let Ty::Arr { of, shape, length: Length::Grows } = ty else {
             self.errors.push(
                 Diagnostic::new("E0482", format!("`{}` does not grow.", ty.name()))
                     .primary(target.span(), format!("{} `{}`", ty.article(), ty.name()))
@@ -3499,7 +3622,7 @@ impl<'a> Checker<'a> {
             match made {
                 Some((made, found)) => {
                     let asked = holes::filled(ty, &fill);
-                    if found != asked {
+                    if !asked.accepts(&found) {
                         self.errors.push(
                             Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), asked.article(), asked.name()))
                                 .primary(value.span, format!("{} `{}`", found.article(), found.name()))

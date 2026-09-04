@@ -173,6 +173,13 @@ Both print the same thing, which is not a coincidence — it is
   little else, `number` gets `+` and `<`, and neither gets `mod` or `^`, because those
   are refused on some numbers.
 
+  **A length is a hole too.** A size is part of the type, so an `arr.i64 (3)` was not an
+  `arr.i64 (grow)` and a function taking an array had to name its length — which would
+  have made `largest` a function per length. `(any)` says the number was never told to
+  whoever wrote this, so one `largest` takes an `arr.i64 (3)`, an `arr.i64 (5)` and an
+  `arr.i64 (grow)` alike. It is deliberately not `grow`: a growing array may be **added
+  to**, and an array that merely arrived may not be assumed to be one.
+
   It **compiles away**. A generic function is a pattern, and the checker writes out one
   real function per type it was used at, so QIR and both engines never learn the word.
   That is forced rather than chosen: a slot is an `i64` whatever is in it, and one copy

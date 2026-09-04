@@ -22,15 +22,24 @@ fn.file.number ['bigger of'] [immut.number 'a', immut.number 'b'] {
     }
 }
 
-# A hole reaches inside an array, and a body may declare one of its own.
-fn.file.number ['largest'] [immut.arr.number (3) 'xs'] {
+# A hole reaches inside an array, and a body may declare one of its own. `(any)` is the
+# other hole: a length whoever wrote this was not told. So there is one `largest` per
+# element type and none per length -- which is what lets it be written once at all.
+fn.file.number ['largest'] [immut.arr.number (any) 'xs'] {
     var.mut.number ['best'] = ['xs'[*1*]];
-    loop.temp.range.i64 ['i'] = [*2*, *3*] {
+    loop.temp.range.i64 ['i'] = [*2*, call count['xs']] {
         if 'xs'['i'] > 'best' {
             set ['best'] = ['xs'['i']];
         }
     }
     give ['best'];
+}
+
+# `any` is not `grow`. A growing array is one a program makes and fills; one whose
+# length is `any` is one that arrived, and this may not assume it grows -- so `add` on
+# it is refused and `count` is asked while the program runs.
+fn.file.i64 ['how many'] [immut.arr.any (any) 'xs'] {
+    give [call count['xs']];
 }
 
 # A function with a hole may call another one. What this asks of `'echo'` is not known
@@ -52,8 +61,11 @@ START {
     print.stdout[call 'bigger of'[i64:*3*, i64:*9*] str:* * call 'bigger of'[b64:*2.5*, b64:*1.5*] \n];
 
     var.immut.arr.i64 (3) ['ns'] = [[*10* *30* *20*]];
-    var.immut.arr.b64 (3) ['fs'] = [[*1.5* *9.25* *0.5*]];
-    print.stdout[call 'largest'[share 'ns'] str:* * call 'largest'[share 'fs'] \n];
+    var.immut.arr.i64 (5) ['more'] = [[*1* *2* *99* *4* *5*]];
+    var.immut.arr.b64 (2) ['fs'] = [[*1.5* *9.25*]];
+    var.immut.arr.str (2) ['ws'] = [[*alpha* *beta*]];
+    print.stdout[call 'largest'[share 'ns'] str:* * call 'largest'[share 'more'] str:* * call 'largest'[share 'fs'] \n];
+    print.stdout[call 'how many'[share 'ws'] str:* * call 'how many'[share 'more'] \n];
 
     print.stdout[call 'twice through'[str:*through*] str:* * call 'twice through'[i64:*7*] \n];
 }

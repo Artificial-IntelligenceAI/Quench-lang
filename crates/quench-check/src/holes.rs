@@ -57,10 +57,10 @@ pub(crate) fn solve(wanted: &Ty, found: &Ty) -> Option<Ty> {
 pub(crate) fn filled(wanted: &Ty, with: &Ty) -> Ty {
     match wanted {
         Ty::Hole(_) => with.clone(),
-        Ty::Arr { of, shape, grows } => Ty::Arr {
+        Ty::Arr { of, shape, length } => Ty::Arr {
             of: Box::new(filled(of, with)),
             shape: shape.clone(),
-            grows: *grows,
+            length: *length,
         },
         settled => settled.clone(),
     }

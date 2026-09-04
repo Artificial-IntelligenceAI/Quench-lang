@@ -162,10 +162,10 @@ Each of these is waiting on something, and the something is named.
 | ~~The IEEE-recommended maths~~ | **built** |
 | Input: stdin, arguments | nothing — a check comes first |
 | Input and output: files | a check that cannot race the world |
-| Sorting, searching, reversing | an array whose length the type does not fix |
+| Sorting, searching, reversing | modules, and somebody writing them |
 | Maps | two holes at once, hashing, and a decided iteration order |
 | Matrices | modules |
-| ~~Generics~~ | **built** — `any` and `number`, one hole per function |
+| ~~Generics~~ | **built** — `any` and `number`, one hole per function, `(any)` for a length |
 | The maths behind `import` | modules |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
@@ -193,9 +193,9 @@ outside, anything the machine does that Quench cannot express. Number formatting
 `sqrt`, opening a file, the bytes of a string.
 
 Not: sorting, searching, reversing, minimum of an array, most of what a person means by
-"the standard library". Those are Quench source now that there are holes — once modules
-exist, and once an array can be taken without its length — and they cost nothing per
-engine forever after.
+"the standard library". Those are Quench source now that there are holes and an array
+can be taken without its length — once modules exist — and they cost nothing per engine
+forever after.
 
 Which was an argument for building **generics and modules before the bulk of the
 library**, and half of it is done, rather than writing forty host calls that did not have to be host calls.

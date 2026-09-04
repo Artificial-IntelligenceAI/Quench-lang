@@ -866,7 +866,7 @@ fn a_size_may_say_grow_and_only_the_first_may() {
     // Finding an element is `(i - 1) x stride + j`, and a stride is the sizes under a
     // dimension -- so the outermost is the only one whose size is never asked for.
     let rendered = errors("START { var.mut.arr.i64 (3 grow) ['xs'] = [[*1*]]; }");
-    assert!(rendered.contains("only the first size of an allocation can grow."), "{rendered}");
+    assert!(rendered.contains("only the first size of an allocation can say `grow`."), "{rendered}");
     assert!(rendered.contains("Error code: E0480"), "{rendered}");
 }
 
@@ -1208,4 +1208,54 @@ fn the_hole_words_are_words_the_language_lists() {
             "`{word}` is a hole word and `quench words` has never heard of it"
         );
     }
+}
+
+#[test]
+fn a_length_left_unsaid_is_one_that_arrived() {
+    // `grow` and `any` are both "not a number", and they grant opposite things. An
+    // array that grows is one a program makes and fills; one whose length is `any` is
+    // one it was handed, and it may not assume the thing it was handed grows.
+    let added = errors(
+        "fn.file.i64 ['f'] [mut.arr.i64 (any) 'xs'] { add ['xs'] = [*1*]; give [*0*]; } START { print.stdout[str:*x*]; }",
+    );
+    assert!(added.contains("does not grow."), "{added}");
+
+    let written = errors("START { var.immut.arr.i64 (any) ['xs'] = [[*1* *2*]]; print.stdout['xs']; }");
+    assert!(written.contains("is one that arrived, not one written here."), "{written}");
+    assert!(written.contains("Error code: E0510"), "{written}");
+
+    // And at any depth, or `[[]]` would make two arrays nothing could ever fill.
+    let nested = errors("START { var.mut.arr.arr.i64 (2 any) ['m'] = [[]]; print.stdout['m']; }");
+    assert!(nested.contains("Error code: E0510"), "{nested}");
+
+    // Only the first size, the same rule `grow` follows and for the same reason.
+    let inner = errors("START { var.immut.arr.i64 (2 any) ['m'] = [[*1* *2*]]; print.stdout['m']; }");
+    assert!(inner.contains("only the first size of an allocation can say `any`."), "{inner}");
+    assert!(inner.contains("Error code: E0480"), "{inner}");
+}
+
+#[test]
+fn an_unsaid_length_is_accepted_from_and_not_given_to() {
+    // An `arr.i64 (3)` is an `arr.i64 (any)`, because `any` claims to know nothing and
+    // a length of three does not contradict that. Nothing goes the other way.
+    let taking = check(
+        "\
+fn.file.i64 ['first of'] [immut.arr.i64 (any) 'xs'] { give ['xs'[*1*]]; }
+START {
+    var.immut.arr.i64 (3) ['ns'] = [[*1* *2* *3*]];
+    var.mut.arr.i64 (grow) ['gs'] = [[*4*]];
+    print.stdout[call 'first of'[share 'ns'] call 'first of'[share 'gs']];
+}
+",
+    );
+    assert!(taking.ok());
+
+    let giving = errors(
+        "\
+fn.file.i64 ['fixed'] [immut.arr.i64 (3) 'xs'] { give ['xs'[*1*]]; }
+fn.file.i64 ['loose'] [immut.arr.i64 (any) 'ys'] { give [call 'fixed'[share 'ys']]; }
+START { print.stdout[str:*x*]; }
+",
+    );
+    assert!(giving.contains("`arr.i64 (any)`, and it is being given to an `arr.i64 (3)`"), "{giving}");
 }

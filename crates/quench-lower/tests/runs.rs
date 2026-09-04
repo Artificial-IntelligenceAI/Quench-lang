@@ -2467,3 +2467,39 @@ START {
     }
     assert!(!names.contains(&"echo"), "the pattern itself was kept: {names:?}");
 }
+
+#[test]
+fn a_length_may_be_left_unsaid_and_then_one_function_serves_every_array() {
+    // `(any)` is the other half of what a library wants: `largest` written once, for
+    // arrays of every element type *and* every length. Two copies exist by the time
+    // this runs -- one per element type -- and neither knows a length.
+    let source = "\
+fn.file.number ['largest'] [immut.arr.number (any) 'xs'] {
+    var.mut.number ['best'] = ['xs'[*1*]];
+    loop.temp.range.i64 ['i'] = [*2*, call count['xs']] {
+        if 'xs'['i'] > 'best' {
+            set ['best'] = ['xs'['i']];
+        }
+    }
+    give ['best'];
+}
+
+fn.file.i64 ['how many'] [immut.arr.any (any) 'xs'] {
+    give [call count['xs']];
+}
+
+START {
+    var.immut.arr.i64 (3) ['three'] = [[*10* *30* *20*]];
+    var.immut.arr.i64 (5) ['five'] = [[*1* *2* *99* *4* *5*]];
+    var.immut.arr.b64 (2) ['fs'] = [[*1.5* *9.25*]];
+    var.mut.arr.i64 (grow) ['growing'] = [[*7* *8*]];
+    add ['growing'] = [*400*];
+    var.immut.arr.str (2) ['ws'] = [[*alpha* *beta*]];
+
+    print.stdout[call 'largest'[share 'three'] str:* * call 'largest'[share 'five'] \\n];
+    print.stdout[call 'largest'[share 'fs'] str:* * call 'largest'[share 'growing'] \\n];
+    print.stdout[call 'how many'[share 'ws'] str:* * call 'how many'[share 'five'] \\n];
+}
+";
+    assert_eq!(said(source), "30 99\n9.25 400\n2 5\n");
+}
