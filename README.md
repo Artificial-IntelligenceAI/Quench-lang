@@ -201,8 +201,10 @@ Both print the same thing, which is not a coincidence — it is
   standard fully specifies — so every engine gives the same bits. What would break that
   is what a compiler does only when asked: fusing a multiply into an add, keeping extra
   precision, flushing denormals. **Fast-math is not a setting and will not become one.**
-  `^` and `mod` are refused, because no standard requires a `pow` to round the same way
-  twice. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
+  `^` works on a `b64` and is worked out here rather than asked of a library; `mod` is
+  refused, because a float division answers with the nearest float and leaves nothing
+  behind to ask about — `call remainder['a', 'b']` is the question IEEE defines for
+  floats, and its answer is exact. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
   or stops. A `b16` is **carried in a `b32`** — no machine Quench targets has a half —
   and gives binary16's own answers anyway, because one wider operation rounded once to
   binary16 *is* the correctly-rounded binary16 answer when the carrier has `2p + 2`
@@ -279,8 +281,10 @@ Both print the same thing, which is not a coincidence — it is
   tan    differed on   872 of 2000   nearer: ours   872, platform     0
   ```
 
-  Eighteen of them altogether: `exp`, `ln`, `pow`, `sin`, `cos`, `tan`, `atan`, `atan2`,
+  Seventeen of them altogether: `exp`, `ln`, `sin`, `cos`, `tan`, `atan`, `atan2`,
   `asin`, `acos`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `cbrt`, `hypot`.
+  **A power is not among them, because `^` already is one** — it works on `i64`, on `e`
+  and on `b64`, and a second name for it would be a second spelling of an operator.
 - **`call count['s']` counts characters, and what a character *is* is a setting.**
   `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is **1** under
   `characters = "clusters"` and **7** under `"letters"`, because that emoji is seven

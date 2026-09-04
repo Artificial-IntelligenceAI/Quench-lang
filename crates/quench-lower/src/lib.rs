@@ -1042,6 +1042,13 @@ fn emit(
                     b.call_host_giving(qir::Host::ToB16, &[v], ty)
                 };
                 return match op {
+                    // Worked out at whatever width the answer needs and rounded once,
+                    // which is the same thing `call exp[…]` and the rest do. `b64` only,
+                    // and the checker has already refused the narrower two.
+                    OpKind::Pow => {
+                        let which = b.const_i64(0);
+                        b.call_host_giving(qir::Host::FloatPower, &[l, r, which], qir::Ty::F64)
+                    }
                     OpKind::Add if stops => { let v = b.bin(qir::BinOp::FAddChecked, l, r); narrow(b, v) }
                     OpKind::Sub if stops => { let v = b.bin(qir::BinOp::FSubChecked, l, r); narrow(b, v) }
                     OpKind::Mul if stops => { let v = b.bin(qir::BinOp::FMulChecked, l, r); narrow(b, v) }

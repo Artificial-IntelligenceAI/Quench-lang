@@ -288,7 +288,6 @@ pub const PROVIDED: &[(&str, Provides)] = &[
     ("acosh", Provides::Slow(12)),
     ("atanh", Provides::Slow(13)),
     ("cbrt", Provides::Slow(14)),
-    ("pow", Provides::Power(0)),
     ("atan2", Provides::Power(1)),
     ("hypot", Provides::Power(2)),
 ];
@@ -2718,18 +2717,44 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
-                // `^` on a float is `pow`, which no standard requires to be rounded
-                // the same way twice — so it is one of the two things a differential
-                // oracle actually has to worry about, and it waits for the answer.
+                // `^` on a `b64` is worked out here rather than asked of a library —
+                // see `Provides::Power`. On the narrower two it is not, because working
+                // the answer out for a `b64` and rounding that down rounds twice.
+                if matches!(l, Ty::F32 | Ty::F16) && *op == OpKind::Pow {
+                    self.errors.push(
+                        Diagnostic::new("E0495", format!("`^` on a `{}` is not built yet.", l.name()))
+                            .primary(span, "here")
+                            .rule("IEEE 754 only recommends how a power rounds, so Quench works it out itself rather than asking a library — and it does that at one width")
+                            .tip("working it out for a `b64` and rounding that down would round twice, which is once too many.")
+                            .fix("use a `b64`"),
+                    );
+                    return None;
+                }
+
+                // A remainder is what a division left over, and a float division leaves
+                // nothing: it answers with the nearest float and there is no remainder
+                // to ask about. `call remainder['a', 'b']` is the question IEEE defines.
                 if matches!(l, Ty::F64 | Ty::F32 | Ty::F16 | Ty::Decimal { .. })
-                    && matches!(op, OpKind::Pow | OpKind::Mod)
+                    && *op == OpKind::Mod
                 {
                     self.errors.push(
-                        Diagnostic::new("E0488", format!("`{}` on a `{}` is not built yet.", op.written(), l.name()))
+                        Diagnostic::new("E0488", format!("`mod` asks what a division left over, and a `{}` division leaves nothing.", l.name()))
                             .primary(span, "here")
-                            .rule("`+`, `-`, `x`, `/` and the comparisons are settled by IEEE 754 and give the same bits everywhere; nothing else about floats is")
-                            .tip("that is why they are what `b64` has: an answer every engine must agree on has to be one somebody specified.")
-                            .fix("use `+`, `-`, `x`, `/` or a comparison"),
+                            .rule("a float division answers with the nearest float there is, so nothing is left behind to ask about")
+                            .tip("`call remainder['a', 'b']` is the question IEEE 754 defines for floats, and its answer is exact.")
+                            .fix("`call remainder[…]`, or use `i64` for whole-number division"),
+                    );
+                    return None;
+                }
+
+                // `^` on a decimal is not built: the standard specifies decimal powers
+                // and this does not have them yet.
+                if matches!(l, Ty::Decimal { .. }) && *op == OpKind::Pow {
+                    self.errors.push(
+                        Diagnostic::new("E0495", format!("`^` on a `{}` is not built yet.", l.name()))
+                            .primary(span, "here")
+                            .rule("a decimal power is its own specification, and this has the binary one")
+                            .fix("use a `b64`, or `x` a few times"),
                     );
                     return None;
                 }

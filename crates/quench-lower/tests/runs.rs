@@ -1823,13 +1823,12 @@ START {
 fn a_decimal_refuses_what_a_binary_float_refuses() {
     // `^` and `mod` for the same reason: no standard says how a `pow` rounds, and a
     // remainder is a question for the types that do not round at all.
-    for source in [
-        "START { var.immut.d64 ['x'] = [*2* ^ *3*]; print.stdout['x']; }",
-        "START { var.immut.d64 ['x'] = [*7* mod *3*]; print.stdout['x']; }",
-    ] {
-        let rendered = report(source);
-        assert!(rendered.contains("is not built yet"), "{source}\n{rendered}");
-    }
+    let power = report("START { var.immut.d64 ['x'] = [*2* ^ *3*]; print.stdout['x']; }");
+    assert!(power.contains("`^` on a `d64` is not built yet"), "{power}");
+    // `mod` says the true reason rather than "not built": a float division answers with
+    // the nearest float and leaves nothing behind to ask about.
+    let left = report("START { var.immut.d64 ['x'] = [*7* mod *3*]; print.stdout['x']; }");
+    assert!(left.contains("a `d64` division leaves nothing"), "{left}");
 
     // And a ratio, which is written the way an `e` is written and is not a decimal.
     let rendered = report("START { var.immut.d64 ['x'] = [*1/3*]; print.stdout['x']; }");
@@ -2126,8 +2125,8 @@ START {
     print.stdout[call stitch[
         call exp['one'] str:* *
         call ln['ten'] str:* *
-        call pow['two', 'ten'] str:* *
-        call pow['two', *0.5*]
+        ('two' ^ 'ten') str:* *
+        ('two' ^ b64:*0.5*)
     ]];
 }
 "),
@@ -2226,4 +2225,40 @@ START {
             "2.0 5.0"
         );
     }
+}
+
+#[test]
+fn a_power_is_the_operator_and_there_is_no_second_name_for_it() {
+    // `^` had been refused on a float with "not built yet" while the same answer was
+    // reachable as `call pow[…]`, which is two spellings of one operator — the thing
+    // one-spelling-per-operator exists to stop. The operator is the spelling.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['two'] = [*2.0*];
+    var.immut.b64 ['ten'] = [*10.0*];
+    var.immut.i64 ['n'] = [*2* ^ *10*];
+    var.immut.e ['third'] = [*2* ^ *3*];
+    print.stdout[call stitch[
+        ('two' ^ 'ten') str:* * ('two' ^ b64:*0.5*) str:* * 'n' str:* * 'third'
+    ]];
+}
+"),
+        "1024.0 1.4142135623730951 1024 8",
+        "one operator, four types, and the same meaning in each",
+    );
+
+    // And the second name is gone.
+    let gone = report("START { var.immut.b64 ['a'] = [*2.0*]; var.immut.b64 ['x'] = [call pow['a', 'a']]; print.stdout['x']; }");
+    assert!(gone.contains("there is nothing called `pow`"), "{gone}");
+
+    // The narrow floats say why, and it is the double rounding rather than "not built".
+    let narrow = report("START { var.immut.b32 ['a'] = [*2.0*]; var.immut.b32 ['x'] = ['a' ^ 'a']; print.stdout['x']; }");
+    assert!(narrow.contains("`^` on a `b32` is not built yet"), "{narrow}");
+    assert!(narrow.contains("would round twice"), "{narrow}");
+
+    // And `mod` on a float now says the true reason rather than "no standard settles it".
+    let left = report("START { var.immut.b64 ['a'] = [*2.0*]; var.immut.b64 ['x'] = ['a' mod 'a']; print.stdout['x']; }");
+    assert!(left.contains("a `b64` division leaves nothing"), "{left}");
+    assert!(left.contains("call remainder"), "{left}");
 }
