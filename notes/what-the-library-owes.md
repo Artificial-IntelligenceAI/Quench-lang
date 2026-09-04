@@ -120,6 +120,26 @@ eighteen functions in all, and every one of them checked by asking which `b64` t
 value is *nearer*, worked out four hundred bits wide so the comparison itself does not
 round.
 
+## Where the maths will live
+
+Thirty of Quench's eighty-three words are provided functions, and twenty-eight of those
+are maths. `count` and `stitch` are the only two that are the language rather than a
+library sitting inside it, and a reader of that list would reasonably conclude Quench is
+a calculator with a compiler attached.
+
+**They go behind imports, when there are imports.** Not before, and not behind a
+qualified name like `call maths.sin[…]` in the meantime — that was considered and
+declined. A prefix would shrink the list today and cost four characters at every use
+site forever, to say something an import will say properly later.
+
+What an import does *not* buy is worth writing down, because it is the thing that makes
+this a naming question rather than an architecture one: none of these can be written in
+Quench. `sin` wants a mantissa that grows, an exponent, and Ziv's retry loop, and the
+language can express none of it. So they are host calls whichever side of an `import`
+they sit on, and a host call is a runtime service every engine must implement. Moving
+them behind a module does not remove seventeen functions from the interpreter, the Dev
+JIT and the LLVM half. That cost is fixed and paid.
+
 ## The rest of the list
 
 Each of these is waiting on something, and the something is named.
@@ -135,6 +155,7 @@ Each of these is waiting on something, and the something is named.
 | Sorting, searching, reversing | generics, and a way to say "a type that orders" |
 | Maps | generics, hashing, and a decided iteration order |
 | Matrices | modules |
+| The maths behind `import` | modules |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
 
