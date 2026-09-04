@@ -1,0 +1,28 @@
+name: counts
+
+# The site prints numbers about the language — how many words, how many symbols,
+# how many of them are reserved. It reads them from `data/language.json`, which is
+# generated rather than live, so it can fall behind `main` without anyone noticing.
+# This is what notices.
+on:
+  push:
+    branches: [site]
+  pull_request:
+    branches: [site]
+  workflow_dispatch:
+
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The site
+        uses: actions/checkout@v4
+
+      - name: The language, beside it
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: language
+
+      - name: Do the counts still match the compiler?
+        run: python3 tools/count-language.py --check --repo language

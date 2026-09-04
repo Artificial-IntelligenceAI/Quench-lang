@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "7a7154f",
+    "commit": "ad55155",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -12,8 +12,8 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 54,
-  "confirmed": 54,
+  "words": 83,
+  "confirmed": 83,
   "missing": [],
   "categories": [
     {
@@ -32,7 +32,8 @@
         "loop",
         "break"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "topLevel",
@@ -43,7 +44,8 @@
         "const",
         "START"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "chainLinks",
@@ -60,7 +62,8 @@
         "while",
         "nothing"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "visibility",
@@ -71,7 +74,8 @@
         "program",
         "export"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "types",
@@ -86,16 +90,17 @@
         "u16",
         "u32",
         "u64",
-        "b16",
-        "b32",
-        "b64",
-        "d32",
-        "d64",
-        "e",
+        "str",
         "bool",
-        "str"
+        "e",
+        "b64",
+        "b32",
+        "b16",
+        "d32",
+        "d64"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
     },
     {
       "id": "operators",
@@ -108,7 +113,8 @@
         "or",
         "not"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "beforeAValue",
@@ -118,7 +124,8 @@
         "share",
         "copy"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "literals",
@@ -128,7 +135,8 @@
         "true",
         "false"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "streams",
@@ -138,17 +146,48 @@
         "stdout",
         "stderr"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": null
     },
     {
       "id": "provided",
       "label": "Provided",
-      "count": 2,
+      "count": 31,
       "words": [
         "count",
-        "stitch"
+        "stitch",
+        "sqrt",
+        "abs",
+        "floor",
+        "ceil",
+        "round",
+        "trunc",
+        "copysign",
+        "min",
+        "max",
+        "remainder",
+        "fma",
+        "exp",
+        "ln",
+        "sin",
+        "cos",
+        "tan",
+        "atan",
+        "asin",
+        "acos",
+        "sinh",
+        "cosh",
+        "tanh",
+        "asinh",
+        "acosh",
+        "atanh",
+        "cbrt",
+        "pow",
+        "atan2",
+        "hypot"
       ],
-      "missing": []
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
     }
   ]
 }

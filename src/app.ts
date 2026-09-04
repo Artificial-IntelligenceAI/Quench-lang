@@ -80,6 +80,10 @@ interface Category {
   readonly count: number;
   readonly words: readonly string[];
   readonly missing: readonly string[];
+  /** The file this group was read out of, or null when it is a list kept by hand.
+      A derived group cannot go stale; a listed one can only notice a word leaving,
+      never one arriving. */
+  readonly readFrom: string | null;
 }
 
 interface Counted {
@@ -109,6 +113,7 @@ function wirePicker(counted: Counted): void {
     count: counted.words,
     words: counted.categories.flatMap((category) => [...category.words]),
     missing: [...counted.missing],
+    readFrom: null,
   };
   const groups = [everything, ...counted.categories];
 
@@ -170,11 +175,15 @@ if (document.getElementById("reserved") !== null) {
         show("reserved", counted.reserved);
         show("words", counted.words);
         show("symbols", counted.symbols);
+        const derived = counted.categories
+          .filter((category) => category.readFrom !== null)
+          .reduce((sum, category) => sum + category.count, 0);
         const drift = counted.missing.length === 0
-          ? "all of them found in it"
-          : `${String(counted.missing.length)} of them no longer in it`;
+          ? ""
+          : ` ${String(counted.missing.length)} are no longer in it.`;
         say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
-          + `${counted.readFrom.date}: ${String(counted.words)} words, ${drift}.`);
+          + `${counted.readFrom.date}: ${String(counted.words)} words, `
+          + `${String(derived)} of them read out of the compiler rather than listed.${drift}`);
         wirePicker(counted);
       },
       (reason: unknown) => {
