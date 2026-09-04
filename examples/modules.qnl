@@ -2,14 +2,17 @@
 # it does is decide which names reach which code. See
 # `notes/five-lines-a-name-can-cross.md`.
 
-module ['maths'] {
+module.export ['maths'] {
     # `module` reaches this module and everything nested inside it, so `trig` below can
     # call this and nothing outside `maths` can.
     fn.module.b64 ['reduce'] [immut.b64 'x'] {
         give ['x' + *1.0*];
     }
 
-    module ['trig'] {
+    # `module.module` is the word twice and means what it says: the construct, then who
+    # may see it. Nothing outside `maths` may name `trig` at all, so it is an
+    # implementation detail rather than part of what `maths` offers.
+    module.module ['trig'] {
         # `parent` reaches the module around this one -- `maths` -- and everything under
         # it. One rung up and no further.
         fn.parent.b64 ['quarter turn'] [immut.b64 'x'] {
@@ -29,7 +32,7 @@ module ['maths'] {
     }
 }
 
-module ['text'] {
+module.export ['text'] {
     const.module.str ['MARK'] = [*!*];
 
     fn.export.str ['shout'] [immut.str 'what'] {

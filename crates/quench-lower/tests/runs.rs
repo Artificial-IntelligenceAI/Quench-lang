@@ -2509,8 +2509,8 @@ fn a_module_is_a_box_of_declarations_and_it_nests() {
     // The whole of what a module does is decide which names reach which code. By the
     // time anything runs, a function is a function with a longer name.
     let source = "\
-module ['maths'] {
-    module ['trig'] {
+module.file ['maths'] {
+    module.file ['trig'] {
         fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { give ['x' / *2.0*]; }
     }
 
@@ -2521,7 +2521,7 @@ module ['maths'] {
     }
 }
 
-module ['text'] {
+module.file ['text'] {
     fn.export.str ['shout'] [immut.str 'what'] { give ['what' *!*]; }
 }
 
@@ -2537,12 +2537,12 @@ fn a_name_is_looked_for_here_and_then_outward() {
     // One rule for a bare name and for a path, which is what lets `maths` say
     // `'trig'.'reduce'` without saying `maths` again. The innermost match wins.
     let source = "\
-module ['a'] {
+module.file ['a'] {
     const.file.i64 ['LIMIT'] = [*10*];
     fn.export.i64 ['size'] [] { give ['LIMIT']; }
 }
 
-module ['b'] {
+module.file ['b'] {
     fn.export.i64 ['size'] [] { give [*99*]; }
 }
 
@@ -2553,4 +2553,26 @@ START {
 }
 ";
     assert_eq!(said(source), "10 99 0\n", "three functions of one name, and no collision");
+}
+
+#[test]
+fn a_constant_in_another_module_is_named_through_a_path() {
+    let source = "\
+module.file ['text'] {
+    const.export.str ['MARK'] = [*!*];
+}
+
+module.file ['a'] {
+    module.file ['b'] {
+        const.parent.i64 ['UP'] = [*3*];
+    }
+    fn.export.i64 ['reach'] [] { give ['b'.'UP']; }
+}
+
+START {
+    var.immut.i64 ['n'] = [call 'a'.'reach'[]];
+    print.stdout['text'.'MARK' str:* * 'n' \\n];
+}
+";
+    assert_eq!(said(source), "! 3\n");
 }

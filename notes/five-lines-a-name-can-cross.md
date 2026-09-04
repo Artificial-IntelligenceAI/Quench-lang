@@ -9,8 +9,8 @@ said this note would have to exist.
 ## A module is a block inside a file, and it nests
 
 ```quench
-module ['maths'] {
-    module ['trig'] {
+module.file ['maths'] {
+    module.file ['trig'] {
         fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { … }
     }
 
@@ -112,9 +112,9 @@ it lost to three rules.
 Here first, then outward, and the innermost match wins:
 
 ```quench
-module ['maths'] {
+module.file ['maths'] {
     fn.module.b64 ['reduce'] [immut.b64 'x'] { … }
-    module ['trig'] {
+    module.file ['trig'] {
         fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { … }
     }
     fn.export.b64 ['sin'] [immut.b64 'x'] {
@@ -134,14 +134,41 @@ names reach which code, and that is settled while checking; by the time anything
 lowered, a function is a function with a longer name — `maths.trig.quarter turn`. Two
 modules may each hold a `'size'` and the file may hold a third.
 
-## What is not built inside a file either
+## A module says who may see it, like everything at the top of a file
 
-**A constant in another module.** Constants walk outward like anything else, so a module
-reaches the ones above it, but there is no path syntax for a *value* — only for a call.
-`'text'.'MARK'` as a value is not written.
+It was briefly the one exception to a rule the language states outright, and it is not
+one now:
 
-**Visibility on a module itself.** `module ['maths'] { … }` carries no chain, so every
-module is visible everywhere in the file. Only what is *inside* one is controlled.
+```quench
+module.file ['maths'] {
+    module.module ['trig'] { … }
+    fn.export.b64 ['sin'] [immut.b64 'x'] { … }
+}
+```
+
+`module.module` is the word twice and means what it says — the construct, then who may
+see it. `trig` there is an implementation detail of `maths`: nothing outside may name
+it, and what is *inside* it saying `export` does not change that. **A name never reaches
+further than the module around it does**, which is the rule every nested privacy system
+has and is worth writing down because it is the one people are surprised by.
+
+So `'maths'.'trig'.'x'` asks three questions rather than one: may this see `maths`, may
+it see `maths.trig`, and may it see `x`.
+
+## A constant is reached the same way
+
+```quench
+module.file ['text'] { const.export.str ['MARK'] = [*!*]; }
+
+START {
+    var.immut.str ['m'] = ['text'.'MARK'];
+}
+```
+
+Marks, dots, marks, in a value as much as at a call, and the same walk outward to find
+it. Only a *constant* is ever named this way: a variable lives inside a function, so it
+has no module to be in, and a function is reached with `call`, which has a path of its
+own.
 
 ## `import` is a different feature, and it is the big one
 

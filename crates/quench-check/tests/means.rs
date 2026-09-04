@@ -1265,7 +1265,7 @@ fn a_module_decides_which_names_reach_which_code() {
     // `module` reaches this module and everything nested inside it, so a child sees its
     // ancestors and the file does not see in.
     let hidden = errors(
-        "module ['m'] { fn.module.i64 ['hidden'] [] { give [*1*]; } } START { print.stdout[call 'm'.'hidden'[]]; }",
+        "module.file ['m'] { fn.module.i64 ['hidden'] [] { give [*1*]; } } START { print.stdout[call 'm'.'hidden'[]]; }",
     );
     assert!(hidden.contains("`'m.hidden'` says `module`, and this is written in the top of the file."), "{hidden}");
     assert!(hidden.contains("Error code: E0511"), "{hidden}");
@@ -1273,9 +1273,9 @@ fn a_module_decides_which_names_reach_which_code() {
     // And a child seeing its ancestor is the case modules exist for.
     let inward = check(
         "\
-module ['maths'] {
+module.file ['maths'] {
     fn.module.i64 ['reduce'] [] { give [*1*]; }
-    module ['trig'] {
+    module.file ['trig'] {
         fn.export.i64 ['sin'] [] { give [call 'reduce'[]]; }
     }
 }
@@ -1286,7 +1286,7 @@ START { print.stdout[call 'maths'.'trig'.'sin'[]]; }
 
     // `parent` reaches the module around the declaring one, and no further.
     let up = errors(
-        "module ['a'] { module ['b'] { fn.parent.i64 ['up'] [] { give [*1*]; } } } START { print.stdout[call 'a'.'b'.'up'[]]; }",
+        "module.file ['a'] { module.file ['b'] { fn.parent.i64 ['up'] [] { give [*1*]; } } } START { print.stdout[call 'a'.'b'.'up'[]]; }",
     );
     assert!(up.contains("says `parent`"), "{up}");
 }
@@ -1301,13 +1301,13 @@ fn the_two_narrow_words_want_a_boundary_that_is_there() {
 
     // At one level deep the module around this one *is* the file, and `parent` would
     // then be a second spelling of `file`.
-    let no_parent = errors("module ['m'] { fn.parent.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.'x'[]]; }");
+    let no_parent = errors("module.file ['m'] { fn.parent.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.'x'[]]; }");
     assert!(no_parent.contains("`parent` says a boundary that is not here."), "{no_parent}");
 }
 
 #[test]
 fn a_module_holds_declarations_and_a_program_begins_once() {
-    let start = errors("module ['m'] { START { print.stdout[str:*x*]; } }");
+    let start = errors("module.file ['m'] { START { print.stdout[str:*x*]; } }");
     assert!(start.contains("`START` is not something a module holds."), "{start}");
     assert!(start.contains("Error code: E0103"), "{start}");
 }
@@ -1315,7 +1315,7 @@ fn a_module_holds_declarations_and_a_program_begins_once() {
 #[test]
 fn every_link_of_a_path_says_the_same_thing_about_who_made_it() {
     let mixed = errors(
-        "module ['m'] { fn.file.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.x[]]; }",
+        "module.file ['m'] { fn.file.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.x[]]; }",
     );
     assert!(mixed.contains("this path is marked in one place and bare in another."), "{mixed}");
     assert!(mixed.contains("Error code: E0499"), "{mixed}");
@@ -1329,4 +1329,65 @@ fn the_ladder_is_five_and_the_list_is_not_a_second_copy() {
     for word in quench_check::Visibility::ALL {
         assert!(rendered.contains(&format!("`{word}`")), "`{word}` missing from the message:\n{rendered}");
     }
+}
+
+#[test]
+fn a_module_says_who_may_see_it_like_everything_else_at_the_top() {
+    // It was the only top-level thing that did not, which made it the one exception to
+    // a rule the language states outright.
+    let silent = errors("module ['m'] { fn.file.i64 ['x'] [] { give [*1*]; } } START { print.stdout[call 'm'.'x'[]]; }");
+    assert!(silent.contains("does not say who can see it."), "{silent}");
+
+    // And saying it means something: a module may be an implementation detail rather
+    // than part of what the module around it offers.
+    let hidden = errors(
+        "\
+module.file ['maths'] {
+    module.module ['trig'] { fn.export.i64 ['x'] [] { give [*1*]; } }
+}
+START { print.stdout[call 'maths'.'trig'.'x'[]]; }
+",
+    );
+    assert!(hidden.contains("the module `'maths.trig'` says `module`"), "{hidden}");
+    assert!(hidden.contains("Error code: E0513"), "{hidden}");
+
+    // What is inside may say something wider and still not reach further than the
+    // module around it does -- `'x'` above says `export` and is unreachable anyway.
+    let inside = check(
+        "\
+module.file ['maths'] {
+    module.module ['trig'] { fn.export.i64 ['x'] [] { give [*1*]; } }
+    fn.export.i64 ['sin'] [] { give [call 'trig'.'x'[]]; }
+}
+START { print.stdout[call 'maths'.'sin'[]]; }
+",
+    );
+    assert!(inside.ok(), "the module around it may still reach in");
+}
+
+#[test]
+fn a_constant_is_reached_through_a_path_too() {
+    let out = check(
+        "\
+module.file ['text'] { const.export.str ['MARK'] = [*!*]; }
+START {
+    var.immut.str ['m'] = ['text'.'MARK'];
+    print.stdout['m'];
+}
+",
+    );
+    assert!(out.ok(), "{}", errors("module.file ['text'] { const.export.str ['MARK'] = [*!*]; } START { var.immut.str ['m'] = ['text'.'MARK']; print.stdout['m']; }"));
+
+    // The same ladder, and the same walk outward to find it.
+    let hidden = errors(
+        "module.file ['t'] { const.module.i64 ['S'] = [*7*]; } START { print.stdout['t'.'S']; }",
+    );
+    assert!(hidden.contains("`'t.S'` says `module`"), "{hidden}");
+
+    let missing = errors("START { print.stdout['a'.'B']; }");
+    assert!(missing.contains("there is nothing called `'a.B'`."), "{missing}");
+
+    // A path is uniformly marked, in a value as much as at a call.
+    let mixed = errors("module.file ['t'] { const.export.i64 ['S'] = [*7*]; } START { print.stdout['t'.S]; }");
+    assert!(mixed.contains("this path is marked in one place and bare in another."), "{mixed}");
 }

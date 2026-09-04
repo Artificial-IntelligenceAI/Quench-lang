@@ -246,6 +246,10 @@ impl<'a> Parser<'a> {
     /// `module ['maths'] { … }`
     fn module(&mut self) -> Option<ast::Module> {
         let word = self.bump().span;
+        let mut chain = vec![word];
+        while self.eat(Kind::Dot).is_some() {
+            chain.push(self.expect(Kind::Word, "a chain")?);
+        }
         self.expect(Kind::OpenList, "a module")?;
         let name = self.expect(Kind::Name, "a module")?;
         self.expect(Kind::CloseList, "a module")?;
@@ -257,7 +261,7 @@ impl<'a> Parser<'a> {
             match token.kind {
                 Kind::CloseBlock => {
                     let close = self.bump().span;
-                    return Some(ast::Module { word, name, items, span: word.to(close) });
+                    return Some(ast::Module { word, chain, name, items, span: word.to(close) });
                 }
                 Kind::End => {
                     self.errors.push(
@@ -267,7 +271,7 @@ impl<'a> Parser<'a> {
                             .tip("the end of the file closes nothing — it is the brace that does.")
                             .fix("add a `}` where the module should end"),
                     );
-                    return Some(ast::Module { word, name, items, span: word.to(open) });
+                    return Some(ast::Module { word, chain, name, items, span: word.to(open) });
                 }
                 _ => {}
             }
@@ -998,7 +1002,32 @@ impl<'a> Parser<'a> {
     fn piece(&mut self, typed: bool) -> Option<Piece> {
         let token = self.peek();
         match token.kind {
-            Kind::Name => Some(Piece::Name(self.bump().span)),
+            Kind::Name => {
+                let first = self.bump().span;
+                if self.peek().kind != Kind::Dot {
+                    return Some(Piece::Name(first));
+                }
+                // `'text'.'MARK'` — a constant in another module. The same marks, dots,
+                // marks a call's path is, because it is the same question about who
+                // made the thing being named.
+                let mut path = vec![first];
+                while self.eat(Kind::Dot).is_some() {
+                    let link = self.peek();
+                    if link.kind != Kind::Name {
+                        self.errors.push(
+                            Diagnostic::new("E0499", "this path is marked in one place and bare in another.")
+                                .primary(link.span, format!("found {}", link.kind.describe()))
+                                .secondary(first, "a name you declared")
+                                .rule("marks say who made a thing, so every link of one path says the same")
+                                .tip("a path to a constant is `'text'.'MARK'`, the way a call's is.")
+                                .fix("put marks round it"),
+                        );
+                        return None;
+                    }
+                    path.push(self.bump().span);
+                }
+                Some(Piece::Path(path))
+            }
             Kind::Escape => Some(Piece::Escape(self.bump().span)),
             Kind::Written => {
                 let mark = self.bump().span;

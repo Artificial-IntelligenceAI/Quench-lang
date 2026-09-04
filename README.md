@@ -190,10 +190,10 @@ Both print the same thing, which is not a coincidence — it is
   name, so nothing that runs knows modules exist.
 
   ```quench
-  module ['maths'] {
+  module.file ['maths'] {
       fn.module.b64 ['reduce'] [immut.b64 'x'] { give ['x' + *1.0*]; }
 
-      module ['trig'] {
+      module.file ['trig'] {
           fn.parent.b64 ['quarter turn'] [immut.b64 'x'] { give ['x' / *2.0*]; }
       }
 
@@ -219,7 +219,13 @@ Both print the same thing, which is not a coincidence — it is
   and no further: Rust's `pub(in path)` is declined, because wanting to reach three
   levels up is evidence the nesting is too deep.
 
-  A path is **marks, dots, marks** — `call 'maths'.'trig'.'quarter turn'[…]` — because
+  **A module says who may see it too**, like everything else at the top of a file:
+  `module.file ['maths']`, and `module.module ['trig']` for one that is an
+  implementation detail of the module around it. A name never reaches further than the
+  module around it does, so `'maths'.'trig'.'x'` asks three questions rather than one.
+
+  A path is **marks, dots, marks** — `call 'maths'.'trig'.'quarter turn'[…]`, and
+  `['text'.'MARK']` for a constant in another module — because
   the rule is the one `call` already had: a bare word is Quench's, a marked name is
   yours, and every link of one path says the same thing about who made it. A name is
   looked for here and then outward, paths included, so `maths` says `'trig'.'…'`

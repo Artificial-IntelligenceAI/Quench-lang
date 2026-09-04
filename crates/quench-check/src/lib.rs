@@ -835,6 +835,16 @@ struct Signature {
     list: Span,
 }
 
+/// One module, as far as reaching into it is concerned.
+#[derive(Clone, Debug)]
+struct Known {
+    visibility: Visibility,
+    /// The module it was declared in, outermost first.
+    in_module: Vec<String>,
+    /// The name, for pointing at.
+    at: Span,
+}
+
 /// Read a whole file, parse it, and work out what it means.
 pub fn check(source: &str) -> Checked {
     let Parsed { program, errors } = quench_parse::parse(source);
@@ -845,6 +855,7 @@ pub fn check(source: &str) -> Checked {
         depth: 0,
         returns: None,
         at_module: Vec::new(),
+        modules: HashMap::new(),
         hole: None,
         opening: false,
         signatures: Vec::new(),
@@ -948,6 +959,9 @@ struct Checker<'a> {
     /// file. A declaration's key is this joined with its name, and a name written
     /// without a path is looked for here first and then outward.
     at_module: Vec<String>,
+    /// Every module in the file, by its full path. A module is a name like any other,
+    /// so reaching into one is checked the way reaching a function in it is.
+    modules: HashMap<String, Known>,
     /// The hole the function being read or checked opened, if it opened one.
     ///
     /// One per function, so this is a single slot rather than a list. While a signature
@@ -1012,7 +1026,18 @@ impl<'a> Checker<'a> {
         for item in items {
             match item {
                 ast::Item::Module(module) => {
+                    let held = at.clone();
+                    let word = module.chain[0];
+                    let outer = std::mem::replace(&mut self.at_module, held.clone());
+                    let visibility = self.seen_by(&module.chain, word, "module");
+                    self.at_module = outer;
                     at.push(self.named(module.name));
+                    if let Some(visibility) = visibility {
+                        self.modules.insert(
+                            at.join("."),
+                            Known { visibility, in_module: held, at: module.name },
+                        );
+                    }
                     self.flatten(&module.items, at, out);
                     at.pop();
                 }
@@ -1055,6 +1080,37 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// Whether every module on the way to something may be named from here.
+    ///
+    /// A path names a module before it names what is inside one, and a module says who
+    /// may see it like everything else at the top of a file. So `'maths'.'tables'.'x'`
+    /// has three questions in it and this asks the first two.
+    fn modules_reach(&mut self, at: &[String], whole: Span) -> bool {
+        for depth in 1..=at.len() {
+            let key = at[..depth].join(".");
+            let Some(known) = self.modules.get(&key).cloned() else { continue };
+            if known.visibility.reaches(&self.at_module, &known.in_module) {
+                continue;
+            }
+            let here = if self.at_module.is_empty() {
+                "the top of the file".to_string()
+            } else {
+                format!("`{}`", self.at_module.join("."))
+            };
+            let said = known.visibility.word();
+            self.errors.push(
+                Diagnostic::new("E0513", format!("the module `'{key}'` says `{said}`, and this is written in {here}."))
+                    .secondary(known.at, format!("`{said}` here"))
+                    .primary(whole, "and reached into here")
+                    .rule("a module says who may see it, the way everything else at the top of a file does")
+                    .tip("what is inside it may say something wider, and never reach further than the module around it does.")
+                    .fix("widen what the module says, or move this inside it"),
+            );
+            return false;
+        }
+        true
+    }
+
     /// Which function a marked call names, and whether it may be named from here.
     ///
     /// Then it has to get past what the declaration said about who may name it.
@@ -1091,6 +1147,11 @@ impl<'a> Checker<'a> {
             return None;
         };
 
+        let signature = &self.signatures[which as usize];
+        let held = signature.in_module.clone();
+        if !self.modules_reach(&held, call.name.to(call.close)) {
+            return None;
+        }
         let signature = &self.signatures[which as usize];
         if let Some(visibility) = signature.visibility {
             if !visibility.reaches(&self.at_module, &signature.in_module) {
@@ -2224,6 +2285,7 @@ impl<'a> Checker<'a> {
                 let mut so_far = String::new();
                 for term in &value.terms {
                     if let ast::Term::Piece(ast::Piece::Name(_))
+                    | ast::Term::Piece(ast::Piece::Path(_))
                     | ast::Term::Piece(ast::Piece::At { .. })
                     | ast::Term::Piece(ast::Piece::Call(_))
                     | ast::Term::At { .. }
@@ -3115,6 +3177,9 @@ impl<'a> Checker<'a> {
             ast::Term::Piece(ast::Piece::Name(span)) => {
                 self.named_value(*span).map(|(value, _)| value)
             }
+            ast::Term::Piece(ast::Piece::Path(path)) => {
+                self.constant_at(path).map(|(value, _)| value)
+            }
             ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
                 let digits = unmarked(self.text(*mark));
                 // A hole is not a type yet, so there is nothing here to read the value.
@@ -3503,6 +3568,17 @@ impl<'a> Checker<'a> {
                         .primary(name.to(*close), "here")
                         .rule("joining something to text builds a new value, and building one needs the collector")
                         .fix("print the pieces separately"),
+                );
+                None
+            }
+            ast::Piece::Path(path) => {
+                let whole = path[0].to(*path.last().expect("a path has a last link"));
+                self.errors.push(
+                    Diagnostic::new("E0411", "a name cannot be one piece of a longer value yet.")
+                        .primary(whole, "here")
+                        .rule("joining a name to something else builds a new value, and building one needs the collector")
+                        .tip("a value that is *only* a name works — that copies rather than builds.")
+                        .fix("declare it on its own, and print the pieces separately"),
                 );
                 None
             }
@@ -4147,6 +4223,10 @@ impl<'a> Checker<'a> {
                     let Some((value, ty)) = self.named_value(*span) else { continue };
                     pieces.push(Printed::Value { value, ty });
                 }
+                ast::Piece::Path(path) => {
+                    let Some((value, ty)) = self.constant_at(path) else { continue };
+                    pieces.push(Printed::Value { value, ty });
+                }
                 ast::Piece::Written { ty: None, mark } => {
                     self.errors.push(
                         Diagnostic::new("E0412", "this written value does not say what it is.")
@@ -4252,6 +4332,51 @@ impl<'a> Checker<'a> {
     }
 
     /// A name used as a value: what a variable holds, or a constant written in.
+    /// `'text'.'MARK'` — a constant named through a module path.
+    ///
+    /// Only a constant is ever reached this way. A variable is local, so it has no
+    /// module to be in; a function is reached with `call`, which has a path of its own.
+    fn constant_at(&mut self, path: &[Span]) -> Option<(Value, Ty)> {
+        let spelt: Vec<String> = path.iter().map(|link| self.named(*link)).collect();
+        let key = spelt.join(".");
+        let whole = path[0].to(*path.last().expect("a path has a last link"));
+
+        let Some(which) = self.reachable_constant(&key) else {
+            self.errors.push(
+                Diagnostic::new("E0455", format!("there is nothing called `'{key}'`."))
+                    .primary(whole, "here")
+                    .rule("a path in a value names a constant in a module, and a name is looked for here and then outward")
+                    .tip("a variable is inside a function, so it has no module to be in, and a function is reached with `call`.")
+                    .fix("check the spelling, or declare it with `const`"),
+            );
+            return None;
+        };
+
+        let held = self.constants[which as usize].in_module.clone();
+        if !self.modules_reach(&held, whole) {
+            return None;
+        }
+        let constant = &self.constants[which as usize];
+        if !constant.visibility.reaches(&self.at_module, &constant.in_module) {
+            let (said, at) = (constant.visibility.word(), constant.at);
+            let here = if self.at_module.is_empty() {
+                "the top of the file".to_string()
+            } else {
+                format!("`{}`", self.at_module.join("."))
+            };
+            self.errors.push(
+                Diagnostic::new("E0511", format!("`'{key}'` says `{said}`, and this is written in {here}."))
+                    .secondary(at, format!("`{said}` here"))
+                    .primary(whole, "and named here")
+                    .rule(format!("`{}` are the five, narrowest first, and each names a boundary a name may cross", listed(Visibility::ALL)))
+                    .tip("the same ladder a function says, and the same walk outward to find it.")
+                    .fix("widen what it says, or move this inside"),
+            );
+            return None;
+        }
+        Some((Value::Const(which), constant.ty.clone()))
+    }
+
     fn named_value(&mut self, span: Span) -> Option<(Value, Ty)> {
         let name = self.named(span);
         if let Some(local) = self.seen(&name) {

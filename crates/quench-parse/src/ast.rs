@@ -44,6 +44,9 @@ pub enum Item {
 pub struct Module {
     /// `module`, for pointing at.
     pub word: Span,
+    /// `module`, then everything dotted after it — who can see it. Required, because
+    /// everything at the top of a file says who can see it and a module is one of them.
+    pub chain: Vec<Span>,
     pub name: Span,
     pub items: Vec<Item>,
     pub span: Span,
@@ -392,6 +395,11 @@ pub enum Piece {
     Written { ty: Option<Span>, mark: Span },
     /// `'name'`
     Name(Span),
+    /// `'text'.'MARK'` — a name in another module, outermost first.
+    ///
+    /// Only a constant is ever reached this way. A variable is local and has no module
+    /// to be in, and a function is reached with `call`, which has a path of its own.
+    Path(Vec<Span>),
     /// `\n`
     Escape(Span),
     /// `'xs'[…]` — an index or a call, told apart by what the name was declared as.
@@ -406,6 +414,7 @@ impl Piece {
             Piece::Written { ty: Some(ty), mark } => ty.to(*mark),
             Piece::Written { ty: None, mark } => *mark,
             Piece::Name(s) | Piece::Escape(s) => *s,
+            Piece::Path(path) => path[0].to(*path.last().expect("a path has a last link")),
             Piece::At { name, close, .. } => name.to(*close),
             Piece::Call(c) => c.name.to(c.close),
         }
