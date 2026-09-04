@@ -53,43 +53,39 @@ READS = [
 # exactly as stale as whoever last edited it: it notices a word being removed and
 # is blind to one being added. `provided` went from 2 to 31 without a word of the
 # old list becoming untrue, and nothing here could have seen it.
+# The same eleven constants `quench words` reads, in the order it prints them.
+# Nothing about the language is written down in this file any more: every word
+# comes out of the place the compiler itself uses, so this cannot say something
+# the language does not do.
+#
+# `quench words` is the authority, and reading the constants directly rather than
+# running it is only so that this needs no build — a checker with a clone and no
+# cargo can still tell whether the site has gone stale. If the shape of any
+# constant changes, main's own CI runs `--check` against this and goes red.
+PARSE = "crates/quench-parse/src/lib.rs"
+CHECK = "crates/quench-check/src/lib.rs"
+QIR = "crates/quench-qir/src/lib.rs"
+
+LIST = r'"([^"]+)"'
+
 DERIVED = [
-    # (id, label, file, region or None for the whole file, how a name is spelled)
-    ("statements", "Statements", "crates/quench-parse/src/lib.rs",
-     r"pub const STATEMENTS[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
-    ("topLevel", "Top level", "crates/quench-parse/src/lib.rs",
-     r"pub const TOP_LEVEL[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
-    ("visibility", "Visibility", "crates/quench-check/src/lib.rs",
-     r"fn from_word\(word: &str\) -> Option<Visibility> \{(.*?)\n        \}",
-     r'"([^"]+)"\s*=>\s*Some'),
-    ("types", "Types", "crates/quench-check/src/lib.rs",
-     r"fn simple\(word: &str\) -> Option<Ty> \{(.*?)\n        \}",
-     r'"([^"]+)"\s*=>\s*Some'),
-    ("operators", "Operators", "crates/quench-parse/src/lib.rs",
-     r"pub const OPERATORS[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
-    ("beforeAValue", "Before a value", "crates/quench-parse/src/lib.rs",
-     r"pub const BEFORE_A_VALUE[^=]*=\s*&\[(.*?)\];", r'"([^"]+)"'),
-    ("streams", "Streams", "crates/quench-qir/src/lib.rs",
-     None, r'Stream::(?:Out|Err) => "([^"]+)"'),
-    ("provided", "Provided", "crates/quench-check/src/lib.rs",
-     r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];", r'\("([^"]+)"'),
+    # (id, label, file, region, how a name is spelled inside it)
+    ("statements", "Statements", PARSE, r"pub const STATEMENTS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("topLevel", "Top level", PARSE, r"pub const TOP_LEVEL[^=]*=\s*&\[(.*?)\];", LIST),
+    ("afterABlock", "After a block", PARSE, r"pub const AFTER_A_BLOCK[^=]*=\s*&\[(.*?)\];", LIST),
+    ("chainLinks", "Chain links", CHECK, r"pub const CHAIN_LINKS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("visibility", "Visibility", CHECK, r"pub const ALL: &\[&str\] = &\[(.*?)\];", LIST),
+    ("types", "Types", CHECK, r"pub const NAMES: &\[&str\] = &\[(.*?)\];", LIST),
+    ("operators", "Operators", PARSE, r"pub const OPERATORS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("beforeAValue", "Before a value", PARSE, r"pub const BEFORE_A_VALUE[^=]*=\s*&\[(.*?)\];", LIST),
+    ("literals", "Literals", CHECK, r"pub const LITERALS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("streams", "Streams", QIR, None, r'Stream::(?:Out|Err) => "([^"]+)"'),
+    ("provided", "Provided", CHECK, r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];", r'\("([^"]+)"'),
 ]
 
-# What is left has no single place in the compiler to read, and the language side
-# has declined to invent one — a constant that agrees with nothing is the very
-# thing both of us are trying to stop writing. These keep the weak check: it
-# notices a word leaving the source and is blind to one arriving.
-LISTED = [
-    # Matched in three different readers — the declaration, the loop and the
-    # function signature — none of which could hold the others without lying
-    # about where the word means something.
-    ("chainLinks", "Chain links", ["mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing"]),
-    # Continue an `if` rather than beginning anything, so they are in no list of
-    # statements. `else-if` is one word on purpose: chaining and nesting are then
-    # different syntax rather than the same syntax read two ways.
-    ("continuing", "Continuing an if", ["else", "else-if"]),
-    ("literals", "Literals", ["true", "false"]),
-]
+# Nothing left. Every group has a constant behind it now, so there is no list here
+# to go stale and no weak check to explain.
+LISTED: list = []
 
 
 def git(*args: str) -> str:
@@ -148,9 +144,7 @@ def main() -> int:
             "missing": [w for w in group if not found(w)], "readFrom": None,
         })
 
-    order = ["statements", "topLevel", "chainLinks", "continuing", "visibility",
-             "types", "operators", "beforeAValue", "literals", "streams", "provided"]
-    categories.sort(key=lambda c: order.index(c["id"]))
+    # Already in the order `quench words` prints them.
 
     every_word = [w for c in categories for w in c["words"]]
     missing = [w for c in categories for w in c["missing"]]

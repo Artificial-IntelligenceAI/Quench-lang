@@ -181,9 +181,11 @@ if (document.getElementById("reserved") !== null) {
         const drift = counted.missing.length === 0
           ? ""
           : ` ${String(counted.missing.length)} are no longer in it.`;
+        const how = derived === counted.words
+          ? "every one read out of the constants the compiler itself uses"
+          : `${String(derived)} of them read out of the compiler rather than listed`;
         say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
-          + `${counted.readFrom.date}: ${String(counted.words)} words, `
-          + `${String(derived)} of them read out of the compiler rather than listed.${drift}`);
+          + `${counted.readFrom.date}: ${String(counted.words)} words, ${how}.${drift}`);
         wirePicker(counted);
       },
       (reason: unknown) => {

@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "5f98fac",
+    "commit": "a5bb097",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -48,6 +48,17 @@
       "readFrom": "crates/quench-parse/src/lib.rs"
     },
     {
+      "id": "afterABlock",
+      "label": "After a block",
+      "count": 2,
+      "words": [
+        "else-if",
+        "else"
+      ],
+      "missing": [],
+      "readFrom": "crates/quench-parse/src/lib.rs"
+    },
+    {
       "id": "chainLinks",
       "label": "Chain links",
       "count": 9,
@@ -63,18 +74,7 @@
         "nothing"
       ],
       "missing": [],
-      "readFrom": null
-    },
-    {
-      "id": "continuing",
-      "label": "Continuing an if",
-      "count": 2,
-      "words": [
-        "else",
-        "else-if"
-      ],
-      "missing": [],
-      "readFrom": null
+      "readFrom": "crates/quench-check/src/lib.rs"
     },
     {
       "id": "visibility",
@@ -101,14 +101,14 @@
         "u16",
         "u32",
         "u64",
-        "str",
-        "bool",
-        "e",
-        "b64",
-        "b32",
         "b16",
+        "b32",
+        "b64",
         "d32",
-        "d64"
+        "d64",
+        "e",
+        "bool",
+        "str"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
@@ -147,7 +147,7 @@
         "false"
       ],
       "missing": [],
-      "readFrom": null
+      "readFrom": "crates/quench-check/src/lib.rs"
     },
     {
       "id": "streams",
