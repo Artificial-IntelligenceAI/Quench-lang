@@ -12,6 +12,8 @@ name = "quench"
 path = "src/main.rs"
 
 [dependencies]
+quench-check = { path = "../quench-check" }
+quench-parse = { path = "../quench-parse" }
 quench-conf = { path = "../quench-conf" }
 quench-qir = { path = "../quench-qir" }
 quench-diag = { path = "../quench-diag" }

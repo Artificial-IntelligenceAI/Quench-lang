@@ -1,0 +1,50 @@
+# What has to hold before a change is believed.
+#
+# The oracle is the interesting one and it is not here: two hundred thousand programs
+# three ways takes half a minute and wants ten cores, so it runs by hand and its result
+# goes in the commit message. This is the part that must never be skipped.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Nightly, because the website is generated from this repository and reads it at a
+  # commit. A workflow on a branch other than the default one cannot be scheduled by
+  # GitHub, so the site cannot notice on its own that the language moved underneath it.
+  # This can.
+  schedule:
+    - cron: "17 3 * * *"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with nothing to say
+        # The bar is a warning-free build, not a passing one.
+        run: cargo build --all-targets 2>&1 | tee build.log && ! grep -q "^warning" build.log
+      - name: Tests
+        run: cargo test --workspace
+      - name: A short oracle run
+        # Not the full two hundred thousand — enough that a disagreement introduced by
+        # the change under test shows up here rather than in somebody's evening.
+        run: cargo run --release -p quench-gen --example oracle -- 20000
+
+  words:
+    # The website keeps counts of what the language provides. It generates them from
+    # this repository and cannot re-run itself when this repository changes, so the
+    # check lives here, where the changes happen.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: quench }
+      - uses: actions/checkout@v4
+        with: { ref: site, path: site }
+      - name: The site's counts against this checkout
+        run: |
+          if [ -f site/tools/count-language.py ]; then
+            python3 site/tools/count-language.py --check --repo quench
+          else
+            echo "the site has no counting tool yet; nothing to check"
+          fi

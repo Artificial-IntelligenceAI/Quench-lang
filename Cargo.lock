@@ -324,11 +324,13 @@ dependencies = [
 name = "quench-cli"
 version = "0.0.0"
 dependencies = [
+ "quench-check",
  "quench-conf",
  "quench-dev",
  "quench-diag",
  "quench-interp",
  "quench-lower",
+ "quench-parse",
  "quench-qir",
 ]
 

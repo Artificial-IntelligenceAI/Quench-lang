@@ -38,6 +38,13 @@ pub const STATEMENTS: &[&str] =
 /// `notes/precedence-stops-where-maths-stopped.md`.
 pub const OPERATORS: &[&str] = &["x", "mod", "and", "or"];
 
+/// What may follow an `if` block.
+///
+/// `else-if` is **one word**, which is the whole of why chaining and nesting are
+/// different syntax here rather than the same syntax read two ways — the dangling-else
+/// problem, absent rather than solved.
+pub const AFTER_A_BLOCK: &[&str] = &["else-if", "else"];
+
 /// The words that stand in front of a value and change what it means.
 pub const BEFORE_A_VALUE: &[&str] = &["not", "share", "copy"];
 

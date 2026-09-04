@@ -138,6 +138,12 @@ impl Ty {
         }
     }
 
+    /// Every type that is one word, which is the list `simple` below answers to.
+    pub const NAMES: &[&str] = &[
+        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "b16", "b32", "b64",
+        "d32", "d64", "e", "bool", "str",
+    ];
+
     fn simple(word: &str) -> Option<Ty> {
         match word {
             "i8" => Some(Ty::Int { bits: 8, signed: true }),
@@ -176,6 +182,9 @@ pub enum Visibility {
 }
 
 impl Visibility {
+    /// Every visibility there is, which is the list `from_word` below answers to.
+    pub const ALL: &[&str] = &["file", "program", "export"];
+
     fn from_word(word: &str) -> Option<Visibility> {
         match word {
             "file" => Some(Visibility::File),
@@ -223,6 +232,19 @@ enum Size {
     /// The span of the `grow`, for pointing at when it is in the wrong place.
     Grows(Span),
 }
+
+/// Every word that may stand in a declaration's chain, and where each may stand.
+///
+/// Three readers match these — a declaration's, a loop's, and a function signature's —
+/// and no one of them could hold the others without lying about where the word means
+/// something. So this is a list beside the code rather than the code itself, and
+/// `tests/means.rs` earns it back by putting every word through the position it belongs
+/// to and refusing to let one go missing.
+pub const CHAIN_LINKS: &[&str] =
+    &["mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing"];
+
+/// What a written value may be when the type reading it is `bool`.
+pub const LITERALS: &[&str] = &["true", "false"];
 
 /// The functions the language provides, and what each takes.
 ///
