@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "5e49df5",
+    "commit": "41b7ca4",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,14 +13,15 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 90,
-  "placesAWordMeansSomething": 91,
-  "confirmed": 90,
+  "words": 91,
+  "placesAWordMeansSomething": 92,
+  "confirmed": 91,
   "missing": [],
   "categories": [
     {
       "id": "statements",
       "label": "Statements",
+      "cliName": "statement",
       "count": 9,
       "words": [
         "var",
@@ -39,6 +40,7 @@
     {
       "id": "topLevel",
       "label": "Top level",
+      "cliName": "top level",
       "count": 5,
       "words": [
         "fn",
@@ -53,6 +55,7 @@
     {
       "id": "afterABlock",
       "label": "After a block",
+      "cliName": "after a block",
       "count": 2,
       "words": [
         "else-if",
@@ -64,6 +67,7 @@
     {
       "id": "chainLinks",
       "label": "Chain links",
+      "cliName": "chain link",
       "count": 11,
       "words": [
         "mut",
@@ -84,6 +88,7 @@
     {
       "id": "visibility",
       "label": "Visibility",
+      "cliName": "visibility",
       "count": 5,
       "words": [
         "module",
@@ -98,6 +103,7 @@
     {
       "id": "types",
       "label": "Types",
+      "cliName": "type",
       "count": 16,
       "words": [
         "i8",
@@ -123,6 +129,7 @@
     {
       "id": "operators",
       "label": "Operators",
+      "cliName": "operator",
       "count": 4,
       "words": [
         "x",
@@ -136,6 +143,7 @@
     {
       "id": "beforeAValue",
       "label": "Before a value",
+      "cliName": "before a value",
       "count": 3,
       "words": [
         "not",
@@ -148,6 +156,7 @@
     {
       "id": "literals",
       "label": "Literals",
+      "cliName": "literal",
       "count": 2,
       "words": [
         "true",
@@ -159,6 +168,7 @@
     {
       "id": "streams",
       "label": "Streams",
+      "cliName": "stream",
       "count": 2,
       "words": [
         "stdout",
@@ -168,14 +178,36 @@
       "readFrom": "crates/quench-qir/src/lib.rs"
     },
     {
+      "id": "providedModule",
+      "label": "Provided modules",
+      "cliName": "provided module",
+      "count": 1,
+      "words": [
+        "maths"
+      ],
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
+    },
+    {
       "id": "provided",
       "label": "Provided",
-      "count": 32,
+      "cliName": "provided",
+      "count": 4,
       "words": [
         "count",
         "stitch",
         "is",
-        "as",
+        "as"
+      ],
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
+    },
+    {
+      "id": "provided_maths",
+      "label": "Provided \u00b7 maths",
+      "cliName": "provided maths",
+      "count": 28,
+      "words": [
         "sqrt",
         "abs",
         "floor",

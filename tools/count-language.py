@@ -70,18 +70,28 @@ LIST = r'"([^"]+)"'
 
 DERIVED = [
     # (id, label, file, region, how a name is spelled inside it)
-    ("statements", "Statements", PARSE, r"pub const STATEMENTS[^=]*=\s*&\[(.*?)\];", LIST),
-    ("topLevel", "Top level", PARSE, r"pub const TOP_LEVEL[^=]*=\s*&\[(.*?)\];", LIST),
-    ("afterABlock", "After a block", PARSE, r"pub const AFTER_A_BLOCK[^=]*=\s*&\[(.*?)\];", LIST),
-    ("chainLinks", "Chain links", CHECK, r"pub const CHAIN_LINKS[^=]*=\s*&\[(.*?)\];", LIST),
-    ("visibility", "Visibility", CHECK, r"pub const ALL: &\[&str\] = &\[(.*?)\];", LIST),
-    ("types", "Types", CHECK, r"pub const NAMES: &\[&str\] = &\[(.*?)\];", LIST),
-    ("operators", "Operators", PARSE, r"pub const OPERATORS[^=]*=\s*&\[(.*?)\];", LIST),
-    ("beforeAValue", "Before a value", PARSE, r"pub const BEFORE_A_VALUE[^=]*=\s*&\[(.*?)\];", LIST),
-    ("literals", "Literals", CHECK, r"pub const LITERALS[^=]*=\s*&\[(.*?)\];", LIST),
-    ("streams", "Streams", QIR, None, r'Stream::(?:Out|Err) => "([^"]+)"'),
-    ("provided", "Provided", CHECK, r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];", r'\("([^"]+)"'),
+    ("statements", "statement|Statements", PARSE, r"pub const STATEMENTS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("topLevel", "top level|Top level", PARSE, r"pub const TOP_LEVEL[^=]*=\s*&\[(.*?)\];", LIST),
+    ("afterABlock", "after a block|After a block", PARSE, r"pub const AFTER_A_BLOCK[^=]*=\s*&\[(.*?)\];", LIST),
+    ("chainLinks", "chain link|Chain links", CHECK, r"pub const CHAIN_LINKS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("visibility", "visibility|Visibility", CHECK, r"pub const ALL: &\[&str\] = &\[(.*?)\];", LIST),
+    ("types", "type|Types", CHECK, r"pub const NAMES: &\[&str\] = &\[(.*?)\];", LIST),
+    ("operators", "operator|Operators", PARSE, r"pub const OPERATORS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("beforeAValue", "before a value|Before a value", PARSE, r"pub const BEFORE_A_VALUE[^=]*=\s*&\[(.*?)\];", LIST),
+    ("literals", "literal|Literals", CHECK, r"pub const LITERALS[^=]*=\s*&\[(.*?)\];", LIST),
+    ("streams", "stream|Streams", QIR, None, r'Stream::(?:Out|Err) => "([^"]+)"'),
 ]
+
+# `provided` is not one constant any more: PROVIDED carries a module column, and
+# MODULES says which modules exist. Both are read, and the groups are built from
+# them rather than named here — a module added to the language becomes a group on
+# the page without this file being touched.
+CLI = "crates/quench-cli/src/main.rs"
+MODULES_RE = r"pub const MODULES[^=]*=\s*&\[(.*?)\];"
+PROVIDED_RE = r"pub const PROVIDED[^=]*=\s*&\[(.*?)\n\];"
+PROVIDED_ENTRY = r'\(\s*"([^"]*)"\s*,\s*"([^"]+)"'
+GROUP_CALL = r'group\(\s*"([^"]+)"'
+
 
 # Nothing left. Every group has a constant behind it now, so there is no list here
 # to go stale and no weak check to explain.
@@ -121,7 +131,8 @@ def main() -> int:
 
     categories = []
 
-    for cid, label, path, block, name in DERIVED:
+    for cid, labels, path, block, name in DERIVED:
+        cli_name, label = labels.split("|", 1)
         text = (QUENCH / path).read_text()
         if block is not None:
             region = re.search(block, text, re.S)
@@ -134,9 +145,51 @@ def main() -> int:
             print(f"the {cid} list in {path} came out empty", file=sys.stderr)
             return 1
         categories.append({
-            "id": cid, "label": label, "count": len(words), "words": words,
-            "missing": [], "readFrom": path,
+            "id": cid, "label": label, "cliName": cli_name, "count": len(words),
+            "words": words, "missing": [], "readFrom": path,
         })
+
+    # The provided functions, split the way the compiler splits them.
+    check_src = (QUENCH / CHECK).read_text()
+    mod_region = re.search(MODULES_RE, check_src, re.S)
+    prov_region = re.search(PROVIDED_RE, check_src, re.S)
+    if mod_region is None or prov_region is None:
+        print("could not find MODULES or PROVIDED in quench-check", file=sys.stderr)
+        return 1
+
+    modules = re.findall(r'"([^"]+)"', mod_region.group(1))
+    entries = re.findall(PROVIDED_ENTRY, prov_region.group(1))
+
+    categories.append({
+        "id": "providedModule", "label": "Provided modules", "cliName": "provided module",
+        "count": len(modules), "words": modules, "missing": [], "readFrom": CHECK,
+    })
+    top = [word for held, word in entries if held == ""]
+    categories.append({
+        "id": "provided", "label": "Provided", "cliName": "provided",
+        "count": len(top), "words": top, "missing": [], "readFrom": CHECK,
+    })
+    for module in modules:
+        inside = [word for held, word in entries if held == module]
+        categories.append({
+            "id": f"provided_{module}", "label": f"Provided \u00b7 {module}",
+            "cliName": f"provided {module}", "count": len(inside), "words": inside,
+            "missing": [], "readFrom": CHECK,
+        })
+
+    # The guard that this file did not have, and the reason it produced nonsense
+    # when the maths moved: the groups were a list kept here, so a group the
+    # compiler grew was invisible. Now the CLI's own `words()` says which groups
+    # exist, and anything it prints that is not built above stops the run.
+    cli_src = (QUENCH / CLI).read_text()
+    printed = set(re.findall(GROUP_CALL, cli_src)) | {f"provided {m}" for m in modules}
+    built_names = {c["cliName"] for c in categories}
+    if printed != built_names:
+        for name in sorted(printed - built_names):
+            print(f"the compiler prints a group this tool does not build: {name}", file=sys.stderr)
+        for name in sorted(built_names - printed):
+            print(f"this tool builds a group the compiler does not print: {name}", file=sys.stderr)
+        return 1
 
     for cid, label, group in LISTED:
         categories.append({
@@ -144,7 +197,9 @@ def main() -> int:
             "missing": [w for w in group if not found(w)], "readFrom": None,
         })
 
-    # Already in the order `quench words` prints them.
+    order = [c for c in re.findall(GROUP_CALL, cli_src)]
+    order += [f"provided {m}" for m in modules]
+    categories.sort(key=lambda c: order.index(c["cliName"]) if c["cliName"] in order else 99)
 
     # A word can mean something in more than one position — `module` names a block
     # at the top level and also names how far a name reaches. It is one word the
