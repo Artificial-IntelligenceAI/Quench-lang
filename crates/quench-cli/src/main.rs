@@ -7,10 +7,11 @@ const USAGE: &str = "\
 quench — a language that would rather say what it means
 
     quench run <file>           compile it with the Dev JIT and run it
-    quench walk <file>           run it on the interpreter instead
+    quench walk <file>          run it on the interpreter instead
     quench check <file.qnl>     check it and stop
     quench build <file.qnl>     write the artefact, and stop
     quench words                every word the language provides, and where it stands
+    quench words --count        how many there are — a word may stand in two groups
     quench --help               this
 
 `run` and `walk` take source or an artefact. An artefact is compiled QIR, which
@@ -114,12 +115,39 @@ fn words() -> String {
     out
 }
 
+/// The two numbers, because there are two and one line each is not obvious.
+///
+/// `quench words` prints one line per word *per group*, which is the useful shape and
+/// is also a trap: `wc -l` is what anybody reaches for to count a language's words, and
+/// it is the wrong number the moment one word stands in two places. `module` is the
+/// first that does — it names the construct and the boundary the construct makes, the
+/// way `file` names a boundary — so the list is 90 lines and 89 words. Both sessions
+/// working on this repo read the line count and believed it.
+fn counted_words() -> String {
+    let listed = words();
+    let places = listed.lines().count();
+    let mut every: Vec<&str> =
+        listed.lines().filter_map(|line| line.split_once('\t').map(|(_, word)| word)).collect();
+    every.sort_unstable();
+    every.dedup();
+    let mut groups: Vec<&str> =
+        listed.lines().filter_map(|line| line.split_once('\t').map(|(group, _)| group)).collect();
+    groups.sort_unstable();
+    groups.dedup();
+    format!(
+        "words\t{}\nplaces\t{places}\ngroups\t{}\n",
+        every.len(),
+        groups.len()
+    )
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Asked for on its own, because a word list kept anywhere but here is a second copy
     // of one, and the second copy is the one that rots. See `words`.
     if args.first().is_some_and(|first| first == "words") {
-        print!("{}", words());
+        let counting = args.get(1).is_some_and(|next| next == "--count");
+        print!("{}", if counting { counted_words() } else { words() });
         return ExitCode::SUCCESS;
     }
 

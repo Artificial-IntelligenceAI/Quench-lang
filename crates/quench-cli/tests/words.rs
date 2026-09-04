@@ -92,3 +92,34 @@ fn the_list_is_grouped_and_says_where_each_word_stands() {
     // None of them is reserved, which is the thing the number on its own would imply.
     assert!(quench_lower::lower("START { var.immut.i64 ['loop'] = [*1*]; print.stdout['loop']; }").ok());
 }
+
+#[test]
+fn the_two_numbers_are_two_numbers_and_the_tool_says_which() {
+    // `quench words` prints one line per word *per group*, so `wc -l` is the wrong
+    // number the moment a word stands in two places -- which `module` does, naming both
+    // the construct and the boundary the construct makes. Two sessions working on this
+    // repo read the line count and believed it, so the tool says both now.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_quench"))
+        .args(["words", "--count"])
+        .output()
+        .expect("`quench words --count` runs");
+    let text = String::from_utf8(out.stdout).expect("text");
+    let said = |key: &str| -> usize {
+        text.lines()
+            .find_map(|line| line.strip_prefix(key)?.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no `{key}` in:\n{text}"))
+    };
+
+    // Counted here rather than trusted, so the two can never drift apart.
+    let listed = listed();
+    let mut every = listed.clone();
+    every.sort();
+    every.dedup();
+    assert_eq!(said("words"), every.len(), "`words` is the distinct count");
+    assert_eq!(said("places"), listed.len(), "`places` is one per word per group");
+    assert!(said("groups") > 1, "there is more than one group");
+    assert!(
+        said("words") <= said("places"),
+        "a word may stand in two groups, and cannot stand in fewer than one"
+    );
+}
