@@ -92,11 +92,12 @@ pub enum Kind {
     Less,
     /// `>`
     Greater,
-    /// `<=` — less than, or equal. The `/` is part of the operator, not a division.
+    /// `<==` — less than, or equal to. Three characters: the `==` is the whole of
+    /// "equal to", the same `==` written on its own, rather than a shortened one.
     LessEqual,
-    /// `>=`
+    /// `>==`
     GreaterEqual,
-    /// `!=` or `!=`. Also spelled `not=`, which arrives as the word `not` and an `=`.
+    /// `!==`
     NotEqual,
 
     /// A bare word: a chain part, a type, or the name of a block. Never a variable's name.

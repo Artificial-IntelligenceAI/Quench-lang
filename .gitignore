@@ -15,3 +15,7 @@
 
 # Artefacts. Built from the source beside them.
 *.qnlo
+
+# Where the tooling puts a worktree for an agent working in isolation. A worktree is a
+# git repository of its own, so `git add -A` will happily commit a link to one.
+/.claude/worktrees
