@@ -2010,15 +2010,15 @@ START {
     var.immut.b64 ['half'] = [*0.5*];
     var.immut.b64 ['neg'] = [*-2.5*];
     print.stdout[call stitch[
-        call sqrt['two'] str:* *
-        call abs['neg'] str:* *
-        call floor['neg'] str:* *
-        call ceil['neg'] str:* *
-        call trunc['neg'] str:* *
-        call min['two', 'half'] str:* *
-        call max['two', 'half'] str:* *
-        call copysign['two', 'neg'] str:* *
-        call fma['two', 'half', 'half']
+        call maths.sqrt['two'] str:* *
+        call maths.abs['neg'] str:* *
+        call maths.floor['neg'] str:* *
+        call maths.ceil['neg'] str:* *
+        call maths.trunc['neg'] str:* *
+        call maths.min['two', 'half'] str:* *
+        call maths.max['two', 'half'] str:* *
+        call maths.copysign['two', 'neg'] str:* *
+        call maths.fma['two', 'half', 'half']
     ]];
 }
 "),
@@ -2037,9 +2037,9 @@ fn remainder_takes_the_nearest_quotient_and_mod_takes_the_near_one() {
     var.immut.b64 ['seven'] = [*7.0*];
     var.immut.b64 ['two'] = [*2.0*];
     print.stdout[call stitch[
-        call remainder['five', 'two'] str:* *
-        call remainder['seven', 'two'] str:* *
-        call remainder['five', 'two']
+        call maths.remainder['five', 'two'] str:* *
+        call maths.remainder['seven', 'two'] str:* *
+        call maths.remainder['five', 'two']
     ]];
 }
 "),
@@ -2059,7 +2059,7 @@ START {
     var.immut.b64 ['a'] = [*2.5*];
     var.immut.b64 ['b'] = [*3.5*];
     var.immut.b64 ['c'] = [*-2.5*];
-    print.stdout[call stitch[call round['a'] str:* * call round['b'] str:* * call round['c']]];
+    print.stdout[call stitch[call maths.round['a'] str:* * call maths.round['b'] str:* * call maths.round['c']]];
 }
 "),
         "2.0 4.0 -2.0",
@@ -2074,7 +2074,7 @@ fn the_maths_works_on_every_width_and_keeps_it() {
 START {
     var.immut.b32 ['a'] = [*2.0*];
     var.immut.b16 ['b'] = [*2.0*];
-    print.stdout[call stitch[call sqrt['a'] str:* * call sqrt['b']]];
+    print.stdout[call stitch[call maths.sqrt['a'] str:* * call maths.sqrt['b']]];
 }
 "),
         "1.4142135 1.4140625",
@@ -2086,15 +2086,15 @@ START {
 fn the_maths_takes_floats_of_one_width_and_says_so() {
     for (source, expected) in [
         (
-            "START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['x'] = [call sqrt['n']]; print.stdout['x']; }",
+            "START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['x'] = [call maths.sqrt['n']]; print.stdout['x']; }",
             "works on binary floats",
         ),
         (
-            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b32 ['b'] = [*1.0*]; var.immut.b64 ['x'] = [call min['a', 'b']]; print.stdout['x']; }",
+            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b32 ['b'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.min['a', 'b']]; print.stdout['x']; }",
             "takes one width, and was given two",
         ),
         (
-            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b64 ['x'] = [call sqrt['a', 'a']]; print.stdout['x']; }",
+            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.sqrt['a', 'a']]; print.stdout['x']; }",
             "`sqrt` takes one number",
         ),
     ] {
@@ -2108,7 +2108,14 @@ fn the_maths_takes_floats_of_one_width_and_says_so() {
     // hour, so it is now something with no plans: the error function.
     let unknown = report("START { var.immut.b64 ['x'] = [call erf[*1.0*]]; print.stdout['x']; }");
     assert!(unknown.contains("there is nothing called `erf`"), "{unknown}");
-    assert!(unknown.contains("`sqrt`"), "{unknown}");
+    assert!(unknown.contains("`maths`, which is a module"), "{unknown}");
+
+    // And a maths name written bare -- which is how it was written until the maths went
+    // behind a namespace, and how it will be written out of habit for a while -- says
+    // where it went rather than that it does not exist.
+    let moved = report("START { var.immut.b64 ['x'] = [call sqrt[*1.0*]]; print.stdout['x']; }");
+    assert!(moved.contains("`sqrt` is in `maths`."), "{moved}");
+    assert!(moved.contains("`call maths.sqrt[…]`"), "{moved}");
 }
 
 #[test]
@@ -2123,8 +2130,8 @@ START {
     var.immut.b64 ['ten'] = [*10.0*];
     var.immut.b64 ['two'] = [*2.0*];
     print.stdout[call stitch[
-        call exp['one'] str:* *
-        call ln['ten'] str:* *
+        call maths.exp['one'] str:* *
+        call maths.ln['ten'] str:* *
         ('two' ^ 'ten') str:* *
         ('two' ^ b64:*0.5*)
     ]];
@@ -2136,13 +2143,13 @@ START {
 
 #[test]
 fn the_recommended_maths_is_a_b64_and_says_why() {
-    let rendered = report("START { var.immut.b32 ['x'] = [*2.0*]; var.immut.b32 ['y'] = [call exp['x']]; print.stdout['y']; }");
+    let rendered = report("START { var.immut.b32 ['x'] = [*2.0*]; var.immut.b32 ['y'] = [call maths.exp['x']]; print.stdout['y']; }");
     assert!(rendered.contains("`exp` works on a `b64`"), "{rendered}");
     assert!(rendered.contains("would round twice"), "{rendered}");
     assert!(rendered.contains("Error code: E0495"), "{rendered}");
 
     // And on something that is not a float at all, the reason is the other one.
-    let whole = report("START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call ln['n']]; print.stdout['y']; }");
+    let whole = report("START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call maths.ln['n']]; print.stdout['y']; }");
     assert!(whole.contains("`ln` works on a `b64`"), "{whole}");
     assert!(whole.contains("because the standard settles those"), "{whole}");
 }
@@ -2158,12 +2165,12 @@ START {
     var.immut.b64 ['one'] = [*1.0*];
     var.immut.b64 ['huge'] = [*1e300*];
     print.stdout[call stitch[
-        call sin['one'] str:* *
-        call cos['one'] str:* *
-        call tan['one'] str:* *
-        call atan['one'] str:* *
-        call atan2['one', 'one'] str:* *
-        call sin['huge']
+        call maths.sin['one'] str:* *
+        call maths.cos['one'] str:* *
+        call maths.tan['one'] str:* *
+        call maths.atan['one'] str:* *
+        call maths.atan2['one', 'one'] str:* *
+        call maths.sin['huge']
     ]];
 }
 "),
@@ -2181,10 +2188,10 @@ START {
     var.immut.b64 ['one'] = [*1.0*];
     var.immut.b64 ['two'] = [*2.0*];
     print.stdout[call stitch[
-        call asin['half'] str:* * call acos['half'] str:* *
-        call sinh['one'] str:* * call tanh['one'] str:* *
-        call acosh['two'] str:* * call atanh['half'] str:* *
-        call cbrt['two'] str:* * call hypot['one', 'two']
+        call maths.asin['half'] str:* * call maths.acos['half'] str:* *
+        call maths.sinh['one'] str:* * call maths.tanh['one'] str:* *
+        call maths.acosh['two'] str:* * call maths.atanh['half'] str:* *
+        call maths.cbrt['two'] str:* * call maths.hypot['one', 'two']
     ]];
 }
 "),
@@ -2202,7 +2209,7 @@ START {
     var.immut.b64 ['zero'] = [*0.0*];
     var.immut.b64 ['nan'] = ['zero' / 'zero'];
     var.immut.b64 ['five'] = [*5.0*];
-    print.stdout[call stitch[call min['nan', 'five'] str:* * call max['nan', 'five']]];
+    print.stdout[call stitch[call maths.min['nan', 'five'] str:* * call maths.max['nan', 'five']]];
 }
 ";
     let under = |min_max| {
@@ -2216,7 +2223,7 @@ START {
 START {
     var.immut.b64 ['a'] = [*2.0*];
     var.immut.b64 ['b'] = [*5.0*];
-    print.stdout[call stitch[call min['a', 'b'] str:* * call max['a', 'b']]];
+    print.stdout[call stitch[call maths.min['a', 'b'] str:* * call maths.max['a', 'b']]];
 }
 ";
     for setting in [quench_conf::MinMax::Skips, quench_conf::MinMax::Spreads] {

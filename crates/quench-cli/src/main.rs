@@ -110,8 +110,23 @@ fn words() -> String {
     group("literal", quench_check::LITERALS);
     let streams: Vec<&str> = quench_qir::Stream::ALL.iter().map(|s| s.name()).collect();
     group("stream", &streams);
-    let provided: Vec<&str> = quench_check::PROVIDED.iter().map(|(word, _)| *word).collect();
-    group("provided", &provided);
+    group("provided module", quench_check::MODULES);
+    // Grouped by the module each is in, so a reader sees `maths.sqrt` rather than a
+    // top-level `sqrt` that has not been one since the maths moved behind a namespace.
+    let top: Vec<&str> = quench_check::PROVIDED
+        .iter()
+        .filter(|(module, _, _)| module.is_empty())
+        .map(|(_, word, _)| *word)
+        .collect();
+    group("provided", &top);
+    for module in quench_check::MODULES {
+        let inside: Vec<&str> = quench_check::PROVIDED
+            .iter()
+            .filter(|(held, _, _)| held == module)
+            .map(|(_, word, _)| *word)
+            .collect();
+        group(&format!("provided {module}"), &inside);
+    }
     out
 }
 

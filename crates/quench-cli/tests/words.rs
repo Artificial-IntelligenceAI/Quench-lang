@@ -86,7 +86,17 @@ fn the_list_is_grouped_and_says_where_each_word_stands() {
         .expect("`quench words` runs");
     let text = String::from_utf8(out.stdout).expect("text");
     assert!(text.lines().all(|line| line.contains('\t')), "every line is a group and a word");
-    for expected in ["statement\tgive", "after a block\telse-if", "provided\tsqrt", "type\td64"] {
+    // `sqrt` is in `provided maths` rather than `provided`: twenty-eight of the
+    // thirty-two provided functions were trigonometry, and a top-level list of them read
+    // like a calculator with a compiler attached.
+    for expected in [
+        "statement\tgive",
+        "after a block\telse-if",
+        "provided\tstitch",
+        "provided module\tmaths",
+        "provided maths\tsqrt",
+        "type\td64",
+    ] {
         assert!(text.contains(expected), "`{expected}` missing:\n{text}");
     }
     // None of them is reserved, which is the thing the number on its own would imply.

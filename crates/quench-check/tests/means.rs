@@ -1080,8 +1080,8 @@ fn a_chain_belongs_only_to_the_two_that_cannot_work_the_type_out() {
 fn is_and_as_are_words_the_language_provides() {
     // Which means they are bare after `call`, and a writer may still have their own
     // `'is'` between marks without a collision.
-    assert!(quench_check::PROVIDED.iter().any(|(word, _)| *word == "is"));
-    assert!(quench_check::PROVIDED.iter().any(|(word, _)| *word == "as"));
+    assert!(quench_check::PROVIDED.iter().any(|(_, word, _)| *word == "is"));
+    assert!(quench_check::PROVIDED.iter().any(|(_, word, _)| *word == "as"));
     let both = check(
         "\
 fn.file.i64 ['as'] [immut.i64 'n'] { give ['n']; }

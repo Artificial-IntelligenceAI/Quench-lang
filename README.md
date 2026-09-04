@@ -320,7 +320,7 @@ Both print the same thing, which is not a coincidence — it is
   precision, flushing denormals. **Fast-math is not a setting and will not become one.**
   `^` works on a `b64` and is worked out here rather than asked of a library; `mod` is
   refused, because a float division answers with the nearest float and leaves nothing
-  behind to ask about — `call remainder['a', 'b']` is the question IEEE defines for
+  behind to ask about — `call maths.remainder['a', 'b']` is the question IEEE defines for
   floats, and its answer is exact. `[defaults] no-number` says whether `infinity` and `not-a-number` are answers
   or stops. A `b16` is **carried in a `b32`** — no machine Quench targets has a half —
   and gives binary16's own answers anyway, because one wider operation rounded once to
@@ -359,6 +359,13 @@ Both print the same thing, which is not a coincidence — it is
   stop, which is the difference between a float and an `e`. `^` and `mod` are refused
   for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
   they cannot round differently.
+- **The maths lives behind `maths`.** `call maths.sqrt[*2.0*]`, bare because it is
+  Quench's — twenty-eight of the thirty-two provided functions are maths, and in front of
+  everything they made the language read like a calculator with a compiler attached.
+  `count`, `stitch`, `is` and `as` are what is left at the top, which is the language
+  rather than a library inside it. It is **not** an import and could not be: `sin` wants
+  a mantissa that grows and Ziv's retry loop, so it is a host call whichever side of a
+  name it sits on.
 - **The maths IEEE 754 requires, and no more.** `sqrt`, `abs`, `floor`, `ceil`,
   `round`, `trunc`, `copysign`, `min`, `max`, `fma`, `remainder`. The standard *requires* these to be
   correctly rounded, so every engine gives identical bits and there is nothing for the

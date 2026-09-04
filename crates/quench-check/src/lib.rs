@@ -465,48 +465,60 @@ pub const LITERALS: &[&str] = &["true", "false"];
 /// rounded, which is what makes it safe: every engine must give identical bits. `sin`,
 /// `log` and the rest are only *recommended*, so three engines calling three C libraries
 /// would be three answers, and they wait for one implementation written here.
-pub const PROVIDED: &[(&str, Provides)] = &[
-    ("count", Provides::Count),
-    ("stitch", Provides::Stitch),
+/// Every module the language provides. Bare, because they are Quench's.
+///
+/// One so far. It exists because twenty-eight of the thirty-two provided functions were
+/// trigonometry, so a reader of the top-level list would reasonably have concluded that
+/// Quench is a calculator with a compiler attached — and `sin` read like a keyword when
+/// it is a library.
+///
+/// None of these could be an `import`. `sin` wants a mantissa that grows, an exponent
+/// and Ziv's retry loop, and the language can express none of it, so every one of them
+/// is a host call whichever side of a namespace it sits on. What a namespace changes is
+/// what a reader has to look at, which was the whole complaint.
+pub const MODULES: &[&str] = &["maths"];
+
+pub const PROVIDED: &[(&str, &str, Provides)] = &[
+    ("", "count", Provides::Count),
+    ("", "stitch", Provides::Stitch),
     // The two that read text, and the only two that carry a chain. `stitch` goes the
     // other way and needs none: what it is given says what to write, and text is the
     // only thing it makes. Coming back, the text says nothing at all — `12` is an `i64`
     // and a `b64` and an `e` — so the type has to be asked for.
-    ("is", Provides::Reads),
-    ("as", Provides::Becomes),
-    ("sqrt", Provides::Alone(0)),
-    ("abs", Provides::Alone(1)),
-    ("floor", Provides::Alone(2)),
-    ("ceil", Provides::Alone(3)),
-    ("round", Provides::Alone(4)),
-    ("trunc", Provides::Alone(5)),
-    ("copysign", Provides::Paired(0)),
-    ("min", Provides::Paired(1)),
-    ("max", Provides::Paired(2)),
-    ("remainder", Provides::Paired(3)),
-    ("fma", Provides::Fused),
+    ("", "is", Provides::Reads),
+    ("", "as", Provides::Becomes),
+    ("maths", "sqrt", Provides::Alone(0)),
+    ("maths", "abs", Provides::Alone(1)),
+    ("maths", "floor", Provides::Alone(2)),
+    ("maths", "ceil", Provides::Alone(3)),
+    ("maths", "round", Provides::Alone(4)),
+    ("maths", "trunc", Provides::Alone(5)),
+    ("maths", "copysign", Provides::Paired(0)),
+    ("maths", "min", Provides::Paired(1)),
+    ("maths", "max", Provides::Paired(2)),
+    ("maths", "remainder", Provides::Paired(3)),
+    ("maths", "fma", Provides::Fused),
     // The half IEEE only recommends, which Quench works out itself rather than asking a
     // library that is a little bit wrong in its own way. `b64` only, for now: rounding a
     // correctly-rounded `b64` down to a `b32` rounds twice, and twice is once too many.
-    ("exp", Provides::Slow(0)),
-    ("ln", Provides::Slow(1)),
-    ("sin", Provides::Slow(2)),
-    ("cos", Provides::Slow(3)),
-    ("tan", Provides::Slow(4)),
-    ("atan", Provides::Slow(5)),
-    ("asin", Provides::Slow(6)),
-    ("acos", Provides::Slow(7)),
-    ("sinh", Provides::Slow(8)),
-    ("cosh", Provides::Slow(9)),
-    ("tanh", Provides::Slow(10)),
-    ("asinh", Provides::Slow(11)),
-    ("acosh", Provides::Slow(12)),
-    ("atanh", Provides::Slow(13)),
-    ("cbrt", Provides::Slow(14)),
-    ("atan2", Provides::Power(1)),
-    ("hypot", Provides::Power(2)),
+    ("maths", "exp", Provides::Slow(0)),
+    ("maths", "ln", Provides::Slow(1)),
+    ("maths", "sin", Provides::Slow(2)),
+    ("maths", "cos", Provides::Slow(3)),
+    ("maths", "tan", Provides::Slow(4)),
+    ("maths", "atan", Provides::Slow(5)),
+    ("maths", "asin", Provides::Slow(6)),
+    ("maths", "acos", Provides::Slow(7)),
+    ("maths", "sinh", Provides::Slow(8)),
+    ("maths", "cosh", Provides::Slow(9)),
+    ("maths", "tanh", Provides::Slow(10)),
+    ("maths", "asinh", Provides::Slow(11)),
+    ("maths", "acosh", Provides::Slow(12)),
+    ("maths", "atanh", Provides::Slow(13)),
+    ("maths", "cbrt", Provides::Slow(14)),
+    ("maths", "atan2", Provides::Power(1)),
+    ("maths", "hypot", Provides::Power(2)),
 ];
-
 /// What one of [`PROVIDED`] is, and how the checker reads it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Provides {
@@ -657,6 +669,14 @@ fn unsaid(ty: &Ty) -> bool {
         Ty::Arr { of, length, .. } => *length == Length::Unknown || unsaid(of),
         _ => false,
     }
+}
+
+/// What a provided module holds, for a diagnostic to list.
+fn provided_in(module: &str) -> String {
+    // `listed` puts the marks on, so they are not put on twice here.
+    let all: Vec<&str> =
+        PROVIDED.iter().filter(|(held, _, _)| *held == module).map(|(_, said, _)| *said).collect();
+    listed(&all)
 }
 
 /// The number type at the bottom of this, for saying which one it was.
@@ -3233,23 +3253,87 @@ impl<'a> Checker<'a> {
             let which = self.function_named(call)?;
             return self.called(which, call);
         }
-        let name = self.text(call.name).to_string();
-        let Some((_, provides)) = PROVIDED.iter().find(|(word, _)| *word == name) else {
-            let all: Vec<String> =
-                PROVIDED.iter().map(|(word, _)| format!("`{word}`")).collect();
-            self.errors.push(
-                Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
-                    .primary(call.name, "here")
-                    .rule("a bare word after `call` is something the language provides, and this names none of them")
-                    .tip(format!("they are {}.", all.join(", ")))
-                    .fix(format!("`call '{name}'[…]` if you declared it with `fn`")),
-            );
-            return None;
+        let word = self.text(call.name).to_string();
+
+        // A bare word is either something the language provides or a module of them.
+        // The top level is tried first, because `is` and `as` are up there *and* carry
+        // a chain -- so `is.i64` is a function and its type, while `maths.sqrt` is a
+        // module and a function, and the two shapes are told apart by which name it is.
+        let top = PROVIDED.iter().find(|(module, said, _)| module.is_empty() && *said == word);
+        let (name, provides) = match top {
+            Some((_, said, provides)) => ((*said).to_string(), provides),
+            None if MODULES.contains(&word.as_str()) => {
+                let Some(link) = call.chain.first() else {
+                    self.errors.push(
+                        Diagnostic::new("E0519", format!("`{word}` is a module, and this names nothing in it."))
+                            .primary(call.name.to(call.close), "here")
+                            .rule("a module holds functions, and a call names one of them")
+                            .tip(format!("they are {}.", provided_in(&word)))
+                            .fix(format!("`call {word}.sqrt[…]`, or whichever was meant")),
+                    );
+                    return None;
+                };
+                let inside = self.text(*link).to_string();
+                let found = PROVIDED
+                    .iter()
+                    .find(|(module, said, _)| *module == word && *said == inside);
+                let Some((_, said, provides)) = found else {
+                    self.errors.push(
+                        Diagnostic::new("E0455", format!("`{word}` has nothing called `{inside}`."))
+                            .primary(*link, "here")
+                            .rule("a module holds the functions it holds, and this names none of them")
+                            .tip(format!("`{word}` holds {}.", provided_in(&word)))
+                            .fix("check the spelling"),
+                    );
+                    return None;
+                };
+                if call.chain.len() > 1 {
+                    self.errors.push(
+                        Diagnostic::new("E0499", format!("`{word}.{said}` carries no chain."))
+                            .primary(call.chain[1], "here")
+                            .rule("`is` and `as` are the only ones that say a type, because they are the only ones that cannot work it out")
+                            .fix(format!("`call {word}.{said}[…]`")),
+                    );
+                    return None;
+                }
+                ((*said).to_string(), provides)
+            }
+            None => {
+                // The one that will be written by habit for a long while: a maths name
+                // on its own, from before the maths went behind a namespace.
+                if let Some((module, said, _)) =
+                    PROVIDED.iter().find(|(module, said, _)| !module.is_empty() && *said == word)
+                {
+                    self.errors.push(
+                        Diagnostic::new("E0520", format!("`{said}` is in `{module}`."))
+                            .primary(call.name, "here")
+                            .rule(format!("`{module}` is a module the language provides, and its functions are named through it"))
+                            .tip(format!("`{module}` holds {}, which is most of what the language provides — so they are behind a name rather than in front of everything.", provided_in(module)))
+                            .fix(format!("`call {module}.{said}[…]`")),
+                    );
+                    return None;
+                }
+                let all: Vec<String> = PROVIDED
+                    .iter()
+                    .filter(|(module, _, _)| module.is_empty())
+                    .map(|(_, said, _)| format!("`{said}`"))
+                    .chain(MODULES.iter().map(|module| format!("`{module}`, which is a module")))
+                    .collect();
+                self.errors.push(
+                    Diagnostic::new("E0455", format!("there is nothing called `{word}`."))
+                        .primary(call.name, "here")
+                        .rule("a bare word after `call` is something the language provides, and this names none of them")
+                        .tip(format!("they are {}.", all.join(", ")))
+                        .fix(format!("`call '{word}'[…]` if you declared it with `fn`")),
+                );
+                return None;
+            }
         };
+
         // Only `is` and `as` say a second thing, and everything else is one word. Said
         // here rather than in each of them, because the ones that take no chain are the
         // ones nobody thinks to write the check in.
-        if !matches!(provides, Provides::Reads | Provides::Becomes) {
+        if top.is_some() && !matches!(provides, Provides::Reads | Provides::Becomes) {
             if let Some(link) = call.chain.first() {
                 self.errors.push(
                     Diagnostic::new("E0499", format!("`{name}` carries no chain."))

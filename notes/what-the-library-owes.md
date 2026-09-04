@@ -1,6 +1,6 @@
 # What the library owes
 
-Quench has fifty-three runtime services and no library. This note is a list of what
+Quench has fifty-three runtime services and a namespace with twenty-eight of them in it. This note is a list of what
 is missing, what each thing is waiting on, and the order that costs least — written
 before there is code for any of it, because most of the list is blocked on three
 decisions and it is worth seeing that before writing the easy parts. All three have
@@ -129,25 +129,58 @@ eighteen functions in all, and every one of them checked by asking which `b64` t
 value is *nearer*, worked out four hundred bits wide so the comparison itself does not
 round.
 
-## Where the maths will live
+## Where the maths lives — behind `maths`
 
-Thirty of Quench's eighty-three words are provided functions, and twenty-eight of those
-are maths. `count` and `stitch` are the only two that are the language rather than a
-library sitting inside it, and a reader of that list would reasonably conclude Quench is
-a calculator with a compiler attached.
+Twenty-eight of the thirty-two provided functions are maths. `count`, `stitch`, `is` and
+`as` are the only four that are the language rather than a library sitting inside it, and
+a reader of that list would reasonably conclude Quench is a calculator with a compiler
+attached. `sin` read like a keyword.
 
-**They go behind imports, when there are imports.** Not before, and not behind a
+```quench
+call maths.sqrt[*2.0*]     # Quench's module, Quench's function
+call 'maths'.'sqrt'[*2.0*] # a module somebody wrote and called maths
+```
+
+Bare, because it is Quench's, and the marks rule tells the two apart the way it always
+has. It cost five characters at every use site and it was the last cheap moment to spend
+them.
+
+**It is not an import, and could not be.** None of this can be written in Quench: `sin`
+wants a mantissa that grows, an exponent, and Ziv's retry loop, and the language can
+express none of it. So they are host calls whichever side of a namespace they sit on, and
+a host call is a runtime service every engine must implement. Putting them behind a name
+removes nothing from the interpreter, the Dev JIT or the LLVM half. That cost is fixed
+and paid; what a namespace changes is what a reader has to look at, which was the whole
+complaint.
+
+### This note said the opposite, and was wrong about which cost mattered
+
+It read: *"They go behind imports, when there are imports. Not before, and not behind a
 qualified name like `call maths.sin[…]` in the meantime — that was considered and
-declined. A prefix would shrink the list today and cost four characters at every use
-site forever, to say something an import will say properly later.
+declined."* The argument was that a prefix costs four characters at every use site
+forever, to say something an import would say properly later.
 
-What an import does *not* buy is worth writing down, because it is the thing that makes
-this a naming question rather than an architecture one: none of these can be written in
-Quench. `sin` wants a mantissa that grows, an exponent, and Ziv's retry loop, and the
-language can express none of it. So they are host calls whichever side of an `import`
-they sit on, and a host call is a runtime service every engine must implement. Moving
-them behind a module does not remove seventeen functions from the interpreter, the Dev
-JIT and the LLVM half. That cost is fixed and paid.
+`import` arrived, and it turned out to say nothing about this at all. An import names a
+**file**, and the maths is not one and cannot become one. So the thing being waited for
+was never going to come, and the price of waiting was paid in every program written
+meanwhile — which is the argument for spending a rename early rather than late.
+
+### What self-hosting it would take
+
+Not much, and none of it exists.
+
+- **A float of chosen precision.** The gap. `e` never rounds, so a series in it explodes
+  its denominators; `b64` is fixed at fifty-three bits. `sin` computes in a float with
+  *p* bits and Ziv's loop doubles *p* until the rounding is provable, and Quench has no
+  way to say that.
+- **A correctly-rounded exact-to-float conversion**, which is the last step of every one
+  of them. Still a host call — but *one* instead of twenty-eight.
+- **A float's bits**, for argument reduction: which quarter-turn `1e300` falls in needs π
+  to a thousand bits, and finding that out starts with the exponent.
+
+Everything else on the list below is already Quench source waiting to be typed. Sorting,
+searching, reversing, minimum-of-an-array, matrices: they wanted generics, arrays whose
+length the type does not fix, and modules, and all three are built.
 
 ## The rest of the list
 
@@ -169,7 +202,7 @@ Each of these is waiting on something, and the something is named.
 | ~~Generics~~ | **built** — `any` and `number`, one hole per function, `(any)` for a length |
 | ~~Modules~~ | **built** — a block, nesting, five visibility words |
 | ~~`import`~~ | **built** — `[program] files` says what a program is, `import` what a file uses |
-| The maths behind `import` | nothing — somebody deciding to move it |
+| ~~The maths behind a namespace~~ | **built** — `call maths.sin[…]`, and not an import |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
 
