@@ -870,6 +870,38 @@ fn emit(
             }
             joined.expect("the checker refused a join with nothing in it")
         }
+        // The one conversion in the language. Which `Say` it becomes is decided by the
+        // type the checker kept, because a number's characters depend on what kind of
+        // number it is and nothing downstream still knows.
+        Value::Said { of, ty } => {
+            let value = emit(b, module, of, held, w);
+            match ty {
+                Ty::Int { bits: 64, signed: false } => {
+                    b.call_host(qir::Host::SayU64, &[value])
+                }
+                Ty::Int { .. } => b.call_host(qir::Host::SayI64, &[value]),
+                Ty::Bool => b.call_host(qir::Host::SayBool, &[value]),
+                // All three widths arrive in the same register, so the runtime is told
+                // which it is holding -- exactly as `print` tells it.
+                Ty::F64 | Ty::F32 | Ty::F16 => {
+                    let width = b.const_i64(match ty {
+                        Ty::F16 => 16,
+                        Ty::F32 => 32,
+                        _ => 64,
+                    });
+                    b.call_host(qir::Host::SayFloat, &[value, width])
+                }
+                Ty::Exact => b.call_host(qir::Host::SayExact, &[value]),
+                Ty::Decimal { .. } => b.call_host(qir::Host::SayDecimal, &[value]),
+                Ty::Arr { .. } => {
+                    let (leaf, depth) = elements_of(of, w);
+                    let kind = b.const_i64(leaf as i64);
+                    let deep = b.const_i64(depth);
+                    b.call_host(qir::Host::SayArray, &[value, kind, deep])
+                }
+                Ty::Str => unreachable!("the checker never wraps text in a `Said`"),
+            }
+        }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);
             b.not(value)

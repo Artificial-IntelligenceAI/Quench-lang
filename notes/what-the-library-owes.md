@@ -5,9 +5,9 @@ is missing, what each thing is waiting on, and the order that costs least — wr
 before there is code for any of it, because most of the list is blocked on three
 decisions and it is worth seeing that before writing the easy parts.
 
-## The hole that matters most
+## The hole that matters most — filled
 
-A number cannot become text.
+A number could not become text.
 
 ```quench
 var.immut.i64 ['n'] = [*42*];
@@ -117,7 +117,7 @@ Each of these is waiting on something, and the something is named.
 
 | | waiting on |
 | --- | --- |
-| Number → text — `stitch` | nothing |
+| ~~Number → text — `stitch`~~ | **built** |
 | Text: length, slice, search, case, trim, split | bytes-or-characters |
 | The IEEE-required maths | nothing |
 | The IEEE-recommended maths | somebody writing it, once, for every engine |

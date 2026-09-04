@@ -279,6 +279,12 @@ pub enum Value {
     /// Pieces of text, one after another. What juxtaposition has always meant — this
     /// is only the case where a piece is not known until the program runs.
     Join(Vec<Value>),
+    /// The text of something that is not text. What `stitch` is made of, and the only
+    /// conversion in the language — which is why it has to be asked for by name.
+    ///
+    /// The type is kept because it is what decides how the value is written down, and
+    /// by the time the lowering sees it there is nothing else left to ask.
+    Said { of: Box<Value>, ty: Ty },
     /// `not 'ready'` — the opposite of a `bool`.
     Not(Box<Value>),
     /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
@@ -1889,6 +1895,74 @@ impl<'a> Checker<'a> {
         self.at(name, &one.terms, close)
     }
 
+    /// `call stitch[*n is * 'n']` — the text of all of it, joined.
+    ///
+    /// The list is a `print`'s: pieces side by side, of whatever types. What it adds
+    /// over plain juxtaposition is the one conversion Quench has — text beside a number
+    /// is refused, because nothing converts on its own, and this is how a program says
+    /// *do it anyway*. The word being written is what makes that a request rather than
+    /// a guess, and it is the whole reason there is a word at all.
+    fn stitched(&mut self, call: &ast::Call) -> Option<Value> {
+        let [list] = call.args.as_slice() else {
+            self.errors.push(
+                Diagnostic::new("E0493", "`stitch` takes one list, written side by side.")
+                    .primary(call.word.to(call.close), format!("{} here", counted(call.args.len(), "list")))
+                    .rule("pieces beside each other build one value, so commas have nothing to separate")
+                    .tip("it is the list a `print` takes, and it is read the same way.")
+                    .fix("take the commas out"),
+            );
+            return None;
+        };
+        if list.between.iter().any(Option::is_some) {
+            self.errors.push(
+                Diagnostic::new("E0493", "`stitch` joins its pieces rather than working them out.")
+                    .primary(list.span, "an operator here")
+                    .rule("pieces beside each other build one value, and an operator between two of them is arithmetic")
+                    .fix("put the sum in brackets of its own"),
+            );
+            return None;
+        }
+
+        // Read under `str`, so a written value with no type in front of it is the
+        // characters it was written with -- which is what it is in a `print` too.
+        let outer = std::mem::replace(&mut self.reading, Ty::Str);
+        let built = self.stitching(list);
+        self.reading = outer;
+        built
+    }
+
+    fn stitching(&mut self, list: &ast::Value) -> Option<Value> {
+        let mut pieces: Vec<Value> = Vec::new();
+        let mut so_far = String::new();
+        for term in &list.terms {
+            // A written value with no type, or an escape, is known here and now, so a
+            // run of them stays one piece rather than becoming a join while it runs.
+            if let ast::Term::Piece(
+                piece @ (ast::Piece::Written { ty: None, .. } | ast::Piece::Escape(_)),
+            ) = term
+            {
+                so_far.push_str(&self.literal(piece)?);
+                continue;
+            }
+            let value = self.term(term)?;
+            let found = self.type_of(&value, term.span())?;
+            if !so_far.is_empty() {
+                pieces.push(Value::Text(std::mem::take(&mut so_far)));
+            }
+            pieces.push(match found {
+                Ty::Str => value,
+                ty => Value::Said { of: Box::new(value), ty },
+            });
+        }
+        if pieces.is_empty() {
+            return Some(Value::Text(so_far));
+        }
+        if !so_far.is_empty() {
+            pieces.push(Value::Text(so_far));
+        }
+        Some(Value::Join(pieces))
+    }
+
     /// A call to a function the writer declared.
     fn called(&mut self, which: u32, call: &ast::Call) -> Option<Value> {
         let args = self.arguments(which, call.name, &call.args, call.close)?;
@@ -2089,13 +2163,16 @@ impl<'a> Checker<'a> {
             };
             return self.called(which, call);
         }
+        if self.text(call.name) == "stitch" {
+            return self.stitched(call);
+        }
         if self.text(call.name) != "count" {
             let name = self.text(call.name).to_string();
             self.errors.push(
                 Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
                     .primary(call.name, "here")
                     .rule("a bare word after `call` is something the language provides, and this names none of them")
-                    .tip("`count` is the one that comes with the language.")
+                    .tip("`count` and `stitch` are the ones that come with the language.")
                     .fix(format!("`call '{name}'[…]` if you declared it with `fn`")),
             );
             return None;
@@ -2357,7 +2434,7 @@ impl<'a> Checker<'a> {
             Value::Bool(_) => Some(Ty::Bool),
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array { .. } => None,
-            Value::Join(_) => Some(Ty::Str),
+            Value::Join(_) | Value::Said { .. } => Some(Ty::Str),
             Value::Not(_) => Some(Ty::Bool),
             Value::Count(_) => Some(Ty::Int { bits: 64, signed: true }),
             Value::Copied(of) => self.type_of(of, span),

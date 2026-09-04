@@ -63,7 +63,7 @@ Both print the same thing, which is not a coincidence — it is
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
-| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down |
+| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch` for the one conversion |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, and `Decimal` behind `d32` and `d64` |
 | **QIR** (`quench-qir`) | **Working** — nine types, SSA with block parameters, verified before any backend sees it, and written down |
@@ -238,6 +238,29 @@ Both print the same thing, which is not a coincidence — it is
   stop, which is the difference between a float and an `e`. `^` and `mod` are refused
   for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
   they cannot round differently.
+- **`call stitch[…]` is how a number becomes text**, and it is the only conversion in
+  the language. Juxtaposing text with a number is refused — nothing converts on its own
+  — and this is how a program says *do it anyway*; the word being written is what makes
+  it a request rather than a guess. It takes the list a `print` takes, pieces side by
+  side, of any types:
+
+  ```quench
+  START {
+      var.immut.i64 ['n'] = [*42*];
+      var.immut.d64 ['due'] = [*7.00*];
+      var.immut.str ['line'] = [call stitch[*item * 'n' *, * 'due' *!*]];
+      print.stdout['line' \n];
+  }
+  ```
+
+  ```text
+  item 42, 7.00!
+  ```
+
+  What it builds is what a `print` would have written, character for character — each
+  is the same expression as the other, so a `d64` keeps its cohort here too. Without it
+  a program could *show* a number and never hold the text of one, which left no way to
+  build a message, a filename, or a line for a file.
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit

@@ -192,7 +192,7 @@ pub fn program_under(
 
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(20) {
+        match rng.upto(22) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -273,6 +273,58 @@ pub fn program_under(
                     b.bin(op, lhs, rhs)
                 };
                 numbers.push(value);
+            }
+            15 => {
+                // `stitch`: the same formatting a `print` does, handed back instead of
+                // written. Two engines could agree on every printed character and still
+                // differ here, because this is a different code path to the same
+                // answer -- and the answer becomes a piece of text the program can then
+                // compare, which is how it reaches the number a run is checked on.
+                let stream = b.const_i64(0);
+                let said = match rng.upto(7) {
+                    0 => {
+                        let n = rng.pick(&numbers);
+                        b.call_host(Host::SayI64, &[n])
+                    }
+                    1 => {
+                        let n = rng.pick(&numbers);
+                        b.call_host(Host::SayU64, &[n])
+                    }
+                    2 => {
+                        let x = rng.pick(&floats);
+                        let width = b.const_i64(match float_ty {
+                            Ty::F64 => 64,
+                            Ty::F32 => 32,
+                            _ => 16,
+                        });
+                        b.call_host(Host::SayFloat, &[x, width])
+                    }
+                    3 => {
+                        let d = rng.pick(&decimals);
+                        b.call_host(Host::SayDecimal, &[d])
+                    }
+                    4 => {
+                        let e = rng.pick(&exacts);
+                        b.call_host(Host::SayExact, &[e])
+                    }
+                    5 => {
+                        let Some(&flag) = flags.last() else { continue };
+                        b.call_host(Host::SayBool, &[flag])
+                    }
+                    _ => {
+                        let handle = rng.pick(&handles);
+                        let kind = b.const_i64(0); // `Elements::I64`
+                        let deep = b.const_i64(0);
+                        b.call_host(Host::SayArray, &[handle, kind, deep])
+                    }
+                };
+                texts.push(said);
+
+                // Written as well as kept, sometimes, so that the two paths to the same
+                // characters are both on the page and a difference between them shows.
+                if rng.upto(2) == 0 {
+                    b.call_host(Host::PrintText, &[stream, said]);
+                }
             }
             14 => {
                 // Printing, which is the only thing a program says that an answer

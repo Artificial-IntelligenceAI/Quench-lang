@@ -1880,3 +1880,98 @@ START {
         "4.0",
     );
 }
+
+#[test]
+fn stitch_is_how_a_number_becomes_text() {
+    // The one conversion in the language. A program could always *show* a number and
+    // could not hold the text of one, so no message, no log line, no file.
+    assert_eq!(
+        said("\
+START {
+    var.immut.i64 ['n'] = [*42*];
+    var.immut.str ['line'] = [call stitch[*n is * 'n' *!*]];
+    print.stdout['line'];
+}
+"),
+        "n is 42!",
+    );
+}
+
+#[test]
+fn stitch_writes_every_type_the_way_print_does() {
+    // Each `Say` is the same expression as the `Print` beside it, so the two cannot
+    // drift: a `d64` keeps its cohort, an `e` wears a denominator, a `u64` reads as
+    // unsigned, and an array wears its brackets.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['x'] = [*1.5*];
+    var.immut.e ['third'] = [*1* / *3*];
+    var.immut.d64 ['due'] = [*7.00*];
+    var.immut.bool ['yes'] = [*true*];
+    var.immut.arr.i64 (3) ['xs'] = [*1* *2* *3*];
+    var.immut.u64 ['big'] = [*18446744073709551615*];
+    print.stdout[call stitch['x' str:* * 'third' str:* * 'due' str:* * 'yes' str:* * 'xs' str:* * 'big']];
+}
+"),
+        "1.5 1/3 7.00 true [1 2 3] 18446744073709551615",
+    );
+}
+
+#[test]
+fn what_stitch_builds_is_what_print_would_have_written() {
+    // The claim that makes one implementation of each rather than two: the text a
+    // program keeps and the text it shows are the same characters.
+    let both = said("\
+START {
+    var.immut.b64 ['x'] = [*0.1* + *0.2*];
+    print.stdout['x' \\n];
+    print.stdout[call stitch['x'] \\n];
+}
+");
+    let lines: Vec<&str> = both.lines().collect();
+    assert_eq!(lines.len(), 2, "{both}");
+    assert_eq!(lines[0], lines[1], "printed and stitched must agree");
+}
+
+#[test]
+fn a_stitched_string_is_a_string_like_any_other() {
+    assert_eq!(
+        said("\
+fn.file.str ['line for'] [immut.i64 'n', immut.d64 'price'] {
+    give [call stitch[*item * 'n' *: * 'price']];
+}
+START {
+    var.immut.str ['a'] = [call 'line for'[*7*, *2.50*]];
+    var.immut.str ['b'] = [call 'line for'[*7*, *2.50*]];
+    var.immut.bool ['same'] = ['a' == 'b'];
+    var.immut.str ['joined'] = ['a' *, again*];
+    print.stdout['same' str:* * 'joined'];
+}
+"),
+        "true item 7: 2.50, again",
+    );
+}
+
+#[test]
+fn stitch_takes_one_list_and_no_arithmetic() {
+    for (source, expected) in [
+        (
+            "START { var.immut.str ['x'] = [call stitch[*a*, *b*]]; print.stdout['x']; }",
+            "takes one list",
+        ),
+        (
+            "START { var.immut.str ['x'] = [call stitch[*1* + *2*]]; print.stdout['x']; }",
+            "joins its pieces rather than working them out",
+        ),
+    ] {
+        let rendered = report(source);
+        assert!(rendered.contains(expected), "{source}\n{rendered}");
+        assert!(rendered.contains("Error code: E0493"), "{source}\n{rendered}");
+    }
+
+    // And juxtaposing text with a number is still refused without it, which is the
+    // rule `stitch` is the exception to.
+    let bare = report("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['x'] = [*n is * 'n']; }");
+    assert!(bare.contains("text is made of text"), "{bare}");
+}
