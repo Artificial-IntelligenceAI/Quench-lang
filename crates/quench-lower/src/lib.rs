@@ -902,6 +902,17 @@ fn emit(
                 Ty::Str => unreachable!("the checker never wraps text in a `Said`"),
             }
         }
+        // Which of the two answers is the project's decision, written in here as one
+        // instruction or the other rather than as a mode an engine reads -- the same
+        // way `division` and `overflow` are.
+        Value::CountText(of) => {
+            let text = emit(b, module, of, held, w);
+            let host = match w.settings.characters {
+                quench_conf::Characters::Clusters => qir::Host::TextClusters,
+                quench_conf::Characters::Letters => qir::Host::TextLetters,
+            };
+            b.call_host(host, &[text])
+        }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);
             b.not(value)

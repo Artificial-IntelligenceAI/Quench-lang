@@ -11,7 +11,7 @@
 //! Grapheme_Cluster_Break class with every other and then does it again with a mark in
 //! between, which is how the rules that only misfire in combination get caught.
 
-use quench_diag::grapheme::graphemes;
+use quench_text::grapheme::graphemes;
 
 /// One case, taken apart into the clusters it says the string has.
 fn expected(case: &str) -> Vec<String> {

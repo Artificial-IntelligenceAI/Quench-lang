@@ -676,6 +676,16 @@ extern "C" fn say_array(rt: *mut Runtime, handle: i64, kind: i64, depth: i64) ->
     keep_text(written)
 }
 
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_clusters(_rt: *mut Runtime, at: i64) -> i64 {
+    HEAP.with(|h| quench_text::grapheme::count(h.borrow().said(at)) as i64)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_letters(_rt: *mut Runtime, at: i64) -> i64 {
+    HEAP.with(|h| h.borrow().said(at).chars().count() as i64)
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
     match trouble {
@@ -1076,6 +1086,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
+    builder.symbol("quench_text_clusters", text_clusters as *const u8);
+    builder.symbol("quench_text_letters", text_letters as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
     builder.symbol("quench_to_b16", to_b16 as *const u8);
     builder.symbol("quench_text_compare", text_compare as *const u8);
@@ -1154,6 +1166,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
+        (qir::Host::TextClusters, "quench_text_clusters"),
+        (qir::Host::TextLetters, "quench_text_letters"),
         (qir::Host::PrintFloat, "quench_print_float"),
         (qir::Host::ToB16, "quench_to_b16"),
         (qir::Host::TextCompare, "quench_text_compare"),

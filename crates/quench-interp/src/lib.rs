@@ -608,6 +608,14 @@ fn evaluate(
                     let shown = shown(slots[args[0].0 as usize], kind, depth, heap);
                     return Ok(heap.text(shown));
                 }
+                qir::Host::TextClusters => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    return Ok(quench_text::grapheme::count(said) as i64);
+                }
+                qir::Host::TextLetters => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    return Ok(said.chars().count() as i64);
+                }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);

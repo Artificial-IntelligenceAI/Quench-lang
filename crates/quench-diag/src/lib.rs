@@ -23,7 +23,7 @@
 //! separated here rather than left for whoever writes the renderer to conflate.
 
 pub mod diag;
-pub mod grapheme;
+pub use quench_text::grapheme;
 pub mod render;
 pub mod source;
 

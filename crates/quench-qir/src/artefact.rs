@@ -321,6 +321,8 @@ fn host_code(host: Host) -> u8 {
         Host::SayExact => 37,
         Host::SayDecimal => 38,
         Host::SayArray => 39,
+        Host::TextClusters => 40,
+        Host::TextLetters => 41,
         Host::PowI64 => 22,
         Host::PowI64Trapping => 23,
     }
@@ -660,6 +662,8 @@ impl<'a> Reader<'a> {
             37 => Host::SayExact,
             38 => Host::SayDecimal,
             39 => Host::SayArray,
+            40 => Host::TextClusters,
+            41 => Host::TextLetters,
             22 => Host::PowI64,
             23 => Host::PowI64Trapping,
             code => return Err(Wrong::Unknown { what: "a runtime call", code }),

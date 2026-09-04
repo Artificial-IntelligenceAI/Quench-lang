@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+quench-text = { path = "../quench-text" }
 quench-conf = { path = "../quench-conf" }
 quench-qir = { path = "../quench-qir" }
 quench-num = { path = "../quench-num" }

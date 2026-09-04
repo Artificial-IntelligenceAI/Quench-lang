@@ -352,11 +352,15 @@ dependencies = [
  "quench-heap",
  "quench-num",
  "quench-qir",
+ "quench-text",
 ]
 
 [[package]]
 name = "quench-diag"
 version = "0.0.0"
+dependencies = [
+ "quench-text",
+]
 
 [[package]]
 name = "quench-gen"
@@ -385,6 +389,7 @@ dependencies = [
  "quench-heap",
  "quench-num",
  "quench-qir",
+ "quench-text",
 ]
 
 [[package]]
@@ -424,6 +429,10 @@ version = "0.0.0"
 dependencies = [
  "quench-diag",
 ]
+
+[[package]]
+name = "quench-text"
+version = "0.0.0"
 
 [[package]]
 name = "quote"

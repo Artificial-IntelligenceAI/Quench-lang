@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Division, Logic, NoNumber, Overflow, Settings};
+use quench_conf::{Characters, Division, Logic, NoNumber, Overflow, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -66,6 +66,7 @@ pub fn settings_for(seed: u64) -> Settings {
         division: if rng.upto(2) == 0 { Division::Truncated } else { Division::Floored },
         logic: if rng.upto(2) == 0 { Logic::StopsEarly } else { Logic::AsksBoth },
         no_number: if rng.upto(2) == 0 { NoNumber::CarriesOn } else { NoNumber::Stops },
+        characters: if rng.upto(2) == 0 { Characters::Clusters } else { Characters::Letters },
         overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
         ..Settings::default()
     }
@@ -172,7 +173,16 @@ pub fn program_under(
 
     // Pieces of text, including two that differ only past the end of the shorter, since
     // that is the comparison a length check would get wrong.
-    let mut texts: Vec<Value> = ["", "a", "ab", "b"]
+    let mut texts: Vec<Value> = [
+        "",
+        "a",
+        "ab",
+        "b",
+        // Two whose length depends on the answer: `é` written as `e` and a combining
+        // acute is one cluster and two scalars, and the family is one and seven.
+        "e\u{0301}",
+        "\u{1F9D1}\u{200D}\u{1F9D1}\u{200D}\u{1F9D2}\u{200D}\u{1F9D2}",
+    ]
         .iter()
         .map(|t| {
             let at = module.intern(t);
@@ -432,6 +442,15 @@ pub fn program_under(
                 if rng.upto(2) == 0 {
                     let joined = b.call_host(Host::TextJoin, &[l, r]);
                     texts.push(joined);
+                    continue;
+                }
+                if rng.upto(3) == 0 {
+                    let host = match settings.characters {
+                        Characters::Clusters => Host::TextClusters,
+                        Characters::Letters => Host::TextLetters,
+                    };
+                    let how_many = b.call_host(host, &[l]);
+                    numbers.push(how_many);
                     continue;
                 }
                 let order = b.call_host(Host::TextCompare, &[l, r]);

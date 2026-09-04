@@ -63,7 +63,7 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "exact-read", "exact-add", "exact-sub", "exact-mul", "exact-div", "exact-pow",
         "exact-compare",
         // Text, which is the other thing built while a program runs.
-        "text-join", "text-compare",
+        "text-join", "text-compare", "text-clusters", "text-letters",
         // `stitch`, which is the same formatting as a `print` reached another way.
         "say-i64", "say-u64", "say-float", "say-decimal", "say-exact", "say-bool",
         "say-array",

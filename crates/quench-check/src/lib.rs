@@ -290,6 +290,9 @@ pub enum Value {
     /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
     /// its own: it is the handle, which is what naming a variable already gives.
     Copied(Box<Value>),
+    /// How many characters a piece of text has, asked while it runs. Which of the two
+    /// answers it gives is `[defaults] characters`, and the lowering picks it.
+    CountText(Box<Value>),
     /// How many an array holds, asked while it runs — which is what `count` becomes on
     /// an array that grows, and what it never becomes on one that does not.
     Count(Box<Value>),
@@ -2212,13 +2215,17 @@ impl<'a> Checker<'a> {
                 })
             }
             Ty::Arr { .. } => Some(Value::Count(Box::new(built))),
+            // A different question with the same word, because it is the same question:
+            // how many things are in this. What one character *is* is
+            // `[defaults] characters`, and it is the only place text has a setting.
+            Ty::Str => Some(Value::CountText(Box::new(built))),
             other => {
                 self.errors.push(
                     Diagnostic::new("E0457", format!("`count` was given {} `{}`.", other.article(), other.name()))
                         .primary(one.span, format!("{} `{}`", other.article(), other.name()))
-                        .rule("only an array holds a number of things")
-                        .tip("counting the characters of a `str` is a different question, and is not built yet.")
-                        .fix("name an array"),
+                        .rule("only an array and a piece of text hold a number of things")
+                        .tip("a number holds one thing, which is itself.")
+                        .fix("name an array or a `str`"),
                 );
                 None
             }
@@ -2436,7 +2443,9 @@ impl<'a> Checker<'a> {
             Value::Array { .. } => None,
             Value::Join(_) | Value::Said { .. } => Some(Ty::Str),
             Value::Not(_) => Some(Ty::Bool),
-            Value::Count(_) => Some(Ty::Int { bits: 64, signed: true }),
+            Value::Count(_) | Value::CountText(_) => {
+                Some(Ty::Int { bits: 64, signed: true })
+            }
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),

@@ -139,6 +139,32 @@ pub enum NoNumber {
     Stops,
 }
 
+/// What counts as one character of a `str`.
+///
+/// **Semantic**, and the only setting so far that is about text rather than numbers.
+/// `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is 1 under one and 7 under the
+/// other, because that emoji is seven scalars welded together with zero-width joiners
+/// and one thing on the page.
+///
+/// The default is [`Characters::Clusters`] because it is what a person counting them
+/// means, and because Quench already has the whole of UAX #29 for putting a caret under
+/// the right column — the algorithm was there before the question was asked. What it
+/// costs is that the answer is tied to a Unicode version: a cluster is defined by
+/// tables that Unicode revises, so a program can count differently after a bump that
+/// nothing else in the language would notice.
+///
+/// [`Characters::Letters`] is one Unicode scalar, which is fixed forever and has no
+/// tables behind it at all. Whether that is worth the emoji answering 7 is the choice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Characters {
+    /// One grapheme cluster: what a reader sees as a single character. Tied to the
+    /// Unicode version the tables were generated from.
+    #[default]
+    Clusters,
+    /// One Unicode scalar. Never needs a table, and never changes.
+    Letters,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -159,6 +185,8 @@ pub struct Settings {
     pub logic: Logic,
     /// `[defaults] no-number`
     pub no_number: NoNumber,
+    /// `[defaults] characters`
+    pub characters: Characters,
     /// `[run] engine`
     pub engine: Engine,
     /// `[build] optimise`
@@ -238,6 +266,12 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 "stops" => settings.no_number = NoNumber::Stops,
                 _ => errors
                     .push(bad_value(span_of(value), key, value, &["carries-on", "stops"])),
+            },
+            ("defaults", "characters") => match value {
+                "clusters" => settings.characters = Characters::Clusters,
+                "letters" => settings.characters = Characters::Letters,
+                _ => errors
+                    .push(bad_value(span_of(value), key, value, &["clusters", "letters"])),
             },
             ("defaults", "overflow") => match value {
                 "wrap" => settings.overflow = Overflow::Wrap,

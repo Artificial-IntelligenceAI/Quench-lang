@@ -449,6 +449,14 @@ pub enum Host {
     /// `(handle, elements, depth)` — the same square brackets a `print` shows.
     SayArray,
 
+    /// `(text)` — how many characters a piece of text has.
+    ///
+    /// Two of them, because `[defaults] characters` is semantic and every semantic
+    /// setting is carried as a separate instruction rather than as a mode an engine
+    /// reads. `count['🧑‍🧑‍🧒‍🧒']` is 1 through the first and 7 through the second.
+    TextClusters,
+    TextLetters,
+
     /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
     /// negative exponent: the answer to that is a fraction and this is a whole number.
     PowI64,
@@ -497,6 +505,8 @@ impl Host {
             Host::SayExact => "say-exact",
             Host::SayDecimal => "say-decimal",
             Host::SayArray => "say-array",
+            Host::TextClusters => "text-clusters",
+            Host::TextLetters => "text-letters",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
         }
@@ -535,6 +545,7 @@ impl Host {
             }
             Host::DecimalCompare => &[Ty::Decimal, Ty::Decimal],
             Host::PrintDecimal => &[Ty::I64, Ty::Decimal],
+            Host::TextClusters | Host::TextLetters => &[Ty::Text],
             Host::SayI64 | Host::SayU64 => &[Ty::I64],
             Host::SayBool => &[Ty::Bool],
             Host::SayFloat => &[Ty::F64, Ty::I64],

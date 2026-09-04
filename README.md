@@ -62,7 +62,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Lowering** (`quench-lower`) | **Working** — the checked tree turned into QIR, settings written in as instructions |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
-| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics |
+| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Five semantic knobs, so the oracle proves thirty-two languages |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch` for the one conversion |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, and `Decimal` behind `d32` and `d64` |
@@ -238,6 +238,13 @@ Both print the same thing, which is not a coincidence — it is
   stop, which is the difference between a float and an `e`. `^` and `mod` are refused
   for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
   they cannot round differently.
+- **`call count['s']` counts characters, and what a character *is* is a setting.**
+  `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is **1** under
+  `characters = "clusters"` and **7** under `"letters"`, because that emoji is seven
+  scalars welded together with zero-width joiners and one thing on the page. `clusters`
+  is the default and is the whole of UAX #29, pinned to Unicode 17.0.0 and checked
+  against Unicode's own 766-case conformance suite. What it costs is that the answer is
+  tied to a Unicode version; `letters` is one scalar, needs no table, and never changes.
 - **`call stitch[…]` is how a number becomes text**, and it is the only conversion in
   the language. Juxtaposing text with a number is refused — nothing converts on its own
   — and this is how a program says *do it anyway*; the word being written is what makes
@@ -446,7 +453,7 @@ There are four semantic ones: `[defaults] division` (truncated or floored), `ove
 stops). Each is threaded all the way through — the generator picks a configuration per
 seed, both engines carry the choice as **separate QIR instructions** rather than as a
 mode they interpret, and a disagreement names the settings it happened under. So the
-oracle proves sixteen languages rather than one, three ways of running each, since it
+oracle proves thirty-two languages rather than one, three ways of running each, since it
 sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 28 seconds.
 
 `logic` is the one worth reading the note for: it was **not** a semantic setting until

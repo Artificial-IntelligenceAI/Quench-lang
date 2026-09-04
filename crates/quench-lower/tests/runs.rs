@@ -1975,3 +1975,29 @@ fn stitch_takes_one_list_and_no_arithmetic() {
     let bare = report("START { var.immut.i64 ['n'] = [*1*]; var.immut.str ['x'] = [*n is * 'n']; }");
     assert!(bare.contains("text is made of text"), "{bare}");
 }
+
+#[test]
+fn what_counts_as_one_character_is_a_setting() {
+    // The only setting about text rather than numbers, and the one place the answer is
+    // visible: `é` written as two scalars, and an emoji welded out of seven.
+    let source = "\
+START {
+    var.immut.str ['plain'] = [*café*];
+    var.immut.str ['acute'] = [*e\u{0301}*];
+    var.immut.str ['family'] = [*\u{1F9D1}\u{200D}\u{1F9D1}\u{200D}\u{1F9D2}\u{200D}\u{1F9D2}*];
+    print.stdout[call stitch[call count['plain'] str:* * call count['acute'] str:* * call count['family']]];
+}
+";
+    let under = |characters| {
+        said_under(source, quench_conf::Settings { characters, ..Default::default() })
+    };
+    assert_eq!(under(quench_conf::Characters::Clusters), "4 1 1");
+    assert_eq!(under(quench_conf::Characters::Letters), "4 2 7");
+}
+
+#[test]
+fn count_takes_an_array_or_a_piece_of_text_and_nothing_else() {
+    let rendered = report("START { var.immut.i64 ['n'] = [*1*]; var.immut.i64 ['c'] = [call count['n']]; }");
+    assert!(rendered.contains("`count` was given an `i64`"), "{rendered}");
+    assert!(rendered.contains("an array and a piece of text"), "{rendered}");
+}

@@ -35,6 +35,21 @@ logic = "stops-early"
 # you named.
 no-number = "carries-on"
 
+# Also changes what a program answers, and the only one so far about text rather than
+# numbers. What counts as one character of a `str`, which is what `count` counts.
+#
+# `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is 1 under `clusters` and 7 under
+# `letters`, because that emoji is seven scalars welded together with zero-width joiners
+# and one thing on the page.
+#
+# `clusters` is the default because it is what a person counting characters means, and
+# because Quench already had the whole of UAX #29 for putting a caret under the right
+# column -- the algorithm arrived before the question did. What it costs is that the
+# answer is tied to a Unicode version: clusters are defined by tables Unicode revises,
+# so a program can count differently after a bump nothing else would notice. `letters`
+# is one Unicode scalar, which needs no table and never changes.
+characters = "clusters"
+
 [build]
 # Changes what gets delivered, never what a program answers -- every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`, or
