@@ -149,6 +149,24 @@ def main() -> int:
     every_word = [w for c in categories for w in c["words"]]
     missing = [w for c in categories for w in c["missing"]]
 
+    # The token kinds, split the way the compiler's own error messages split them:
+    # a kind whose name in a diagnostic is its own spelling in backticks is a
+    # symbol, and one described in words is not. Nothing is classified here.
+    tokens = [
+        {
+            "id": "symbols",
+            "label": "Symbols",
+            "words": [text.strip("`") for _, text in described if text.startswith("`")],
+        },
+        {
+            "id": "otherKinds",
+            "label": "The other kinds",
+            "words": [text for _, text in described if not text.startswith("`")],
+        },
+    ]
+    for group in tokens:
+        group["count"] = len(group["words"])
+
     data = {
         "readFrom": {
             "commit": git("rev-parse", "--short", "HEAD"),
@@ -162,6 +180,7 @@ def main() -> int:
         "confirmed": len(every_word) - len(missing),
         "missing": missing,
         "categories": categories,
+        "tokens": tokens,
     }
 
     written = json.dumps(data, indent=2) + "\n"

@@ -94,28 +94,29 @@ interface Counted {
   readonly confirmed: number;
   readonly missing: readonly string[];
   readonly categories: readonly Category[];
+  readonly tokens: readonly Group[];
 }
 
-/** Fills the picker from whatever categories the file happens to carry, and shows
-    the one chosen. Nothing about the groups is written down here — add a category
-    to the generator and it appears, with no change to this. */
-function wirePicker(counted: Counted): void {
-  const picker = document.getElementById("category");
-  const total = document.getElementById("category-count");
-  const list = document.getElementById("category-words");
+/** A group of things the page can list: a category of words, or a kind of token. */
+interface Group {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number;
+  readonly words: readonly string[];
+  readonly missing?: readonly string[];
+}
+
+/** Fills a picker from whatever groups it is handed and shows the one chosen.
+    Nothing about the groups is written down here — they come out of the generated
+    file, so a group added to the compiler appears with no change to this. */
+function wirePicker(pickerId: string, countId: string, listId: string,
+                    groups: readonly Group[], unit: string): void {
+  const picker = document.getElementById(pickerId);
+  const total = document.getElementById(countId);
+  const list = document.getElementById(listId);
   if (!(picker instanceof HTMLSelectElement) || total === null || list === null) {
     return;
   }
-
-  const everything: Category = {
-    id: "everything",
-    label: "Everything",
-    count: counted.words,
-    words: counted.categories.flatMap((category) => [...category.words]),
-    missing: [...counted.missing],
-    readFrom: null,
-  };
-  const groups = [everything, ...counted.categories];
 
   picker.replaceChildren();
   for (const group of groups) {
@@ -126,15 +127,24 @@ function wirePicker(counted: Counted): void {
   }
 
   const draw = (): void => {
-    const chosen = groups.find((group) => group.id === picker.value) ?? everything;
-    total.textContent = chosen.count === 1 ? "1 word" : `${String(chosen.count)} words`;
+    const chosen = groups.find((group) => group.id === picker.value) ?? groups[0];
+    if (chosen === undefined) {
+      return;
+    }
+    total.textContent = `${String(chosen.count)} ${unit}${chosen.count === 1 ? "" : "s"}`;
     list.replaceChildren();
     for (const word of chosen.words) {
       const item = document.createElement("li");
-      const code = document.createElement("code");
-      code.textContent = word;
-      item.appendChild(code);
-      if (chosen.missing.includes(word)) {
+      /* A spelling is set in the mono face; a kind described in words is not one. */
+      if (word.includes(" ")) {
+        item.textContent = word;
+        item.classList.add("said");
+      } else {
+        const code = document.createElement("code");
+        code.textContent = word;
+        item.appendChild(code);
+      }
+      if (chosen.missing?.includes(word) === true) {
         item.classList.add("gone");
         item.title = "No longer found in the source";
       }
@@ -144,6 +154,15 @@ function wirePicker(counted: Counted): void {
 
   picker.addEventListener("change", draw);
   draw();
+}
+
+/** Everything in a set of groups, as a group of its own. */
+function allOf(id: string, label: string, groups: readonly Group[]): Group {
+  const words = groups.flatMap((group) => [...group.words]);
+  return {
+    id, label, count: words.length, words,
+    missing: groups.flatMap((group) => [...(group.missing ?? [])]),
+  };
 }
 
 function show(id: string, value: number | null): void {
@@ -186,7 +205,10 @@ if (document.getElementById("reserved") !== null) {
           : `${String(derived)} of them read out of the compiler rather than listed`;
         say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
           + `${counted.readFrom.date}: ${String(counted.words)} words, ${how}.${drift}`);
-        wirePicker(counted);
+        const words = [allOf("everything", "Everything", counted.categories), ...counted.categories];
+        wirePicker("category", "category-count", "category-words", words, "word");
+        const tokens = [...counted.tokens, allOf("everyKind", "Every kind", counted.tokens)];
+        wirePicker("token", "token-count", "token-words", tokens, "kind");
       },
       (reason: unknown) => {
         say(`Could not read the counts, so nothing above is claimed: ${String(reason)}`);

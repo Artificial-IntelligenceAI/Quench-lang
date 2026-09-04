@@ -199,5 +199,49 @@
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
     }
+  ],
+  "tokens": [
+    {
+      "id": "symbols",
+      "label": "Symbols",
+      "words": [
+        "[",
+        "]",
+        "{",
+        "}",
+        "(",
+        ")",
+        ";",
+        ",",
+        ".",
+        ":",
+        "=",
+        "==",
+        "+",
+        "-",
+        "x",
+        "/",
+        "^",
+        "<",
+        ">",
+        "<==",
+        ">==",
+        "!=="
+      ],
+      "count": 22
+    },
+    {
+      "id": "otherKinds",
+      "label": "The other kinds",
+      "words": [
+        "a word",
+        "a bare number",
+        "a name",
+        "a written value",
+        "an escape",
+        "the end of the file"
+      ],
+      "count": 6
+    }
   ]
 }

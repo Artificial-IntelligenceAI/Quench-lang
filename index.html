@@ -98,6 +98,22 @@
     <code>quench words</code> prints.</p>
   </section>
 
+  <section class="picked glass" aria-label="The tokens a program is made of">
+    <div class="picked-head">
+      <label class="picked-label" for="token">Tokens in</label>
+      <select id="token" autocomplete="off"
+              data-tip="Symbols have a spelling of their own. The other kinds are described in words because they have none."></select>
+      <span class="picked-count" id="token-count">&mdash;</span>
+    </div>
+    <ul class="words" id="token-words"></ul>
+    <p class="picked-note">Twenty-two of the twenty-eight kinds of token are symbols, each
+    one its own spelling. The other six are described rather than spelled, because they
+    have no fixed spelling to give: a name is whatever stands between marks, a written
+    value whatever stands between the other pair, and a word is any bare word at all.
+    The split is the compiler&rsquo;s own &mdash; it is how each kind names itself in an
+    error message.</p>
+  </section>
+
   <p class="source" id="source">Counting&hellip;</p>
 </main>
 
