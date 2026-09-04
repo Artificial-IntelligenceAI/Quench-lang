@@ -11,7 +11,7 @@ START {
     print.stdout['hello' \n];
 
     # A built piece joins again like any other, and comes back out of a function.
-    var.immut.str ['both'] = ['hello' *  * greet[*Claude*]];
+    var.immut.str ['both'] = ['hello' *  * call 'greet'[*Claude*]];
     print.stdout['both' \n];
 
     # And compares equal to a written one, because comparing text asks what it

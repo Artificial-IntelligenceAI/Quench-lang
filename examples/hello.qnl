@@ -1,7 +1,3 @@
 START {
-    var.immut.str ['greeting'] = [*Hello*];
-    var.immut.i64 ['answer']   = [*42*];
-
-    print.stdout['greeting' str:*, World!* \n];
-    print.stdout[str:*The answer is * 'answer' str:*.* \n];
+    print.stdout[str:*Hello, World!* \n];
 }

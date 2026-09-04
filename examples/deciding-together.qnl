@@ -23,7 +23,7 @@ START {
 
     # Under `logic = "stops-early"` — the default — the right side is never asked,
     # so nothing is printed by this line. Under `asks-both` it is.
-    var.immut.bool ['x'] = ['f' and shout[*true*]];
+    var.immut.bool ['x'] = ['f' and call 'shout'[*true*]];
     print.stdout[str:*after: * 'x' \n];
 
     # And this is why stopping early is the default. Quench stops rather than having

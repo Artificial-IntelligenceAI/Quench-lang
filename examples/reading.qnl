@@ -1,0 +1,44 @@
+# Text becomes a number by being asked first. Nothing here recovers from a failure,
+# because nothing here fails: `is` is the question and `as` is the answer.
+
+fn.file.i64 ['total of'] [immut.str 'a', immut.str 'b'] {
+    if call is.i64['a'] and call is.i64['b'] {
+        give [call as.i64['a'] + call as.i64['b']];
+    }
+    give [*0*];
+}
+
+START {
+    var.immut.str ['line'] = [*42*];
+    if call is.i64['line'] {
+        var.immut.i64 ['n'] = [call as.i64['line']];
+        print.stdout[str:*read * 'n' \n];
+    }
+
+    # `as.i64['hello']` would stop the program, exactly like an index off the end of
+    # an array. Asking first is what makes that impossible rather than unlikely.
+    if not call is.i64[*hello*] {
+        print.stdout[str:*`hello` is no whole number* \n];
+    }
+
+    # The type has to be said, because text says nothing about what it holds: the same
+    # five characters are three different numbers and one refusal.
+    print.stdout[str:*`3.5` as i64 * call is.i64[*3.5*] str:*, b64 * call is.b64[*3.5*] \n];
+    print.stdout[str:*`3/4` as e   * call is.e[*3/4*] str:*, d64 * call is.d64[*3/4*] \n];
+
+    # And what each type accepts is what it could have been written with, which is one
+    # rule rather than two because one function decides both. `*200*` is a `u8` in a
+    # source file and is not an `i8`, and it is the same here.
+    print.stdout[str:*`200` as u8  * call is.u8[*200*] str:*, i8  * call is.i8[*200*] \n];
+
+    var.immut.b64 ['x'] = [call as.b64[*2.5*]];
+    var.immut.e ['r'] = [call as.e[*3/4*]];
+    var.immut.d64 ['d'] = [call as.d64[*0.10*]];
+    var.immut.bool ['t'] = [call as.bool[*true*]];
+    print.stdout[str:*read back: * 'x' str:* * 'r' str:* * 'd' str:* * 't' \n];
+
+    # A function of your own can wrap the pair, and the marks are what tell it from
+    # Quench's own: `call 'total of'` is the writer's, `call is.i64` is the language's.
+    var.immut.i64 ['sum'] = [call 'total of'[*17*, *25*]];
+    print.stdout[str:*17 + 25 = * 'sum' \n];
+}

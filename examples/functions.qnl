@@ -26,17 +26,17 @@ fn.file.i64 ['factorial'] [immut.i64 'n'] {
     if 'n' <== *1* {
         give [*1*];
     } else {
-        give ['n' x factorial['n' - *1*]];
+        give ['n' x call 'factorial'['n' - *1*]];
     }
 }
 
 START {
-    greet[*Tankun*];
+    call 'greet'[*Tankun*];
 
-    print.stdout[str:*1 + 2 = * add[*1*, *2*] \n];
-    print.stdout[str:*10! = * factorial[*10*] \n];
+    print.stdout[str:*1 + 2 = * call 'add'[*1*, *2*] \n];
+    print.stdout[str:*10! = * call 'factorial'[*10*] \n];
 
-    if past[*42*] {
+    if call 'past'[*42*] {
         print.stdout[str:*42 is past * 'LIMIT' \n];
     }
 }

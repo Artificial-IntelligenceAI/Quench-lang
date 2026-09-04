@@ -11,7 +11,9 @@
 //!    ```` ```text ```` block follows it, which means it is there to fail and rule two
 //!    owns it.
 //! 2. **A ```` ```text ```` block right after one is exactly what it says**, character
-//!    for character.
+//!    for character — the diagnostic when the program does not compile, and what it
+//!    prints when it does. Which of the two it is follows from the program, so there is
+//!    nothing for a writer to mark and nothing to get wrong.
 //! 3. **An inline snippet that is a whole statement is one.** Anything ending in `;`
 //!    or `}` gets compiled; anything with an ellipsis in it is an illustration and is
 //!    left alone. A name it never declared is allowed to be undeclared — the snippet is
@@ -28,18 +30,26 @@ fn readme() -> String {
 }
 
 /// Every fenced block, with its tag, in the order they appear.
+///
+/// Indented ones too, and that was not always so: a fence inside a bullet is indented
+/// to sit under it, and this used to insist on column nought. So three of the README's
+/// programs -- every one written as part of a bullet, which is most of the interesting
+/// ones -- were never compiled and never run. A block nothing checks is prose with
+/// syntax highlighting.
 fn blocks(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut lines = text.lines();
     while let Some(line) = lines.next() {
-        let Some(tag) = line.strip_prefix("```") else { continue };
+        let indent = line.len() - line.trim_start().len();
+        let Some(tag) = line.trim_start().strip_prefix("```") else { continue };
         let tag = tag.trim().to_string();
         let mut body = String::new();
         for line in lines.by_ref() {
-            if line.starts_with("```") {
+            if line.trim_start().starts_with("```") {
                 break;
             }
-            body.push_str(line);
+            // Back out the indent the bullet put on, so the program is the program.
+            body.push_str(if line.len() >= indent { &line[indent..] } else { line.trim_start() });
             body.push('\n');
         }
         out.push((tag, body));
@@ -108,20 +118,56 @@ fn every_quench_block_in_the_readme_is_a_program() {
 fn a_text_block_after_a_quench_one_is_what_that_program_says() {
     // Which is how the README shows off its errors, and how one of them came to show
     // off an error the compiler had stopped producing.
+    //
+    // "Says" is two things, and which one is decided by the program rather than by a
+    // marker somebody has to remember: a program that does not compile says a
+    // diagnostic, and one that does says whatever it prints. The convention could only
+    // express the first until the Hello, World example needed the second -- and a
+    // README that cannot show a program's output at the top of it is a README with the
+    // wrong rule, not an example with the wrong shape.
     let text = readme();
     let blocks = blocks(&text);
-    let mut checked = 0;
+    let (mut refusals, mut outputs) = (0, 0);
     for pair in blocks.windows(2) {
         let [(first, source), (second, shown)] = pair else { continue };
         if first != "quench" || second != "text" {
             continue;
         }
         let out = quench_lower::lower(source);
-        let said = quench_diag::report(&SourceFile::new("src/main.qnl", source), &out.errors);
-        assert_eq!(said.trim_end(), shown.trim_end(), "\n--- the README says ---\n{shown}\n--- and it says ---\n{said}");
-        checked += 1;
+        let compiled_ok = out.ok();
+        let Some(module) = out.module.filter(|_| compiled_ok) else {
+            let said =
+                quench_diag::report(&SourceFile::new("src/main.qnl", source), &out.errors);
+            assert_eq!(said.trim_end(), shown.trim_end(), "\n--- the README says ---\n{shown}\n--- and it says ---\n{said}");
+            refusals += 1;
+            continue;
+        };
+
+        // Both engines, because the README's claim about the two of them agreeing is
+        // one this can check rather than repeat.
+        let (mut written, mut wrong) = (Vec::new(), Vec::new());
+        quench_interp::run_writing(
+            &module,
+            &mut quench_interp::Writing { out: &mut written, err: &mut wrong },
+        )
+        .expect("it runs");
+        let walked = quench_dev::Printed {
+            out: String::from_utf8(written).expect("text"),
+            err: String::from_utf8(wrong).expect("text"),
+        };
+        let (_, compiled) =
+            quench_dev::compile(&module).expect("it compiles").run_capturing();
+        assert_eq!(walked, compiled, "the engines printed different things:\n{source}");
+        assert_eq!(
+            walked.out.trim_end(),
+            shown.trim_end(),
+            "\n--- the README says ---\n{shown}\n--- and it printed ---\n{}",
+            walked.out
+        );
+        outputs += 1;
     }
-    assert!(checked > 0, "no program-and-output pair found; has the README stopped showing one?");
+    assert!(refusals > 0, "no program-and-diagnostic pair found; has the README stopped showing an error?");
+    assert!(outputs > 0, "no program-and-output pair found; has the README stopped showing what one prints?");
 }
 
 #[test]

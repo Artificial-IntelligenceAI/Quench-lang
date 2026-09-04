@@ -35,13 +35,19 @@ nothing can check and which is therefore the only part to read sceptically.
 
 ```quench
 START {
-    var.immut.str ['greeting'] = [*Hello*];
-    var.immut.i64 ['answer']   = [*42*];
-
-    print.stdout['greeting' str:*, World!* \n];
-    print.stdout[str:*The answer is * 'answer' str:*.* \n];
+    print.stdout[str:*Hello, World!* \n];
 }
 ```
+
+```text
+Hello, World!
+```
+
+One line, and four of Quench's arguments are already in it. `START` is where a program
+begins, because `main` says nothing. `print` says **where it goes** — there is no default
+stream. `str:` says the value is text, because `*1000*` is a number under one type and
+four characters under another. And the text wears `*` marks, which is what lets a name
+hold a space, an apostrophe or an emoji everywhere else in the language.
 
 ```bash
 quench run examples/hello.qnl     # the Dev JIT
@@ -226,7 +232,9 @@ Both print the same thing, which is not a coincidence — it is
       var.immut.d64 ['b'] = [*0.2*];
       var.immut.b64 ['x'] = [*0.1*];
       var.immut.b64 ['y'] = [*0.2*];
-      print.stdout[str:*d64  * ['a' + 'b'] str:*  b64  * ['x' + 'y'] \n];
+      var.immut.d64 ['exact'] = ['a' + 'b'];
+      var.immut.b64 ['near']  = ['x' + 'y'];
+      print.stdout[str:*d64  * 'exact' str:*  b64  * 'near' \n];
   }
   ```
 
