@@ -326,6 +326,8 @@ fn host_code(host: Host) -> u8 {
         Host::FloatAlone => 42,
         Host::FloatPaired => 43,
         Host::FloatFused => 44,
+        Host::FloatSlow => 45,
+        Host::FloatPower => 46,
         Host::PowI64 => 22,
         Host::PowI64Trapping => 23,
     }
@@ -670,6 +672,8 @@ impl<'a> Reader<'a> {
             42 => Host::FloatAlone,
             43 => Host::FloatPaired,
             44 => Host::FloatFused,
+            45 => Host::FloatSlow,
+            46 => Host::FloatPower,
             22 => Host::PowI64,
             23 => Host::PowI64Trapping,
             code => return Err(Wrong::Unknown { what: "a runtime call", code }),

@@ -2109,3 +2109,39 @@ fn the_maths_takes_floats_of_one_width_and_says_so() {
     assert!(unknown.contains("there is nothing called `sin`"), "{unknown}");
     assert!(unknown.contains("`sqrt`"), "{unknown}");
 }
+
+#[test]
+fn the_maths_ieee_only_recommends_is_worked_out_rather_than_asked_for() {
+    // Every library gets these a little bit wrong in its own way, so three engines
+    // calling three libraries would be three answers. Quench works them out instead, at
+    // whatever width the particular answer needs, and rounds once.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['one'] = [*1.0*];
+    var.immut.b64 ['ten'] = [*10.0*];
+    var.immut.b64 ['two'] = [*2.0*];
+    print.stdout[call stitch[
+        call exp['one'] str:* *
+        call ln['ten'] str:* *
+        call pow['two', 'ten'] str:* *
+        call pow['two', *0.5*]
+    ]];
+}
+"),
+        "2.718281828459045 2.302585092994046 1024.0 1.4142135623730951",
+    );
+}
+
+#[test]
+fn the_recommended_maths_is_a_b64_and_says_why() {
+    let rendered = report("START { var.immut.b32 ['x'] = [*2.0*]; var.immut.b32 ['y'] = [call exp['x']]; print.stdout['y']; }");
+    assert!(rendered.contains("`exp` works on a `b64`"), "{rendered}");
+    assert!(rendered.contains("would round twice"), "{rendered}");
+    assert!(rendered.contains("Error code: E0495"), "{rendered}");
+
+    // And on something that is not a float at all, the reason is the other one.
+    let whole = report("START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call ln['n']]; print.stdout['y']; }");
+    assert!(whole.contains("`ln` works on a `b64`"), "{whole}");
+    assert!(whole.contains("because the standard settles those"), "{whole}");
+}

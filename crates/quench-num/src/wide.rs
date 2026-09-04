@@ -91,6 +91,17 @@ impl Wide {
             return if self.negative { -0.0 } else { 0.0 };
         }
         let top = self.mantissa.bits() as i64 + self.exponent; // one past the leading bit
+        // Far outside what a `b64` reaches, answered without arithmetic. Not only for
+        // speed: scaling toward an exponent of ten billion takes ten million steps, so
+        // this is the difference between an answer and a program that never finishes.
+        // The bounds are loose on purpose -- anything near the edge goes the long way,
+        // where the rounding is done properly.
+        if top > 1100 {
+            return if self.negative { f64::NEG_INFINITY } else { f64::INFINITY };
+        }
+        if top < -1200 {
+            return if self.negative { -0.0 } else { 0.0 };
+        }
         // Where the significand's last bit falls, for a normal `b64`.
         let mut lowest = top - 53;
         // Subnormal: the exponent cannot go below this, so bits are lost instead.
@@ -204,6 +215,19 @@ impl Wide {
             return self.clone();
         }
         Wide { exponent: self.exponent + by, ..self.clone() }
+    }
+
+    /// The whole-number part, ignoring the sign. What a test uses to read the digits of
+    /// a value off against a constant somebody else published.
+    pub fn floor_abs(&self) -> Big {
+        if self.is_zero() || self.mantissa.bits() as i64 + self.exponent <= 0 {
+            return Big::zero();
+        }
+        if self.exponent >= 0 {
+            self.mantissa.shifted_up(self.exponent as u64)
+        } else {
+            self.mantissa.shifted_down(self.exponent.unsigned_abs())
+        }
     }
 
     pub fn cmp_abs(&self, other: &Wide) -> Ordering {

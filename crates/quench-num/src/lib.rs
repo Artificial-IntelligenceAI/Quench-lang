@@ -11,6 +11,7 @@
 pub mod big;
 pub mod decimal;
 pub mod maths;
+pub mod transcend;
 pub mod wide;
 pub mod exact;
 

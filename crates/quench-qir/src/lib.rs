@@ -460,6 +460,16 @@ pub enum Host {
     FloatPaired,
     /// `(a, b, c, width)` — multiply and add with one rounding rather than two.
     FloatFused,
+    /// `(float, which)` — `exp` or `ln`, worked out until the rounding is certain.
+    ///
+    /// Kept apart from [`Host::FloatAlone`] because the two halves of a maths library
+    /// are not the same kind of thing. That one is what IEEE 754 *requires*, and the
+    /// machine has it. This is what IEEE only *recommends*, so it is computed here at
+    /// whatever width the particular answer needs — which is why there is no width
+    /// argument: only `b64` has it, and the checker says so.
+    FloatSlow,
+    /// `(a, b)` — `a` to the power `b`, the same way.
+    FloatPower,
 
     /// `(text)` — how many characters a piece of text has.
     ///
@@ -520,6 +530,8 @@ impl Host {
             Host::FloatAlone => "float-alone",
             Host::FloatPaired => "float-paired",
             Host::FloatFused => "float-fused",
+            Host::FloatSlow => "float-slow",
+            Host::FloatPower => "float-power",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
             Host::PowI64 => "pow-i64",
@@ -563,6 +575,8 @@ impl Host {
             Host::FloatAlone => &[Ty::F64, Ty::I64, Ty::I64],
             Host::FloatPaired => &[Ty::F64, Ty::F64, Ty::I64, Ty::I64],
             Host::FloatFused => &[Ty::F64, Ty::F64, Ty::F64, Ty::I64],
+            Host::FloatSlow => &[Ty::F64, Ty::I64],
+            Host::FloatPower => &[Ty::F64, Ty::F64],
             Host::TextClusters | Host::TextLetters => &[Ty::Text],
             Host::SayI64 | Host::SayU64 => &[Ty::I64],
             Host::SayBool => &[Ty::Bool],
@@ -629,7 +643,11 @@ impl Host {
             | Host::SayArray => Ty::Text,
             Host::ToB16 => Ty::F32,
             // Whatever width it was handed, which the call site says.
-            Host::FloatAlone | Host::FloatPaired | Host::FloatFused => Ty::F64,
+            Host::FloatAlone
+            | Host::FloatPaired
+            | Host::FloatFused
+            | Host::FloatSlow
+            | Host::FloatPower => Ty::F64,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub

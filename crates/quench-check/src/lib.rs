@@ -248,6 +248,12 @@ pub const PROVIDED: &[(&str, Provides)] = &[
     ("max", Provides::Paired(2)),
     ("remainder", Provides::Paired(3)),
     ("fma", Provides::Fused),
+    // The half IEEE only recommends, which Quench works out itself rather than asking a
+    // library that is a little bit wrong in its own way. `b64` only, for now: rounding a
+    // correctly-rounded `b64` down to a `b32` rounds twice, and twice is once too many.
+    ("exp", Provides::Slow(0)),
+    ("ln", Provides::Slow(1)),
+    ("pow", Provides::Power),
 ];
 
 /// What one of [`PROVIDED`] is, and how the checker reads it.
@@ -263,6 +269,10 @@ pub enum Provides {
     Paired(u8),
     /// Three floats in, one out, rounded once.
     Fused,
+    /// One `b64` in, one out, worked out until the rounding is certain.
+    Slow(u8),
+    /// Two `b64`s in, one out, the same way.
+    Power,
 }
 
 /// One variable.
@@ -334,6 +344,9 @@ pub enum Value {
     /// One of the maths functions IEEE 754 requires, on however wide a float it was
     /// given. `which` is the number the lowering writes beside it.
     Maths { which: u8, of: Vec<Value>, width: u8 },
+    /// One of the ones it only recommends, which Quench works out itself. A `b64`, and
+    /// only a `b64`.
+    Slowly { which: u8, of: Vec<Value> },
     /// How many characters a piece of text has, asked while it runs. Which of the two
     /// answers it gives is `[defaults] characters`, and the lowering picks it.
     CountText(Box<Value>),
@@ -1942,6 +1955,51 @@ impl<'a> Checker<'a> {
         self.at(name, &one.terms, close)
     }
 
+    /// `call exp['x']` — the maths IEEE 754 only recommends, worked out here.
+    ///
+    /// A `b64` and nothing narrower. Working the answer out for a `b64` and then rounding
+    /// that down to a `b32` rounds twice, and a value that sits just the wrong side of a
+    /// `b32` boundary comes out one step off — rarely, silently, and in both engines at
+    /// once. Doing it properly means rounding straight from the wide value to the narrow
+    /// format, which is a thing to build rather than a thing to assume.
+    fn slowly(&mut self, call: &ast::Call, name: &str, wants: usize, which: u8) -> Option<Value> {
+        if call.args.len() != wants {
+            self.errors.push(
+                Diagnostic::new("E0494", format!("`{name}` takes {}.", counted(wants, "number")))
+                    .primary(call.word.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                    .rule("a call brings one value for each thing it takes, in the same order")
+                    .fix(format!("give it {}", counted(wants, "number"))),
+            );
+            return None;
+        }
+        let mut built = Vec::with_capacity(wants);
+        for given in &call.args {
+            let outer = std::mem::replace(&mut self.reading, Ty::F64);
+            let value = self.tree(given);
+            self.reading = outer;
+            let value = value?;
+            match self.type_of(&value, given.span)? {
+                Ty::F64 => built.push(value),
+                other => {
+                    let narrow = matches!(other, Ty::F32 | Ty::F16);
+                    self.errors.push(
+                        Diagnostic::new("E0495", format!("`{name}` works on a `b64`, and this is {} `{}`.", other.article(), other.name()))
+                            .primary(given.span, format!("{} `{}`", other.article(), other.name()))
+                            .rule("IEEE 754 only recommends this one, so Quench works it out itself rather than asking a library — and it does that at one width")
+                            .tip(if narrow {
+                                "working it out for a `b64` and rounding that down would round twice, which is once too many."
+                            } else {
+                                "`+`, `-`, `x`, `/`, `sqrt` and the rest work on every width, because the standard settles those."
+                            })
+                            .fix("use a `b64`"),
+                    );
+                    return None;
+                }
+            }
+        }
+        Some(Value::Slowly { which, of: built })
+    }
+
     /// `call sqrt['x']` — the maths IEEE 754 requires, on whatever width it was given.
     ///
     /// Every argument is a float and they are all the same width, which is also the
@@ -2285,6 +2343,8 @@ impl<'a> Checker<'a> {
             Provides::Alone(which) => return self.maths(call, &name, 1, *which),
             Provides::Paired(which) => return self.maths(call, &name, 2, *which),
             Provides::Fused => return self.maths(call, &name, 3, 0),
+            Provides::Slow(which) => return self.slowly(call, &name, 1, *which),
+            Provides::Power => return self.slowly(call, &name, 2, 0),
             Provides::Count => {}
         }
 
@@ -2549,6 +2609,7 @@ impl<'a> Checker<'a> {
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array { .. } => None,
             Value::Join(_) | Value::Said { .. } => Some(Ty::Str),
+            Value::Slowly { .. } => Some(Ty::F64),
             Value::Maths { width, .. } => Some(match width {
                 16 => Ty::F16,
                 32 => Ty::F32,

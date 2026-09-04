@@ -108,8 +108,13 @@ deliberately.)
 
 **IEEE 754 only recommends these**, and no library delivers it: `sin`, `cos`, `tan`,
 `log`, `exp`, `pow`, `atan2`. Three engines calling three C libraries is three answers.
-The way out is the one `e` and decimal already take — one implementation, in Quench's
-own tree, that every engine calls — and until somebody writes it these stay out.
+
+`exp`, `ln` and `pow` are **built**, the way `e` and decimal are: one implementation in
+Quench's own tree that every engine calls. They are worked out in a float as wide as the
+answer needs and rounded once, and the rounding is only accepted when every value in the
+interval the answer might be in rounds the same way — Ziv's strategy, which makes them
+provably correctly rounded rather than probably. `sin`, `cos`, `tan` and `atan2` remain,
+and want π to a few thousand digits for argument reduction, which is a `Big`.
 
 ## The rest of the list
 

@@ -54,7 +54,7 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "FAdd", "FSub", "FMul", "FDiv",
         "FAddChecked", "FSubChecked", "FMulChecked", "FDivChecked", "to-b16",
         // The maths IEEE 754 requires, which every engine must round identically.
-        "float-alone", "float-paired", "float-fused",
+        "float-alone", "float-paired", "float-fused", "float-slow", "float-power",
         // Decimals, whose arithmetic both engines share and whose plumbing they do not.
         "decimal-read", "decimal-add", "decimal-sub", "decimal-mul", "decimal-div",
         "decimal-compare",

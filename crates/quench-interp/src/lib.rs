@@ -680,6 +680,20 @@ fn evaluate(
                         ),
                     });
                 }
+                qir::Host::FloatSlow => {
+                    let x = f64::from_bits(slots[args[0].0 as usize] as u64);
+                    let answer = if slots[args[1].0 as usize] == 0 {
+                        quench_num::transcend::exp(x)
+                    } else {
+                        quench_num::transcend::ln(x)
+                    };
+                    return Ok(answer.to_bits() as i64);
+                }
+                qir::Host::FloatPower => {
+                    let a = f64::from_bits(slots[args[0].0 as usize] as u64);
+                    let b = f64::from_bits(slots[args[1].0 as usize] as u64);
+                    return Ok(quench_num::transcend::pow(a, b).to_bits() as i64);
+                }
                 qir::Host::TextClusters => {
                     let said = heap.said(slots[args[0].0 as usize]);
                     return Ok(quench_text::grapheme::count(said) as i64);

@@ -945,6 +945,17 @@ fn emit(
                 answer
             }
         }
+        Value::Slowly { which, of } => {
+            let args: Vec<qir::Value> =
+                of.iter().map(|value| emit(b, module, value, held, w)).collect();
+            if args.len() == 2 {
+                b.call_host_giving(qir::Host::FloatPower, &args, qir::Ty::F64)
+            } else {
+                let mut given = args;
+                given.push(b.const_i64(i64::from(*which)));
+                b.call_host_giving(qir::Host::FloatSlow, &given, qir::Ty::F64)
+            }
+        }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);
             b.not(value)

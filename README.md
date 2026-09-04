@@ -247,10 +247,17 @@ Both print the same thing, which is not a coincidence — it is
   not-a-number loses to a real number rather than poisoning it. `remainder` is the odd
   one: its answer is **exact**, never rounded, which is why it can be checked against
   arithmetic that does not round at all rather than trusted.
-  **`sin`, `cos`, `log`, `exp`, `pow` and `atan2` are deliberately absent** — IEEE only
-  *recommends* correct rounding for those and no library delivers it, so three engines
-  calling three C libraries would be three answers. They arrive when somebody writes
-  them once, the way `e` and decimal are written once.
+- **`exp`, `ln` and `pow` are worked out rather than asked for.** IEEE only
+  *recommends* correct rounding for these, which in practice means every C library is a
+  little bit wrong in its own way — so three engines calling three libraries would be
+  three answers. Quench computes them itself instead, in a float as wide as the answer
+  turns out to need, and rounds exactly once. **Twenty thousand arguments against this
+  machine's own `libm`: `ln` agreed everywhere, `exp` and `pow` differed on about one in
+  seven hundred — and at three hundred bits the true value was on our side every time.**
+  That costs about forty microseconds a call, a thousand times what the machine's own
+  would; the reference engine is the one that does the least, and being right was the
+  point. `b64` only: rounding a `b64` answer down to a `b32` rounds twice.
+  `sin`, `cos`, `tan` and `atan2` are still absent, and arrive the same way.
 - **`call count['s']` counts characters, and what a character *is* is a setting.**
   `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is **1** under
   `characters = "clusters"` and **7** under `"letters"`, because that emoji is seven

@@ -202,7 +202,7 @@ pub fn program_under(
 
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(24) {
+        match rng.upto(26) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -283,6 +283,23 @@ pub fn program_under(
                     b.bin(op, lhs, rhs)
                 };
                 numbers.push(value);
+            }
+            17 => {
+                // `exp`, `ln` and `pow`. Rare on purpose: each is worked out at a
+                // hundred bits and more, which costs a thousand times what an addition
+                // does, and a generated program that spent its life in one would test
+                // that one thing very thoroughly and nothing else at all.
+                if float_ty == Ty::F64 && rng.upto(4) == 0 {
+                    let x = rng.pick(&floats);
+                    let made = if rng.upto(3) == 0 {
+                        let y = rng.pick(&floats);
+                        b.call_host_giving(Host::FloatPower, &[x, y], Ty::F64)
+                    } else {
+                        let which = b.const_i64(rng.upto(2) as i64);
+                        b.call_host_giving(Host::FloatSlow, &[x, which], Ty::F64)
+                    };
+                    floats.push(made);
+                }
             }
             16 => {
                 // The maths IEEE requires. Every engine must give identical bits, so

@@ -738,6 +738,23 @@ extern "C" fn float_fused(_rt: *mut Runtime, a: i64, b: i64, c: i64, width: i64)
 }
 
 /// Called by compiled code. Not called by anything else.
+extern "C" fn float_slow(_rt: *mut Runtime, bits: i64, which: i64) -> i64 {
+    let x = f64::from_bits(bits as u64);
+    let answer = if which == 0 {
+        quench_num::transcend::exp(x)
+    } else {
+        quench_num::transcend::ln(x)
+    };
+    answer.to_bits() as i64
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn float_power(_rt: *mut Runtime, a: i64, b: i64) -> i64 {
+    quench_num::transcend::pow(f64::from_bits(a as u64), f64::from_bits(b as u64)).to_bits()
+        as i64
+}
+
+/// Called by compiled code. Not called by anything else.
 extern "C" fn text_clusters(_rt: *mut Runtime, at: i64) -> i64 {
     HEAP.with(|h| quench_text::grapheme::count(h.borrow().said(at)) as i64)
 }
@@ -1150,6 +1167,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_float_alone", float_alone as *const u8);
     builder.symbol("quench_float_paired", float_paired as *const u8);
     builder.symbol("quench_float_fused", float_fused as *const u8);
+    builder.symbol("quench_float_slow", float_slow as *const u8);
+    builder.symbol("quench_float_power", float_power as *const u8);
     builder.symbol("quench_text_clusters", text_clusters as *const u8);
     builder.symbol("quench_text_letters", text_letters as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
@@ -1233,6 +1252,8 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::FloatAlone, "quench_float_alone"),
         (qir::Host::FloatPaired, "quench_float_paired"),
         (qir::Host::FloatFused, "quench_float_fused"),
+        (qir::Host::FloatSlow, "quench_float_slow"),
+        (qir::Host::FloatPower, "quench_float_power"),
         (qir::Host::TextClusters, "quench_text_clusters"),
         (qir::Host::TextLetters, "quench_text_letters"),
         (qir::Host::PrintFloat, "quench_print_float"),
