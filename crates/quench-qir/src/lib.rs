@@ -67,9 +67,33 @@ pub enum Trap {
     /// An exact number raised to a fraction, whose answer is generally not a ratio —
     /// the square root of two is the oldest number known not to be one.
     FractionalPower = 7,
+    /// `call as.i64['hello']` — text read as a type it does not hold.
+    ///
+    /// The one trap a writer is expected to be able to avoid rather than to be careful
+    /// about: `call is.i64['hello']` asks the same question and answers it with a
+    /// `bool`. Reaching this means nobody asked.
+    NotThatNumber = 9,
 }
 
 impl Trap {
+    /// Every reason there is to stop, which is the list `describe` below answers to.
+    ///
+    /// Written once so that a test asking whether each is reached cannot go stale in
+    /// the direction that matters. A list checked against itself catches a reason being
+    /// removed and never catches one being added, and this project has found six lists
+    /// wrong that way. See `notes/checking-comes-first.md`.
+    pub const ALL: &[Trap] = &[
+        Trap::DividedByZero,
+        Trap::DivisionOverflowed,
+        Trap::OutsideTheArray,
+        Trap::TooDeep,
+        Trap::Overflowed,
+        Trap::NegativePower,
+        Trap::FractionalPower,
+        Trap::NoNumber,
+        Trap::NotThatNumber,
+    ];
+
     /// What to call this when telling somebody.
     pub fn describe(self) -> &'static str {
         match self {
@@ -81,6 +105,7 @@ impl Trap {
             Trap::NegativePower => "a whole number raised to a negative power",
             Trap::NoNumber => "an answer that is not a number",
             Trap::FractionalPower => "an exact number raised to a fraction",
+            Trap::NotThatNumber => "text that is not a number of that type",
         }
     }
 
@@ -95,6 +120,7 @@ impl Trap {
             6 => Trap::NegativePower,
             8 => Trap::NoNumber,
             7 => Trap::FractionalPower,
+            9 => Trap::NotThatNumber,
             _ => return None,
         })
     }
@@ -480,6 +506,30 @@ pub enum Host {
     TextClusters,
     TextLetters,
 
+    /// `(text, kind, a, b)` — whether text could be read as that type. Never stops.
+    ///
+    /// One host for all six types rather than six, because the answer is a `bool`
+    /// whichever was asked and the type is a constant by the time it arrives. `kind` is
+    /// a [`Reading`]; `a` and `b` are what that kind needs — bits and signedness for a
+    /// whole number, the width for a float, the digits for a decimal, nothing at all for
+    /// an `e` or a `bool`.
+    ///
+    /// The `TextAs…` hosts below are the same question asked for its answer. Each pair
+    /// goes through one function in `quench_num::read`, which is what makes `is` a
+    /// promise about `as` rather than a second opinion on it.
+    TextReads,
+    /// `(text, bits, signed)` — text read as a whole-number type. Can stop.
+    TextAsWhole,
+    /// `(text, width)` — text read as `b16`, `b32` or `b64`. Can stop.
+    TextAsFloat,
+    /// `(text)` — text read as an `e`. Can stop.
+    TextAsExact,
+    /// `(text, digits)` — text read as a `d32` or a `d64`. Can stop.
+    TextAsDecimal,
+    /// `(text)` — text read as a `bool`, which is `true` and `false` and nothing else.
+    /// Can stop.
+    TextAsBool,
+
     /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
     /// negative exponent: the answer to that is a fraction and this is a whole number.
     PowI64,
@@ -535,6 +585,12 @@ impl Host {
             Host::FloatPower => "float-power",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
+            Host::TextReads => "text-reads",
+            Host::TextAsWhole => "text-as-whole",
+            Host::TextAsFloat => "text-as-float",
+            Host::TextAsExact => "text-as-exact",
+            Host::TextAsDecimal => "text-as-decimal",
+            Host::TextAsBool => "text-as-bool",
             Host::PowI64 => "pow-i64",
             Host::PowI64Trapping => "pow-i64-trapping",
         }
@@ -585,6 +641,11 @@ impl Host {
             Host::SayExact => &[Ty::Exact],
             Host::SayDecimal => &[Ty::Decimal],
             Host::SayArray => &[Ty::Handle, Ty::I64, Ty::I64],
+            Host::TextReads => &[Ty::Text, Ty::I64, Ty::I64, Ty::I64],
+            Host::TextAsWhole => &[Ty::Text, Ty::I64, Ty::I64],
+            Host::TextAsFloat => &[Ty::Text, Ty::I64],
+            Host::TextAsExact | Host::TextAsBool => &[Ty::Text],
+            Host::TextAsDecimal => &[Ty::Text, Ty::I64],
             Host::PowI64 | Host::PowI64Trapping => &[Ty::I64, Ty::I64],
         }
     }
@@ -626,6 +687,11 @@ impl Host {
                 | Host::ExactPow
                 | Host::PowI64
                 | Host::PowI64Trapping
+                | Host::TextAsWhole
+                | Host::TextAsFloat
+                | Host::TextAsExact
+                | Host::TextAsDecimal
+                | Host::TextAsBool
         )
     }
 
@@ -633,7 +699,7 @@ impl Host {
     pub fn result(self) -> Ty {
         match self {
             Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
-            Host::ArrayEqual => Ty::Bool,
+            Host::ArrayEqual | Host::TextReads | Host::TextAsBool => Ty::Bool,
             Host::TextJoin
             | Host::SayI64
             | Host::SayU64
@@ -648,20 +714,49 @@ impl Host {
             | Host::FloatPaired
             | Host::FloatFused
             | Host::FloatSlow
-            | Host::FloatPower => Ty::F64,
+            | Host::FloatPower
+            | Host::TextAsFloat => Ty::F64,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub
             | Host::ExactMul
             | Host::ExactDiv
-            | Host::ExactPow => Ty::Exact,
+            | Host::ExactPow
+            | Host::TextAsExact => Ty::Exact,
             Host::DecimalRead
             | Host::DecimalAdd
             | Host::DecimalSub
             | Host::DecimalMul
-            | Host::DecimalDiv => Ty::Decimal,
+            | Host::DecimalDiv
+            | Host::TextAsDecimal => Ty::Decimal,
             _ => Ty::I64,
         }
+    }
+}
+
+/// Which type a [`Host::TextReads`] is asking about, as compiled code carries it.
+///
+/// A number rather than five hosts, for the same reason [`Elements`] is a number: it is
+/// a constant the call site wrote down, and every engine reads the same one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reading {
+    Whole = 0,
+    Float = 1,
+    Exact = 2,
+    Decimal = 3,
+    Bool = 4,
+}
+
+impl Reading {
+    pub fn from_code(code: i64) -> Option<Reading> {
+        Some(match code {
+            0 => Reading::Whole,
+            1 => Reading::Float,
+            2 => Reading::Exact,
+            3 => Reading::Decimal,
+            4 => Reading::Bool,
+            _ => return None,
+        })
     }
 }
 

@@ -11,6 +11,7 @@
 //! gave it text" is this, and so is "you have declared that twice".
 
 use quench_diag::{Diagnostic, Span};
+use quench_num::{whole_range, Whole};
 use quench_parse::{ast, counted, Parsed};
 use std::collections::HashMap;
 
@@ -259,6 +260,12 @@ pub const LITERALS: &[&str] = &["true", "false"];
 pub const PROVIDED: &[(&str, Provides)] = &[
     ("count", Provides::Count),
     ("stitch", Provides::Stitch),
+    // The two that read text, and the only two that carry a chain. `stitch` goes the
+    // other way and needs none: what it is given says what to write, and text is the
+    // only thing it makes. Coming back, the text says nothing at all — `12` is an `i64`
+    // and a `b64` and an `e` — so the type has to be asked for.
+    ("is", Provides::Reads),
+    ("as", Provides::Becomes),
     ("sqrt", Provides::Alone(0)),
     ("abs", Provides::Alone(1)),
     ("floor", Provides::Alone(2)),
@@ -299,6 +306,13 @@ pub enum Provides {
     Count,
     /// A list of pieces, joined, converting whatever is not text.
     Stitch,
+    /// `call is.i64['line']` — whether that text could be read as that type.
+    Reads,
+    /// `call as.i64['line']` — that text read as that type, stopping when it is not one.
+    ///
+    /// Which is the whole failure model: nothing here recovers, and the writer is
+    /// expected to have asked `is` first. See `notes/checking-comes-first.md`.
+    Becomes,
     /// One float in, one out. The number is which.
     Alone(u8),
     /// Two floats in, one out.
@@ -389,6 +403,13 @@ pub enum Value {
     /// How many an array holds, asked while it runs — which is what `count` becomes on
     /// an array that grows, and what it never becomes on one that does not.
     Count(Box<Value>),
+    /// `call is.i64['line']` — whether text holds one of those. Always gives an answer.
+    CanRead { ty: Ty, text: Box<Value> },
+    /// `call as.i64['line']` — text read as one of those, stopping when it is not one.
+    ///
+    /// The two carry the same type and reach the same reader, which is what makes the
+    /// promise `is` gives about `as` a true one rather than a documented one.
+    Read { ty: Ty, text: Box<Value> },
     /// A top-level constant, written in where it was named.
     Const(u32),
     /// `add[*1*, *2*]` — the answer a function gave back.
@@ -412,20 +433,6 @@ fn boundaries(ty: &Ty) -> Vec<usize> {
         walking = of;
     }
     stops
-}
-
-/// The lowest and highest a whole-number type holds.
-///
-/// The high end of a `u64` does not fit in an `i64`, and is carried as the bits of one
-/// — which is what the whole type does, so nothing is lost by saying it here too.
-fn whole_range(bits: u8, signed: bool) -> (i64, i64) {
-    if signed {
-        let high = if bits >= 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
-        (-high - 1, high)
-    } else {
-        let high = if bits >= 64 { -1i64 } else { (1i64 << bits) - 1 };
-        (0, high)
-    }
 }
 
 /// The number type at the bottom of this, for saying which one it was.
@@ -1066,34 +1073,30 @@ impl<'a> Checker<'a> {
         };
         let (bits, signed) = (*bits, *signed);
         let (low, high) = whole_range(bits, signed);
-        let read = if signed {
-            digits.parse::<i64>().ok()
-        } else {
-            digits.parse::<u64>().ok().map(|n| n as i64)
-        };
-        match read {
-            Some(n) if signed && (n < low || n > high) => {
+        // The same reader `call as.i64['…']` uses, so that what an `i64` may be written
+        // with and what one may be read from are one answer rather than two.
+        match quench_num::read_whole(digits, bits, signed) {
+            Whole::Read(n) => Some(Value::Number { value: n, bits, signed }),
+            Whole::Outside => {
+                let holds = if signed {
+                    format!("`{}` holds {low} to {high}", ty.name())
+                } else {
+                    format!("`{}` holds 0 to {}", ty.name(), high as u64)
+                };
                 self.errors.push(
                     Diagnostic::new("E0489", format!("`{digits}` does not fit in {} `{}`.", ty.article(), ty.name()))
                         .primary(at, "here")
-                        .rule(format!("`{}` holds {low} to {high}", ty.name()))
-                        .tip("a written value is read by the type it is given to, and this one has an edge.")
+                        .rule(holds)
+                        .tip(if !signed && digits.starts_with('-') {
+                            "an unsigned type holds no negative number at all."
+                        } else {
+                            "a written value is read by the type it is given to, and this one has an edge."
+                        })
                         .fix("write a number in that range, or declare it a wider type"),
                 );
                 None
             }
-            Some(n) if !signed && ((n as u64) > high as u64) => {
-                self.errors.push(
-                    Diagnostic::new("E0489", format!("`{digits}` does not fit in {} `{}`.", ty.article(), ty.name()))
-                        .primary(at, "here")
-                        .rule(format!("`{}` holds 0 to {}", ty.name(), high as u64))
-                        .tip("a written value is read by the type it is given to, and this one has an edge.")
-                        .fix("write a number in that range, or declare it a wider type"),
-                );
-                None
-            }
-            Some(n) => Some(Value::Number { value: n, bits, signed }),
-            None => {
+            Whole::NotOne => {
                 self.errors.push(
                     Diagnostic::new("E0407", format!("`{digits}` is not {} `{}`.", ty.article(), ty.name()))
                         .primary(at, "here")
@@ -1117,20 +1120,7 @@ impl<'a> Checker<'a> {
             Ty::F32 => 32,
             _ => 64,
         };
-        let read = match width {
-            64 => written.parse::<f64>().ok().filter(|x| x.is_finite()).map(f64::to_bits),
-            32 => written
-                .parse::<f32>()
-                .ok()
-                .filter(|x| x.is_finite())
-                .map(|x| u64::from(x.to_bits())),
-            _ => written
-                .parse::<f32>()
-                .ok()
-                .filter(|x| x.is_finite())
-                .map(|x| u64::from(quench_num::to_b16(x).to_bits())),
-        };
-        match read {
+        match quench_num::read_float(written, width) {
             Some(bits) => Some(Value::Float { bits, width }),
             None => {
                 self.errors.push(
@@ -1545,7 +1535,7 @@ impl<'a> Checker<'a> {
         if &found != ty {
             self.errors.push(
                 Diagnostic::new("E0406", format!("this works out to {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
-                    .primary(value.span, format!("a `{}`", found.name()))
+                    .primary(value.span, format!("{} `{}`", found.article(), found.name()))
                     .secondary(ty_span, format!("declared `{}` here", ty.name()))
                     .rule("nothing converts on its own — two types meet only where something says they should")
                     .fix("declare it the same type"),
@@ -1580,7 +1570,7 @@ impl<'a> Checker<'a> {
             if &held != ty {
                 self.errors.push(
                     Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", held.article(), held.name(), ty.article(), ty.name()))
-                        .primary(*span, format!("a `{}`", held.name()))
+                        .primary(*span, format!("{} `{}`", held.article(), held.name()))
                         .secondary(ty_span, format!("declared `{}` here", ty.name()))
                         .rule("nothing converts on its own — two types meet only where something says they should")
                         .fix("declare it the same type, or write the value out"),
@@ -1781,7 +1771,7 @@ impl<'a> Checker<'a> {
                     if !matches!(found, Ty::Int { .. }) {
                         self.errors.push(
                             Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to an `i64`.", found.article(), found.name()))
-                                .primary(one.span(), format!("a `{}`", found.name()))
+                                .primary(one.span(), format!("{} `{}`", found.article(), found.name()))
                                 .secondary(ty_span, "declared `i64` here")
                                 .rule("nothing converts on its own — two types meet only where something says they should")
                                 .fix("declare it the same type"),
@@ -1942,7 +1932,7 @@ impl<'a> Checker<'a> {
             if &found != of {
                 self.errors.push(
                     Diagnostic::new("E0432", format!("this is {} `{}`, and the array holds {} `{}`.", found.article(), found.name(), of.article(), of.name()))
-                        .primary(term.span(), format!("a `{}`", found.name()))
+                        .primary(term.span(), format!("{} `{}`", found.article(), found.name()))
                         .secondary(ty_span, format!("declared `arr.{}` here", of.name()))
                         .rule("every element of an array is the type the array said, and nothing converts on its own")
                         .fix(format!("write a `{}`", of.name())),
@@ -2041,6 +2031,78 @@ impl<'a> Checker<'a> {
     /// Every argument is a float and they are all the same width, which is also the
     /// width of the answer. A `b16` goes through as the `f32` it is carried in and is
     /// put back afterwards, exactly as `+` on one is.
+    /// `call is.i64['line']` and `call as.i64['line']`.
+    ///
+    /// The two are one function asked two ways, which is deliberate and is the whole of
+    /// how Quench fails. There is no value that is either an answer or a reason — that
+    /// wants a type the language has not got — so instead `is` is the question and `as`
+    /// is the answer, and a program that asks the first before the second never reaches
+    /// a trap. A program that does not ask is a program with a mistake in it, and it
+    /// stops, exactly like an index off the end of an array.
+    ///
+    /// What each type accepts is what a written value of that type accepts, because
+    /// both go through [`quench_num::read`]. `*12*` is an `i64` in a source file and
+    /// `12` is an `i64` here, and there is one implementation deciding it.
+    fn reads(&mut self, call: &ast::Call, sure: bool) -> Option<Value> {
+        let word = if sure { "as" } else { "is" };
+
+        let [link] = call.chain.as_slice() else {
+            let saying = if call.chain.is_empty() {
+                format!("`{word}` says which type it is about.")
+            } else {
+                format!("`{word}` is about one type, and this names {}.", call.chain.len())
+            };
+            self.errors.push(
+                Diagnostic::new("E0496", saying)
+                    .primary(call.word.to(call.close), "here")
+                    .rule(format!("`{word}` carries the type on its chain, one link and no more"))
+                    .tip("text says nothing about what it holds — `12` is an `i64`, a `b64` and an `e` — so the type is asked for rather than worked out.")
+                    .fix(format!("`call {word}.i64['line']`")),
+            );
+            return None;
+        };
+
+        let named = self.text(*link).to_string();
+        let Some(ty) = Ty::simple(&named) else {
+            let all: Vec<String> = Ty::NAMES.iter().map(|name| format!("`{name}`")).collect();
+            self.errors.push(
+                Diagnostic::new("E0496", format!("there is no type called `{named}`."))
+                    .primary(*link, "here")
+                    .rule(format!("the link after `{word}` names one of the types that is one word"))
+                    .tip(format!("they are {}.", all.join(", ")))
+                    .fix(format!("`call {word}.i64['line']`")),
+            );
+            return None;
+        };
+        if ty == Ty::Str {
+            self.errors.push(
+                Diagnostic::new("E0497", format!("`{word}.str` reads text out of text."))
+                    .primary(*link, "here")
+                    .rule("these read something that is not text, out of text")
+                    .tip("`stitch` goes the other way, and every type may go through it.")
+                    .fix("name a number type or `bool`"),
+            );
+            return None;
+        }
+
+        let [one] = call.args.as_slice() else {
+            self.errors.push(
+                Diagnostic::new("E0498", format!("`{word}` reads one piece of text."))
+                    .primary(call.word.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                    .rule(format!("`{word}` takes one `str`, and nothing else"))
+                    .fix(format!("`call {word}.{named}['line']`")),
+            );
+            return None;
+        };
+
+        // Built as a `str` is built anywhere else, which is what makes pieces side by
+        // side join here too: `call as.i64['first' 'second']` reads one number out of
+        // both, and a written value needs no `str:` in front of it because the only
+        // thing this takes is text.
+        let text = Box::new(self.value(one, &Ty::Str, call.name)?);
+        Some(if sure { Value::Read { ty, text } } else { Value::CanRead { ty, text } })
+    }
+
     fn maths(&mut self, call: &ast::Call, name: &str, wants: usize, which: u8) -> Option<Value> {
         if call.args.len() != wants {
             self.errors.push(
@@ -2080,7 +2142,7 @@ impl<'a> Checker<'a> {
                 Some(first) if first != each => {
                     self.errors.push(
                         Diagnostic::new("E0494", format!("`{name}` takes one width, and was given two."))
-                            .primary(given.span, format!("a `{}`", found.name()))
+                            .primary(given.span, format!("{} `{}`", found.article(), found.name()))
                             .rule("nothing converts on its own, so two float widths never meet")
                             .fix("make them the same width"),
                     );
@@ -2192,7 +2254,7 @@ impl<'a> Checker<'a> {
         if !matches!(held, Ty::Arr { .. }) {
             self.errors.push(
                 Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
-                    .primary(name, format!("a `{}`", held.name()))
+                    .primary(name, format!("{} `{}`", held.article(), held.name()))
                     .rule("only an array has elements to index")
                     .fix("index an array, or use the value on its own"),
             );
@@ -2374,8 +2436,26 @@ impl<'a> Checker<'a> {
             );
             return None;
         };
+        // Only `is` and `as` say a second thing, and everything else is one word. Said
+        // here rather than in each of them, because the ones that take no chain are the
+        // ones nobody thinks to write the check in.
+        if !matches!(provides, Provides::Reads | Provides::Becomes) {
+            if let Some(link) = call.chain.first() {
+                self.errors.push(
+                    Diagnostic::new("E0499", format!("`{name}` carries no chain."))
+                        .primary(*link, "here")
+                        .rule("`is` and `as` are the only ones that say a type, because they are the only ones that cannot work it out")
+                        .tip(format!("what `{name}` gives back follows from what it is given."))
+                        .fix(format!("`call {name}[…]`")),
+                );
+                return None;
+            }
+        }
+
         match provides {
             Provides::Stitch => return self.stitched(call),
+            Provides::Reads => return self.reads(call, false),
+            Provides::Becomes => return self.reads(call, true),
             Provides::Alone(which) => return self.maths(call, &name, 1, *which),
             Provides::Paired(which) => return self.maths(call, &name, 2, *which),
             Provides::Fused => return self.maths(call, &name, 3, 0),
@@ -2655,6 +2735,8 @@ impl<'a> Checker<'a> {
             Value::Count(_) | Value::CountText(_) => {
                 Some(Ty::Int { bits: 64, signed: true })
             }
+            Value::CanRead { .. } => Some(Ty::Bool),
+            Value::Read { ty, .. } => Some(ty.clone()),
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
             Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
@@ -3327,7 +3409,7 @@ impl<'a> Checker<'a> {
                     if !matches!(held, Ty::Arr { .. }) {
                         self.errors.push(
                             Diagnostic::new("E0433", format!("`{}` is not an array.", held.name()))
-                                .primary(*name, format!("a `{}`", held.name()))
+                                .primary(*name, format!("{} `{}`", held.article(), held.name()))
                                 .rule("only an array has elements to change")
                                 .fix("change the whole thing, or index an array"),
                         );

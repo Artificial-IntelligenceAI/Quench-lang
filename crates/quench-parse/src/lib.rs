@@ -480,6 +480,26 @@ impl<'a> Parser<'a> {
         }
         let marked = named.kind == Kind::Name;
         let name = self.bump().span;
+
+        // `call as.i64['line']`. A bare word is Quench's own name and one word, so the
+        // chain is the only way something the language provides says a second thing —
+        // and it is the same chain `var.immut.i64` and `print.stdout` already are.
+        let mut chain = Vec::new();
+        while self.peek().kind == Kind::Dot {
+            self.bump();
+            chain.push(self.expect(Kind::Word, "a call")?);
+        }
+        if marked && !chain.is_empty() {
+            self.errors.push(
+                Diagnostic::new("E0499", "a name you declared carries no chain.")
+                    .primary(chain[0], "here")
+                    .rule("a chain after `call` belongs to a bare word, which is one of Quench's own")
+                    .tip("what a function of yours gives back is written where it was declared, not where it is called.")
+                    .fix(format!("`call {}[…]`", self.text(name))),
+            );
+            return None;
+        }
+
         self.expect(Kind::OpenList, "a call")?;
         let mut args = Vec::new();
         while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
@@ -489,7 +509,7 @@ impl<'a> Parser<'a> {
             }
         }
         let close = self.expect(Kind::CloseList, "a call")?;
-        Some(ast::Call { word, name, marked, args, close })
+        Some(ast::Call { word, name, marked, chain, args, close })
     }
 
     /// `loop.temp.range.i64 ['i'] = [*1*, *5*] { … }` or `loop.while … { … }`.

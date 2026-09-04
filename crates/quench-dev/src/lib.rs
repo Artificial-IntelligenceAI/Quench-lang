@@ -783,6 +783,95 @@ extern "C" fn text_letters(_rt: *mut Runtime, at: i64) -> i64 {
     HEAP.with(|h| h.borrow().said(at).chars().count() as i64)
 }
 
+/// Called by compiled code. Not called by anything else.
+///
+/// `is`, for every type at once: the kind and whatever it needs arrive as constants the
+/// call site wrote down, and every arm asks the reader the type is written with.
+extern "C" fn text_reads(_rt: *mut Runtime, at: i64, kind: i64, first: i64, second: i64) -> i64 {
+    let kind = qir::Reading::from_code(kind).expect("the lowering wrote this constant");
+    let yes = HEAP.with(|h| {
+        let h = h.borrow();
+        let said = h.said(at);
+        match kind {
+            qir::Reading::Whole => matches!(
+                quench_num::read_whole(said, first as u8, second != 0),
+                quench_num::Whole::Read(_)
+            ),
+            qir::Reading::Float => quench_num::read_float(said, first as u8).is_some(),
+            qir::Reading::Exact => quench_num::read_exact(said).is_some(),
+            qir::Reading::Decimal => {
+                quench_num::read_decimal(said, decimal_format(first)).is_some()
+            }
+            qir::Reading::Bool => quench_num::read_bool(said).is_some(),
+        }
+    });
+    i64::from(yes)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_as_whole(rt: *mut Runtime, at: i64, bits: i64, signed: i64) -> i64 {
+    let read = HEAP
+        .with(|h| quench_num::read_whole(h.borrow().said(at), bits as u8, signed != 0));
+    match read {
+        quench_num::Whole::Read(n) => n,
+        _ => {
+            stop(rt, qir::Trap::NotThatNumber);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_as_float(rt: *mut Runtime, at: i64, width: i64) -> i64 {
+    let read = HEAP.with(|h| quench_num::read_float(h.borrow().said(at), width as u8));
+    match read {
+        Some(bits) => bits as i64,
+        None => {
+            stop(rt, qir::Trap::NotThatNumber);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_as_exact(rt: *mut Runtime, at: i64) -> i64 {
+    maybe_collect(rt);
+    let read = HEAP.with(|h| quench_num::read_exact(h.borrow().said(at)));
+    match read {
+        Some(value) => keep(value),
+        None => {
+            stop(rt, qir::Trap::NotThatNumber);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_as_decimal(rt: *mut Runtime, at: i64, digits: i64) -> i64 {
+    maybe_collect(rt);
+    let read = HEAP
+        .with(|h| quench_num::read_decimal(h.borrow().said(at), decimal_format(digits)));
+    match read {
+        Some(value) => keep_decimal(value),
+        None => {
+            stop(rt, qir::Trap::NotThatNumber);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_as_bool(rt: *mut Runtime, at: i64) -> i64 {
+    let read = HEAP.with(|h| quench_num::read_bool(h.borrow().said(at)));
+    match read {
+        Some(yes) => i64::from(yes),
+        None => {
+            stop(rt, qir::Trap::NotThatNumber);
+            0
+        }
+    }
+}
+
 /// Why a power had no answer, as a reason to stop.
 fn no_power(trouble: quench_num::NoPower) -> qir::Trap {
     match trouble {
@@ -1183,6 +1272,12 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
+    builder.symbol("quench_text_reads", text_reads as *const u8);
+    builder.symbol("quench_text_as_whole", text_as_whole as *const u8);
+    builder.symbol("quench_text_as_float", text_as_float as *const u8);
+    builder.symbol("quench_text_as_exact", text_as_exact as *const u8);
+    builder.symbol("quench_text_as_decimal", text_as_decimal as *const u8);
+    builder.symbol("quench_text_as_bool", text_as_bool as *const u8);
     builder.symbol("quench_float_alone", float_alone as *const u8);
     builder.symbol("quench_float_paired", float_paired as *const u8);
     builder.symbol("quench_float_fused", float_fused as *const u8);
@@ -1268,6 +1363,12 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
+        (qir::Host::TextReads, "quench_text_reads"),
+        (qir::Host::TextAsWhole, "quench_text_as_whole"),
+        (qir::Host::TextAsFloat, "quench_text_as_float"),
+        (qir::Host::TextAsExact, "quench_text_as_exact"),
+        (qir::Host::TextAsDecimal, "quench_text_as_decimal"),
+        (qir::Host::TextAsBool, "quench_text_as_bool"),
         (qir::Host::FloatAlone, "quench_float_alone"),
         (qir::Host::FloatPaired, "quench_float_paired"),
         (qir::Host::FloatFused, "quench_float_fused"),

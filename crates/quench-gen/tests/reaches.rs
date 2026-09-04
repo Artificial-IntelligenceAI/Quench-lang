@@ -66,6 +66,10 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "exact-compare",
         // Text, which is the other thing built while a program runs.
         "text-join", "text-compare", "text-clusters", "text-letters",
+        // Reading a number back out of text -- the asking, which never stops, and every
+        // one of the answering ones, which do.
+        "text-reads", "text-as-whole", "text-as-float", "text-as-exact",
+        "text-as-decimal", "text-as-bool",
         // `stitch`, which is the same formatting as a `print` reached another way.
         "say-i64", "say-u64", "say-float", "say-decimal", "say-exact", "say-bool",
         "say-array",
@@ -96,6 +100,12 @@ fn no_shape_is_so_rare_that_generating_it_is_luck() {
     for shape in [
         "array-get", "array-set", "array-push", "array-copy", "decimal-div",
         "exact-div", "exact-pow", "text-join", "text-compare",
+        // The asking, which is written often. The answering ones are not on this list:
+        // there are five of them sharing one step and each lands around forty times in
+        // two thousand programs, which is thousands of times in a run and nothing like
+        // luck. Weighting them up to clear this bar would mean stopping far more
+        // programs on a bad read than the step is worth.
+        "text-reads",
     ] {
         let n = seen.get(shape).copied().unwrap_or(0);
         assert!(n > 100, "`{shape}` was written {n} times in two thousand programs");

@@ -63,7 +63,7 @@ Both print the same thing, which is not a coincidence — it is
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
 | **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Six semantic knobs, so the oracle proves sixty-four languages |
-| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch` for the one conversion |
+| **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch`, `is` and `as` for the conversions |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, `Decimal` behind `d32` and `d64`, and the half of IEEE 754's maths the standard actually requires |
 | **QIR** (`quench-qir`) | **Working** — nine types, SSA with block parameters, verified before any backend sees it, and written down |
@@ -315,6 +315,36 @@ Both print the same thing, which is not a coincidence — it is
   is the same expression as the other, so a `d64` keeps its cohort here too. Without it
   a program could *show* a number and never hold the text of one, which left no way to
   build a message, a filename, or a line for a file.
+- **`call as.i64[…]` goes the other way, and `call is.i64[…]` is the check you are
+  expected to have made.** Bad input is the one failure a program has to survive, and
+  Quench has no value that is either an answer or a reason — that wants generics. So it
+  does what it already did for arrays: **you ask first.**
+
+  ```quench
+  START {
+      var.immut.str ['line'] = [*42*];
+      if call is.i64['line'] {
+          var.immut.i64 ['n'] = [call as.i64['line']];
+          print.stdout[str:*read * 'n' \n];
+      }
+  }
+  ```
+
+  ```text
+  read 42
+  ```
+
+  `as.i64` on `hello` **stops the program**, exactly like `'xs'[*99*]` does — a writer
+  who asked never reaches it, and one who did not has a bug rather than bad luck. These
+  are the only two things the language provides that carry a chain, because they are the
+  only two that cannot work the type out: text says nothing about what it holds, and
+  `12` is an `i64`, a `b64`, a `d32` and an `e`.
+
+  What each accepts is **the text a value of that type could have been written with** —
+  one function decides both, so `*200*` being a `u8` and not an `i8` is one rule and not
+  two. `infinity` is not a `b64` here for the same reason it is not one in a source
+  file. See
+  [notes/checking-comes-first.md](notes/checking-comes-first.md).
 - **`e` never rounds.** `var.immut.e ['third'] = [*1* / *3*];` is a third, and times
   three is exactly one. `e:*0.1* + e:*0.2* == e:*0.3*` is **true** — a decimal point is
   exact here, which is the whole reason to write one. Arbitrarily large, so a 32-digit
@@ -393,11 +423,10 @@ Both print the same thing, which is not a coincidence — it is
 ## Decisions not made yet
 
 - The **type system**.
-- **How a running program fails** — how an error is signalled and propagated at run
-  time, as opposed to how the compiler reports one. `START` returns an `i64` exit
-  status for now, and that is waiting on this.
-- **How a top-level function is declared.** The chain covers variables; there is
-  nothing in Luarust to inherit for routines.
+- **How a failure carries a reason.** *That* a program fails is settled — it stops, and
+  a check comes first — but nothing yet carries *why* back to a caller, and files will
+  want it, because no check can be made honest against a world that changes underneath
+  it. `START` returns an `i64` exit status for now.
 - Whether **`mut`** keeps that spelling, given visibility chose words over initials.
 - **Whether there are modules inside a file.** The three visibilities assume a file
   is the unit of privacy; modules would add a rung.

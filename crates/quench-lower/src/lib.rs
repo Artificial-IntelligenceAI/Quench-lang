@@ -757,6 +757,28 @@ fn flat_index(
     flat.expect("the checker refused an index with no numbers in it")
 }
 
+/// Which type a `call is.…` is asking about, and whatever that kind needs alongside.
+///
+/// The two numbers mean different things per kind, which is what keeps this to one host
+/// instead of five: bits and signedness for a whole number, the width for a float, the
+/// digits for a decimal, and nothing at all for an `e` or a `bool`.
+fn reading_of(ty: &Ty) -> (qir::Reading, i64, i64) {
+    match ty {
+        Ty::Int { bits, signed } => {
+            (qir::Reading::Whole, i64::from(*bits), i64::from(*signed))
+        }
+        Ty::F16 => (qir::Reading::Float, 16, 0),
+        Ty::F32 => (qir::Reading::Float, 32, 0),
+        Ty::F64 => (qir::Reading::Float, 64, 0),
+        Ty::Exact => (qir::Reading::Exact, 0, 0),
+        Ty::Decimal { digits } => (qir::Reading::Decimal, i64::from(*digits), 0),
+        Ty::Bool => (qir::Reading::Bool, 0, 0),
+        Ty::Str | Ty::Arr { .. } => {
+            unreachable!("the checker refuses every type that is not read from text")
+        }
+    }
+}
+
 /// One value, put into the IR.
 fn emit(
     b: &mut qir::Builder,
@@ -900,6 +922,48 @@ fn emit(
                     b.call_host(qir::Host::SayArray, &[value, kind, deep])
                 }
                 Ty::Str => unreachable!("the checker never wraps text in a `Said`"),
+            }
+        }
+        // `is` and `as` reach the same reader in `quench_num`, one asking whether there
+        // was an answer and one asking what it was. The type is a constant here, which
+        // is why one host serves every type on the asking side.
+        Value::CanRead { ty, text } => {
+            let text = emit(b, module, text, held, w);
+            let (kind, first, second) = reading_of(ty);
+            let kind = b.const_i64(kind as i64);
+            let first = b.const_i64(first);
+            let second = b.const_i64(second);
+            b.call_host(qir::Host::TextReads, &[text, kind, first, second])
+        }
+        Value::Read { ty, text } => {
+            let text = emit(b, module, text, held, w);
+            match ty {
+                Ty::Int { bits, signed } => {
+                    let bits = b.const_i64(i64::from(*bits));
+                    let signed = b.const_i64(i64::from(*signed));
+                    b.call_host(qir::Host::TextAsWhole, &[text, bits, signed])
+                }
+                // The answer is the width that was asked for, not the width the host
+                // happens to hand back in -- the same as the maths functions, and for
+                // the same reason: all three arrive in one register.
+                Ty::F64 | Ty::F32 | Ty::F16 => {
+                    let (width, ty) = match ty {
+                        Ty::F16 => (16, qir::Ty::F16),
+                        Ty::F32 => (32, qir::Ty::F32),
+                        _ => (64, qir::Ty::F64),
+                    };
+                    let said = b.const_i64(width);
+                    b.call_host_giving(qir::Host::TextAsFloat, &[text, said], ty)
+                }
+                Ty::Exact => b.call_host(qir::Host::TextAsExact, &[text]),
+                Ty::Decimal { digits } => {
+                    let digits = b.const_i64(i64::from(*digits));
+                    b.call_host(qir::Host::TextAsDecimal, &[text, digits])
+                }
+                Ty::Bool => b.call_host(qir::Host::TextAsBool, &[text]),
+                Ty::Str | Ty::Arr { .. } => {
+                    unreachable!("the checker refuses every type that is not read from text")
+                }
             }
         }
         // Which of the two answers is the project's decision, written in here as one

@@ -235,9 +235,25 @@ fn every_kind_of_stop_is_generated_by_something() {
             seen.insert(t);
         }
     }
-    assert!(seen.contains(&quench_qir::Trap::DividedByZero), "{seen:?}");
-    assert!(seen.contains(&quench_qir::Trap::DivisionOverflowed), "{seen:?}");
-    assert!(seen.contains(&quench_qir::Trap::Overflowed), "{seen:?}");
+
+    // The reverse direction, which is the only one that catches anything. Asking
+    // whether the three reasons somebody thought of are still reached catches one
+    // being removed and never catches one being added -- and a reason nothing
+    // generates is a reason implemented twice and compared never, which is how
+    // `FractionalPower` sat outside the oracle until this test was written this way
+    // round. See `notes/checking-comes-first.md`.
+    let unreached: Vec<&quench_qir::Trap> = quench_qir::Trap::ALL
+        .iter()
+        .filter(|trap| !seen.contains(trap))
+        // Recursion without a floor is deliberately never written: a runaway call is
+        // reported by the interpreter and overflows the stack in compiled code, so the
+        // two cannot be compared on it at all.
+        .filter(|trap| **trap != quench_qir::Trap::TooDeep)
+        .collect();
+    assert!(
+        unreached.is_empty(),
+        "nothing generated writes a program that stops for {unreached:?}, so no engine is compared on it"
+    );
 }
 
 #[test]

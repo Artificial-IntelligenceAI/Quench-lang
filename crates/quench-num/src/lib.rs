@@ -11,6 +11,7 @@
 pub mod big;
 pub mod decimal;
 pub mod maths;
+pub mod read;
 pub mod transcend;
 pub mod wide;
 pub mod exact;
@@ -18,6 +19,7 @@ pub mod exact;
 pub use big::Big;
 pub use decimal::{Decimal, Format, D32, D64};
 pub use maths::{Alone, Paired};
+pub use read::{read_bool, read_decimal, read_exact, read_float, read_whole, whole_range, Whole};
 pub use wide::Wide;
 pub use exact::{Exact, Trouble};
 

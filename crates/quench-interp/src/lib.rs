@@ -726,6 +726,72 @@ fn evaluate(
                     let said = heap.said(slots[args[0].0 as usize]);
                     return Ok(said.chars().count() as i64);
                 }
+                // `is`, for every type, through the reader that type is written with.
+                qir::Host::TextReads => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    let kind = qir::Reading::from_code(slots[args[1].0 as usize])
+                        .expect("the lowering wrote this constant");
+                    let (first, second) =
+                        (slots[args[2].0 as usize], slots[args[3].0 as usize]);
+                    let yes = match kind {
+                        qir::Reading::Whole => matches!(
+                            quench_num::read_whole(said, first as u8, second != 0),
+                            quench_num::Whole::Read(_)
+                        ),
+                        qir::Reading::Float => {
+                            quench_num::read_float(said, first as u8).is_some()
+                        }
+                        qir::Reading::Exact => quench_num::read_exact(said).is_some(),
+                        qir::Reading::Decimal => {
+                            quench_num::read_decimal(said, decimal_format(first)).is_some()
+                        }
+                        qir::Reading::Bool => quench_num::read_bool(said).is_some(),
+                    };
+                    return Ok(i64::from(yes));
+                }
+                // And `as`, which is the same call with the answer kept rather than the
+                // fact that there was one. Both stop here rather than inventing a
+                // number, because a writer who wanted the other behaviour has `is`.
+                qir::Host::TextAsWhole => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    let (bits, signed) =
+                        (slots[args[1].0 as usize] as u8, slots[args[2].0 as usize] != 0);
+                    return match quench_num::read_whole(said, bits, signed) {
+                        quench_num::Whole::Read(n) => Ok(n),
+                        _ => Err(Trap::NotThatNumber),
+                    };
+                }
+                qir::Host::TextAsFloat => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    let width = slots[args[1].0 as usize] as u8;
+                    return match quench_num::read_float(said, width) {
+                        Some(bits) => Ok(bits as i64),
+                        None => Err(Trap::NotThatNumber),
+                    };
+                }
+                qir::Host::TextAsExact => {
+                    let read = quench_num::read_exact(heap.said(slots[args[0].0 as usize]));
+                    return match read {
+                        Some(value) => Ok(heap.exact(value)),
+                        None => Err(Trap::NotThatNumber),
+                    };
+                }
+                qir::Host::TextAsDecimal => {
+                    let format = decimal_format(slots[args[1].0 as usize]);
+                    let read =
+                        quench_num::read_decimal(heap.said(slots[args[0].0 as usize]), format);
+                    return match read {
+                        Some(value) => Ok(heap.decimal(value)),
+                        None => Err(Trap::NotThatNumber),
+                    };
+                }
+                qir::Host::TextAsBool => {
+                    let said = heap.said(slots[args[0].0 as usize]);
+                    return match quench_num::read_bool(said) {
+                        Some(yes) => Ok(i64::from(yes)),
+                        None => Err(Trap::NotThatNumber),
+                    };
+                }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);

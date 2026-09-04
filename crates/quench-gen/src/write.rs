@@ -21,7 +21,9 @@
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
 use quench_conf::{Characters, Division, Logic, MinMax, NoNumber, Overflow, Settings};
-use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
+use quench_qir::{
+    BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Reading, Ty, Value,
+};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
 /// disagreement is replayed by writing the seed down.
@@ -190,6 +192,21 @@ pub fn program_under(
             b.const_text(at)
         })
         .collect();
+
+    // Text shaped like a number, kept in its own list as well as in the one above.
+    // `as` picks from here most of the time, so that it usually answers rather than
+    // usually stopping — a step that stops every program before its third instruction
+    // is a step that hides everything after it. `200` fits a `u8` and not an `i8`,
+    // `2.5` is no whole number, `3/4` is an `e` and nothing else, and `true` is only
+    // ever a `bool`, so which type was asked for still decides the answer.
+    let numberish: Vec<Value> = ["42", "-7", "200", "2.5", "3/4", "true"]
+        .iter()
+        .map(|t| {
+            let at = module.intern(t);
+            b.const_text(at)
+        })
+        .collect();
+    texts.extend_from_slice(&numberish);
 
     // One array to start with, for the same reason there are numbers and floats to
     // start with: a program whose first array step has to allocate before it can index
@@ -466,13 +483,18 @@ pub fn program_under(
                             b.call_host(Host::ExactDiv, &[l, divisor])
                         }
                         // A whole exponent, and sometimes a negative one, which is
-                        // where an `e` parts company with an `i64`.
+                        // where an `e` parts company with an `i64` -- and sometimes a
+                        // fraction, whose answer is generally not a ratio and which is
+                        // therefore a stop. Nothing wrote one of those until now, so
+                        // one of the nine reasons to stop was implemented twice and
+                        // compared never.
                         4 => {
-                            let exponent = exactly(
-                                &mut b,
-                                module,
-                                &format!("{}", rng.upto(6) as i64 - 2),
-                            );
+                            let written = if rng.upto(4) == 0 {
+                                "1/2".to_string()
+                            } else {
+                                format!("{}", rng.upto(6) as i64 - 2)
+                            };
+                            let exponent = exactly(&mut b, module, &written);
                             b.call_host(Host::ExactPow, &[l, exponent])
                         }
                         _ => {
@@ -488,6 +510,73 @@ pub fn program_under(
                         }
                     };
                     exacts.push(made);
+                    continue;
+                }
+
+                // Reading a number back out of text. `is` never stops and `as` does,
+                // and both are written: stopping in the same place for the same reason
+                // is as much an agreement as answering with the same number.
+                if rng.upto(2) == 0 {
+                    let width = match float_ty {
+                        Ty::F64 => 64,
+                        Ty::F32 => 32,
+                        _ => 16,
+                    };
+                    // Two in three ask, and the asking sweeps every type — including
+                    // the narrow whole numbers, where whether `200` fits is the whole
+                    // question and no answer has to be carried anywhere.
+                    if rng.upto(2) == 0 {
+                        let said = rng.pick(&texts);
+                        let (kind, first, second) = match rng.upto(5) {
+                            0 => (
+                                Reading::Whole,
+                                [8i64, 16, 32, 64][rng.upto(4)],
+                                rng.upto(2) as i64,
+                            ),
+                            1 => (Reading::Float, width, 0),
+                            2 => (Reading::Exact, 0, 0),
+                            3 => (Reading::Decimal, keep, 0),
+                            _ => (Reading::Bool, 0, 0),
+                        };
+                        let kind = b.const_i64(kind as i64);
+                        let first = b.const_i64(first);
+                        let second = b.const_i64(second);
+                        let yes =
+                            b.call_host(Host::TextReads, &[said, kind, first, second]);
+                        flags.push(yes);
+                        continue;
+                    }
+                    // And the other half answers, at the width and format this
+                    // program uses, so that what comes back belongs in the pool it goes
+                    // to. Mostly on text that reads, and sometimes on text that does
+                    // not, which is the trap.
+                    let said =
+                        if rng.upto(4) == 0 { rng.pick(&texts) } else { rng.pick(&numberish) };
+                    match rng.upto(5) {
+                        0 => {
+                            let bits = b.const_i64(64);
+                            let signed = b.const_i64(1);
+                            let read =
+                                b.call_host(Host::TextAsWhole, &[said, bits, signed]);
+                            numbers.push(read);
+                        }
+                        1 => {
+                            let said_width = b.const_i64(width);
+                            let read = b.call_host_giving(
+                                Host::TextAsFloat,
+                                &[said, said_width],
+                                float_ty,
+                            );
+                            floats.push(read);
+                        }
+                        2 => exacts.push(b.call_host(Host::TextAsExact, &[said])),
+                        3 => {
+                            let held = b.const_i64(keep);
+                            decimals
+                                .push(b.call_host(Host::TextAsDecimal, &[said, held]));
+                        }
+                        _ => flags.push(b.call_host(Host::TextAsBool, &[said])),
+                    }
                     continue;
                 }
 

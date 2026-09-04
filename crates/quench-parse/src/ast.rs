@@ -115,6 +115,12 @@ pub struct Call {
     /// something the language provides is not, which is the only difference between
     /// `call count['xs']` and `call 'count'['xs']`.
     pub marked: bool,
+    /// The `.i64` of `call as.i64['line']`, one span per link.
+    ///
+    /// Only something the language provides can carry one, because only a bare word has
+    /// a chain to hang it on — a writer's name is between marks and the marks end it.
+    /// Empty for every call that says nothing after the word, which is most of them.
+    pub chain: Vec<Span>,
     /// One value per argument, separated by commas.
     pub args: Vec<Value>,
     pub close: Span,

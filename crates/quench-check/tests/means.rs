@@ -1027,3 +1027,70 @@ fn a_constant_that_is_not_an_array_is_not_called_one() {
     assert!(array.contains("a constant array of `e` is not built yet"), "{array}");
     assert!(array.contains("an `e` is a handle"), "{array}");
 }
+
+#[test]
+fn reading_text_says_which_type_it_is_about() {
+    // Text says nothing about what it holds, so the type cannot be worked out and has
+    // to be asked for. See `notes/checking-comes-first.md`.
+    let rendered = errors("START { var.immut.i64 ['n'] = [call as['x']]; }");
+    assert!(rendered.contains("`as` says which type it is about."), "{rendered}");
+    assert!(rendered.contains("Error code: E0496"), "{rendered}");
+
+    let two = errors("START { var.immut.i64 ['n'] = [call as.i64.b64['x']]; }");
+    assert!(two.contains("`as` is about one type, and this names 2."), "{two}");
+
+    let unknown = errors("START { var.immut.i64 ['n'] = [call is.frog['x']]; }");
+    assert!(unknown.contains("there is no type called `frog`."), "{unknown}");
+    // The list comes from `Ty::NAMES` rather than from a second copy of it, which is
+    // the only way it cannot go stale.
+    for name in quench_check::Ty::NAMES {
+        assert!(unknown.contains(&format!("`{name}`")), "{name} missing:\n{unknown}");
+    }
+}
+
+#[test]
+fn text_is_not_read_out_of_text() {
+    let rendered = errors("START { var.immut.str ['s'] = [call as.str['x']]; }");
+    assert!(rendered.contains("`as.str` reads text out of text."), "{rendered}");
+    assert!(rendered.contains("Error code: E0497"), "{rendered}");
+}
+
+#[test]
+fn reading_text_reads_one_piece_of_it() {
+    let rendered = errors("START { var.immut.i64 ['n'] = [call as.i64['x', 'y']]; }");
+    assert!(rendered.contains("`as` reads one piece of text."), "{rendered}");
+    assert!(rendered.contains("Error code: E0498"), "{rendered}");
+}
+
+#[test]
+fn a_chain_belongs_only_to_the_two_that_cannot_work_the_type_out() {
+    // Everything else the language provides is told what it is by what it is given.
+    let provided = errors("START { var.immut.i64 ['n'] = [call count.i64['x']]; }");
+    assert!(provided.contains("`count` carries no chain."), "{provided}");
+    assert!(provided.contains("Error code: E0499"), "{provided}");
+
+    // And a writer's own name is between marks, which is where the chain would have
+    // gone. What it gives back was said where it was declared.
+    let mine = errors("START { var.immut.i64 ['n'] = [call 'mine'.i64['x']]; }");
+    assert!(mine.contains("a name you declared carries no chain."), "{mine}");
+    assert!(mine.contains("Error code: E0499"), "{mine}");
+}
+
+#[test]
+fn is_and_as_are_words_the_language_provides() {
+    // Which means they are bare after `call`, and a writer may still have their own
+    // `'is'` between marks without a collision.
+    assert!(quench_check::PROVIDED.iter().any(|(word, _)| *word == "is"));
+    assert!(quench_check::PROVIDED.iter().any(|(word, _)| *word == "as"));
+    let both = check(
+        "\
+fn.file.i64 ['as'] [immut.i64 'n'] { give ['n']; }
+START {
+    var.immut.i64 ['a'] = [call 'as'[*1*]];
+    var.immut.i64 ['b'] = [call as.i64[*2*]];
+    print.stdout['a' 'b'];
+}
+",
+    );
+    assert!(both.ok());
+}

@@ -2262,3 +2262,92 @@ START {
     assert!(left.contains("a `b64` division leaves nothing"), "{left}");
     assert!(left.contains("call remainder"), "{left}");
 }
+
+#[test]
+fn text_becomes_a_number_when_it_holds_one() {
+    // The whole failure model in one program: ask, then read. Nothing here can stop,
+    // because the `if` already established that it would not.
+    // See `notes/checking-comes-first.md`.
+    let source = "\
+START {
+    var.immut.str ['line'] = [*42*];
+    if call is.i64['line'] {
+        var.immut.i64 ['n'] = [call as.i64['line']];
+        print.stdout[str:*read * 'n' \\n];
+    }
+}
+";
+    assert_eq!(said(source), "read 42\n");
+}
+
+#[test]
+fn every_type_that_can_be_written_can_be_read_back() {
+    let source = "\
+START {
+    var.immut.b64 ['x'] = [call as.b64[*2.5*]];
+    var.immut.b32 ['y'] = [call as.b32[*-0.5*]];
+    var.immut.e ['r'] = [call as.e[*3/4*]];
+    var.immut.d64 ['d'] = [call as.d64[*0.10*]];
+    var.immut.bool ['t'] = [call as.bool[*true*]];
+    var.immut.u8 ['n'] = [call as.u8[*200*]];
+    print.stdout['x' str:* * 'y' str:* * 'r' str:* * 'd' str:* * 't' str:* * 'n' \\n];
+}
+";
+    assert_eq!(said(source), "2.5 -0.5 3/4 0.10 true 200\n");
+}
+
+#[test]
+fn what_a_type_may_be_written_with_is_what_it_may_be_read_from() {
+    // `*200*` is a `u8` and is not an `i8`, in a source file and here alike, because
+    // one function decides both. `infinity` is an answer a program reaches and not a
+    // thing it writes, so it is not a `b64` either way.
+    let source = "\
+START {
+    print.stdout[call is.u8[*200*] str:* * call is.i8[*200*] \\n];
+    print.stdout[call is.i64[*3.5*] str:* * call is.b64[*3.5*] \\n];
+    print.stdout[call is.b64[*infinity*] str:* * call is.e[*3/4*] \\n];
+    print.stdout[call is.bool[*true*] str:* * call is.bool[*True*] \\n];
+    print.stdout[call is.u8[*-1*] str:* * call is.i64[**] \\n];
+}
+";
+    assert_eq!(
+        said(source),
+        "true false\nfalse true\nfalse true\ntrue false\nfalse false\n"
+    );
+}
+
+#[test]
+fn reading_text_that_is_not_a_number_stops_the_program() {
+    use quench_qir::{Outcome, Trap};
+
+    // The trap a writer is expected to be able to avoid rather than to be careful
+    // about, which is what makes it the same kind of thing as an index off the end.
+    assert_eq!(
+        ended("START { var.immut.i64 ['n'] = [call as.i64[*hello*]]; print.stdout['n']; }"),
+        Outcome::Trapped(Trap::NotThatNumber)
+    );
+    assert_eq!(
+        ended("START { var.immut.i8 ['n'] = [call as.i8[*200*]]; print.stdout['n']; }"),
+        Outcome::Trapped(Trap::NotThatNumber),
+        "a number, and not one of these"
+    );
+    assert_eq!(
+        ended("START { var.immut.bool ['t'] = [call as.bool[*yes*]]; print.stdout['t']; }"),
+        Outcome::Trapped(Trap::NotThatNumber)
+    );
+}
+
+#[test]
+fn what_is_read_is_built_the_way_any_other_text_is() {
+    // Pieces side by side join before they are read, which needs no rule of its own:
+    // the argument is a `str` and that is what a `str` has always meant.
+    let source = "\
+START {
+    var.immut.str ['tens'] = [*4*];
+    var.immut.str ['units'] = [*2*];
+    var.immut.i64 ['n'] = [call as.i64['tens' 'units']];
+    print.stdout['n' \\n];
+}
+";
+    assert_eq!(said(source), "42\n");
+}

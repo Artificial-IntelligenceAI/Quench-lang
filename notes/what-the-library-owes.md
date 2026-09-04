@@ -1,9 +1,10 @@
 # What the library owes
 
-Quench has thirty-three runtime services and no library. This note is a list of what
+Quench has fifty-three runtime services and no library. This note is a list of what
 is missing, what each thing is waiting on, and the order that costs least — written
 before there is code for any of it, because most of the list is blocked on three
-decisions and it is worth seeing that before writing the easy parts.
+decisions and it is worth seeing that before writing the easy parts. All three have
+since been answered; each section below says what the answer was.
 
 ## The hole that matters most — filled
 
@@ -59,39 +60,46 @@ So the rule reads: nothing converts on its own, and `stitch` is how a program sa
 it anyway*. Written down here because the next person wanting an implicit conversion
 will point at this one, and the answer to them is that theirs has nowhere to say so.
 
-## Three decisions the rest waits on
+## Three decisions the rest waited on
 
-### Is a `str` bytes, or is it characters?
+### Is a `str` bytes, or is it characters? — answered
 
-`call count['café']` is 5 or it is 4. `call count['🔥']` is 4 or it is 1. Nothing can be built on
-top of `str` until that is settled: length, indexing, slicing, searching, and any loop
-that walks it all mean something different under each answer.
+Characters, and a character is a grapheme cluster.
 
-It is not a free choice in either direction. Bytes are what the heap holds and what a
-file gives back, and they make `count` a subtraction. Characters are what a person
-counting them means, and they cost a walk of the whole string to answer anything — and
-"character" itself has two answers, since a scalar value and a grapheme cluster differ
-on exactly the emoji people test with.
+`call count['café']` is 4 and `call count['🔥']` is 1, because that is what a person
+counting them means. It is not free: it costs a walk of the whole string to answer
+anything, where bytes would have made `count` a subtraction. And "character" itself had
+two answers, since a scalar value and a cluster differ on exactly the emoji people test
+with — so **both are built**, `[defaults] characters` picks between them, and the
+oracle checks the language under each. `count['🧑‍🧑‍🧒‍🧒']` is 1 through one and 7
+through the other.
 
-Quench already leans one way without having said so: a name may hold anything a line
-can hold, which was decided by the marks doing the delimiting rather than by anyone
-choosing it.
+Quench was already leaning this way without having said so: a name may hold anything a
+line can hold, which the marks decided by doing the delimiting.
 
-### How does something fail without stopping?
+### How does something fail without stopping? — answered
 
-A trap ends the program. There is no recovering from one, anywhere, and that is
-deliberate: Quench stops where another language would have undefined behaviour, because
-undefined behaviour is where a differential oracle stops working — a program entitled to
-do anything cannot be compared against itself. See
-[the collector earns its place](the-collector-earns-its-place.md).
+It does not. It says beforehand whether it is going to.
 
-Which is fine for a mistake in the program and useless for a mistake in the *input*:
-reading a number from a file that turns out to say `hello` has to be sayable without
-killing the process that asked.
+A trap still ends the program, and there is still no recovering from one anywhere. What
+changed is that every conversion now ships with the question that guards it, the way
+indexing has always shipped with `count` and division has always shipped with a divisor
+you can look at:
 
-Every input function, every parse, every file that might not open needs an answer here.
-It is a language question rather than a library one, and it gates most of the list
-below.
+```quench
+if call is.i64['line'] {
+    var.immut.i64 ['n'] = [call as.i64['line']];
+}
+```
+
+`as.i64` on `hello` stops, exactly like an index off the end, and a writer who asked
+first never reaches it. No new statement, nothing added to a signature, and the oracle
+does not grow — which the alternatives all did, since a value that is either an answer
+or a reason wants generics, and Quench has none.
+
+The reasoning, the four shapes turned down, and the one place this genuinely will not
+reach — files, where a check cannot be made honest — are in
+[checking comes first](checking-comes-first.md).
 
 ### Which maths is Quench allowed to have?
 
@@ -147,11 +155,12 @@ Each of these is waiting on something, and the something is named.
 | | waiting on |
 | --- | --- |
 | ~~Number → text — `stitch`~~ | **built** |
-| Text: length, slice, search, case, trim, split | bytes-or-characters |
+| ~~Text → number — `is` and `as`~~ | **built** |
+| Text: length, slice, search, case, trim, split | nothing — `characters` settled it |
 | ~~The IEEE-required maths~~ | **built** |
-| The IEEE-recommended maths | somebody writing it, once, for every engine |
-| Input: stdin, arguments, files | failure that is not a stop |
-| Output: files, streams beyond the two | failure that is not a stop |
+| ~~The IEEE-recommended maths~~ | **built** |
+| Input: stdin, arguments | nothing — a check comes first |
+| Input and output: files | a check that cannot race the world |
 | Sorting, searching, reversing | generics, and a way to say "a type that orders" |
 | Maps | generics, hashing, and a decided iteration order |
 | Matrices | modules |
