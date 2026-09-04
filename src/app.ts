@@ -1,7 +1,6 @@
 type Theme = "glass" | "solarized-dark" | "solarized-light";
 
 const THEME_KEY = "quench.theme";
-const COUNT_KEY = "quench.visits";
 
 const THEMES: readonly Theme[] = ["glass", "solarized-dark", "solarized-light"];
 
@@ -35,16 +34,6 @@ function applyTheme(theme: Theme): void {
   remember(THEME_KEY, theme);
 }
 
-/** The whole site. It counts refreshes, because that is what was asked for. */
-function countThisVisit(): void {
-  const visits = Number(remembered(COUNT_KEY) ?? 0) + 1;
-  remember(COUNT_KEY, String(visits));
-  const output = document.getElementById("count");
-  if (output !== null) {
-    output.textContent = visits.toLocaleString();
-  }
-}
-
 /** Points the specular highlight at the cursor, which is what sells it as glass.
     Nothing resets it on the way out: a light that snapped back to the middle the
     moment you stopped pointing at it would read as a cursor effect, and the whole
@@ -74,7 +63,6 @@ for (const panel of document.querySelectorAll<HTMLElement>(".glass")) {
 
 const stored = remembered(THEME_KEY);
 applyTheme(isTheme(stored) ? stored : "glass");
-countThisVisit();
 
 /* --- The language, counted -------------------------------------------------
    Every number below is checked against the source on main at load, so nothing

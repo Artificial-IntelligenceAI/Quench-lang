@@ -178,31 +178,6 @@ main {
   padding: 8vh 16px;
 }
 
-.card {
-  width: min(440px, 100%);
-  padding: 40px 32px 34px;
-  text-align: center;
-}
-
-.label {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-
-.count {
-  margin: 10px 0 14px;
-  font-family: var(--mono);
-  font-size: clamp(56px, 14vw, 92px);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-
-.note { margin: 0; font-size: 14px; color: var(--ink-dim); }
-
 footer {
   display: flex;
   justify-content: center;
