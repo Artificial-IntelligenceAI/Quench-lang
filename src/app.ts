@@ -158,7 +158,9 @@ function wirePicker(pickerId: string, countId: string, listId: string,
 
 /** Everything in a set of groups, as a group of its own. */
 function allOf(id: string, label: string, groups: readonly Group[]): Group {
-  const words = groups.flatMap((group) => [...group.words]);
+  /* A word can stand in two groups — `module` names a block and also says how far
+     a name reaches — so it appears once here and once in each group it belongs to. */
+  const words = [...new Set(groups.flatMap((group) => [...group.words]))];
   return {
     id, label, count: words.length, words,
     missing: groups.flatMap((group) => [...(group.missing ?? [])]),
@@ -194,9 +196,14 @@ if (document.getElementById("reserved") !== null) {
         show("reserved", counted.reserved);
         show("words", counted.words);
         show("symbols", counted.symbols);
-        const derived = counted.categories
-          .filter((category) => category.readFrom !== null)
-          .reduce((sum, category) => sum + category.count, 0);
+        /* Ask which groups are derived, not how many words — a word standing in two
+           groups makes the sum larger than the number of words there are. */
+        const listed = counted.categories.filter((category) => category.readFrom === null);
+        const derived = listed.length === 0
+          ? counted.words
+          : counted.categories
+              .filter((category) => category.readFrom !== null)
+              .reduce((sum, category) => sum + category.count, 0);
         const drift = counted.missing.length === 0
           ? ""
           : ` ${String(counted.missing.length)} are no longer in it.`;

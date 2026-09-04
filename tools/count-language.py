@@ -146,7 +146,11 @@ def main() -> int:
 
     # Already in the order `quench words` prints them.
 
-    every_word = [w for c in categories for w in c["words"]]
+    # A word can mean something in more than one position — `module` names a block
+    # at the top level and also names how far a name reaches. It is one word the
+    # language answers to, so the total counts it once and the groups both keep it.
+    every_word = list(dict.fromkeys(w for c in categories for w in c["words"]))
+    slots = sum(c["count"] for c in categories)
     missing = [w for c in categories for w in c["missing"]]
 
     # The token kinds, split the way the compiler's own error messages split them:
@@ -177,6 +181,7 @@ def main() -> int:
         "symbols": symbols or None,
         "tokenKinds": len(described),
         "words": len(every_word),
+        "placesAWordMeansSomething": slots,
         "confirmed": len(every_word) - len(missing),
         "missing": missing,
         "categories": categories,
@@ -225,8 +230,9 @@ def main() -> int:
     print(f"read {sum(len(s) for s in sources.values()):,} bytes of Rust at {data['readFrom']['commit']}")
     derived = sum(c["count"] for c in categories if c["readFrom"])
     print(f"  reserved {data['reserved']}, symbols {symbols} of {len(described)} kinds")
-    print(f"  words {len(every_word)} across {len(categories)} categories "
-          f"({derived} read from the compiler, {len(every_word) - derived} listed here)")
+    dup = slots - len(every_word)
+    also = f", {dup} of them in two groups" if dup else ""
+    print(f"  words {len(every_word)} across {len(categories)} categories{also}")
     if missing:
         print(f"  NOT FOUND IN THE SOURCE: {', '.join(missing)}", file=sys.stderr)
     print(f"wrote {OUT.relative_to(pathlib.Path.cwd())} ({OUT.stat().st_size} bytes)")
