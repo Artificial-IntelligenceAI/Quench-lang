@@ -515,3 +515,11 @@ html {
   .compare tbody th { width: auto; }
   .compare { font-size: 13px; }
 }
+
+/* Answers are sentences of very different lengths, so the columns are given
+   their share rather than fighting over it. */
+.compare { table-layout: fixed; }
+.compare th, .compare td { overflow-wrap: anywhere; }
+.compare thead th:first-child, .compare tbody th { width: 22%; }
+.compare thead th:not(:first-child) { width: 39%; }
+.compare td code { font-family: var(--mono); font-size: 0.88em; }

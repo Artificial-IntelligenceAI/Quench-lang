@@ -382,47 +382,35 @@ const AXES: readonly Axis[] = [
   { id: "running", label: "How it runs" },
 ];
 
-/* Quench's answers are the ones the README already gives. Test and Test2 are
-   placeholders, and say so, so that changing the pickers is visibly doing
-   something before there is a second real language to put here. */
+/* Quench's answers are the ones the README already gives. Go's were produced by
+   running them on go1.26.5 rather than recalled — including the row where
+   `0.1 + 0.2 == 0.3` is true and false in the same language, depending on whether
+   the values are constants. */
 const LANGUAGES: readonly Language[] = [
   {
     id: "quench",
     name: "Quench",
     on: {
       reserved: "None. Every word the language uses is still yours to name something.",
-      names: "Between marks, everywhere — 'a name'. A bare word is never a name.",
-      tenths: "Exactly 0.3 under e, its unbounded exact rationals. Binary floats are there when asked for by name.",
-      precedence: "Only what mathematics settled. Everything programming invented takes brackets.",
-      output: "Said every time: print.stdout[…] or print.stderr[…]. There is no default.",
-      conversion: "None. call stitch[…] is the one conversion, and it is written down.",
+      names: "Between marks, everywhere — `'a name'`. A bare word is never a name.",
+      tenths: "Exactly 0.3 under `e`, its unbounded exact rationals. The binary floats are there when asked for by name.",
+      precedence: "Only what mathematics settled. Everything programming invented takes brackets — `mod`, `and` against `or`, bitwise.",
+      output: "Said every time: `print.stdout[…]` or `print.stderr[…]`. There is no default.",
+      conversion: "None. `call stitch[…]` is the one conversion in the language, and it is written down.",
       running: "Compiles once to one artefact; the machine decides how to run it. Two of four ways exist today.",
     },
   },
   {
-    id: "test",
-    name: "Test",
+    id: "go",
+    name: "Go",
     on: {
-      reserved: "Placeholder. Test is not a language.",
-      names: "Placeholder. Test is not a language.",
-      tenths: "Placeholder. Test is not a language.",
-      precedence: "Placeholder. Test is not a language.",
-      output: "Placeholder. Test is not a language.",
-      conversion: "Placeholder. Test is not a language.",
-      running: "Placeholder. Test is not a language.",
-    },
-  },
-  {
-    id: "test2",
-    name: "Test2",
-    on: {
-      reserved: "Placeholder the second.",
-      names: "Placeholder the second.",
-      tenths: "Placeholder the second.",
-      precedence: "Placeholder the second.",
-      output: "Placeholder the second.",
-      conversion: "Placeholder the second.",
-      running: "Placeholder the second.",
+      reserved: "Twenty-five, unchanged since Go 1.0. `len` and `nil` are not among them and can be shadowed; `if` and `range` are not yours.",
+      names: "A bare identifier, and its first letter decides who can see it — capitalised is exported, lower case is not.",
+      tenths: "Both. `0.1 + 0.2 == 0.3` is true for untyped constants, which are evaluated exactly, and false once they are float64 variables — 0.30000000000000004.",
+      precedence: "Five binary levels, and `&` binds tighter than `==` — C's trap fixed rather than inherited.",
+      output: "`fmt.Println` goes to standard output. The built-in `println` goes to standard error, and nothing about writing it says so.",
+      conversion: "None between types: `int64(n)` is written out. Untyped constants adapt to their context on their own.",
+      running: "Compiled ahead of time to one native binary with its runtime inside it. Cross-compiling is two environment variables at build time.",
     },
   },
 ];
@@ -439,6 +427,24 @@ function fillPicker(picker: HTMLSelectElement, chosen: string): void {
     option.selected = language.id === chosen;
     picker.appendChild(option);
   }
+}
+
+/** Answers are written with `backticks` round anything that is code. Split on
+    them and build real elements, rather than handing a string to innerHTML. */
+function writeAnswer(cell: HTMLElement, answer: string): void {
+  const pieces = answer.split("`");
+  pieces.forEach((piece, index) => {
+    if (piece === "") {
+      return;
+    }
+    if (index % 2 === 1) {
+      const code = document.createElement("code");
+      code.textContent = piece;
+      cell.appendChild(code);
+    } else {
+      cell.appendChild(document.createTextNode(piece));
+    }
+  });
 }
 
 function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
@@ -465,7 +471,7 @@ function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
 
     for (const language of [first, second]) {
       const cell = document.createElement("td");
-      cell.textContent = language.on[axis.id] ?? "—";
+      writeAnswer(cell, language.on[axis.id] ?? "—");
       row.appendChild(cell);
     }
 
@@ -481,7 +487,7 @@ const leftPick = document.getElementById("left");
 const rightPick = document.getElementById("right");
 if (leftPick instanceof HTMLSelectElement && rightPick instanceof HTMLSelectElement) {
   fillPicker(leftPick, "quench");
-  fillPicker(rightPick, "test");
+  fillPicker(rightPick, "go");
   const again = (): void => {
     compare(leftPick, rightPick);
   };
