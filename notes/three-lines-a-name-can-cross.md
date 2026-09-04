@@ -47,7 +47,13 @@ anyway because the distinction is *already true* — a program-wide name is not 
 promise and an exported one is — and because widening later is safe while narrowing
 is not. A name that ships as exported cannot quietly become internal afterwards.
 
-## What is not decided
+## What was not decided, and now is
 
-Modules. Three levels assume a file is the unit of privacy. If Quench grows modules
-inside a file, the ladder grows a rung and this note gets rewritten.
+Modules. Three levels assumed a file was the unit of privacy, and this note said that
+if Quench grew modules inside a file the ladder would grow a rung.
+
+It grew two. A module is a block inside a file, it nests, and the ladder is `module`,
+`parent`, `file`, `program`, `export` — see
+[five lines a name can cross](five-lines-a-name-can-cross.md). None of it is built yet,
+so everything above is still what the compiler does; the successor note is what it is
+going to do.

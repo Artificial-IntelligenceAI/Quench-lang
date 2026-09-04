@@ -474,8 +474,13 @@ Both print the same thing, which is not a coincidence — it is
   want it, because no check can be made honest against a world that changes underneath
   it. `START` returns an `i64` exit status for now.
 - Whether **`mut`** keeps that spelling, given visibility chose words over initials.
-- **Whether there are modules inside a file.** The three visibilities assume a file
-  is the unit of privacy; modules would add a rung.
+- **How `import` is written, and what a program is.** Modules themselves are decided —
+  a block inside a file, nesting, and a ladder of five: `module`, `parent`, `file`,
+  `program`, `export`. See
+  [notes/five-lines-a-name-can-cross.md](notes/five-lines-a-name-can-cross.md). What is
+  not decided is reaching across files, which is the bigger half: nothing in the
+  compiler reads more than one file, so a program has no way to say which files it *is*.
+  None of this is built.
 
 ## Types, iteration 1
 
