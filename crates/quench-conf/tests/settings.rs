@@ -48,7 +48,8 @@ fn a_setting_it_does_not_know_is_refused_rather_than_ignored() {
     // says so.
     let out = errors("[defaults]\ndivison = \"floored\"\n");
     assert!(out.contains("`divison` is not a setting `[defaults]` has."), "{out}");
-    assert!(out.contains("`[defaults]` holds `division`, `logic`, `no-number` and `overflow`."), "{out}");
+    assert!(out.contains("`[defaults]` holds"), "{out}");
+    assert!(out.contains("`characters`") && out.contains("`min-max`"), "{out}");
 }
 
 #[test]
@@ -117,4 +118,34 @@ fn no_number_says_what_a_float_does_when_it_has_none() {
     let (_, errors) = quench_conf::read("[defaults]\nno-number = \"ieee\"\n");
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].code, "E0705");
+}
+
+#[test]
+fn every_setting_the_reader_knows_is_a_setting_it_lists() {
+    // The list a reader is shown and the keys the reader accepts were two separate
+    // things, and they drifted: `characters` was added to one and not the other, and the
+    // test that checked the sentence passed because it was checking the same stale
+    // words. So the sentence is generated from the list, and this holds the list against
+    // what the parser actually does.
+    for (section, key) in quench_conf::KEYS {
+        let text = format!("[{section}]\n{key} = \"an-answer-nobody-offers\"\n");
+        let (_, errors) = quench_conf::read(&text);
+        let codes: Vec<&str> = errors.iter().map(|e| e.code.as_str()).collect();
+        assert_eq!(
+            codes,
+            ["E0705"],
+            "`{key}` in `[{section}]` should be a known key with a bad value, and was {codes:?}"
+        );
+    }
+
+    // And the other way: a key that is not in the list is refused, and the refusal names
+    // the ones that are.
+    let (_, errors) = quench_conf::read("[defaults]\nwobble = \"yes\"\n");
+    let rendered = format!("{:?}", errors);
+    assert!(rendered.contains("E0704"), "{rendered}");
+    for (section, key) in quench_conf::KEYS {
+        if *section == "defaults" {
+            assert!(rendered.contains(key), "the refusal did not mention `{key}`: {rendered}");
+        }
+    }
 }

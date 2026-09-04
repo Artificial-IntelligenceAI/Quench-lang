@@ -2193,3 +2193,37 @@ START {
 1.3169578969248168 0.5493061443340549 1.2599210498948732 2.23606797749979",
     );
 }
+
+#[test]
+fn what_min_and_max_do_with_a_not_a_number_is_a_setting() {
+    // Both are somebody's idea of right — C's `fmin` skips, Java's `Math.min` spreads —
+    // so it is a key rather than a decision.
+    let source = "\
+START {
+    var.immut.b64 ['zero'] = [*0.0*];
+    var.immut.b64 ['nan'] = ['zero' / 'zero'];
+    var.immut.b64 ['five'] = [*5.0*];
+    print.stdout[call stitch[call min['nan', 'five'] str:* * call max['nan', 'five']]];
+}
+";
+    let under = |min_max| {
+        said_under(source, quench_conf::Settings { min_max, ..Default::default() })
+    };
+    assert_eq!(under(quench_conf::MinMax::Skips), "5.0 5.0");
+    assert_eq!(under(quench_conf::MinMax::Spreads), "not-a-number not-a-number");
+
+    // And with no not-a-number in sight the two agree, which is most programs.
+    let ordinary = "\
+START {
+    var.immut.b64 ['a'] = [*2.0*];
+    var.immut.b64 ['b'] = [*5.0*];
+    print.stdout[call stitch[call min['a', 'b'] str:* * call max['a', 'b']]];
+}
+";
+    for setting in [quench_conf::MinMax::Skips, quench_conf::MinMax::Spreads] {
+        assert_eq!(
+            said_under(ordinary, quench_conf::Settings { min_max: setting, ..Default::default() }),
+            "2.0 5.0"
+        );
+    }
+}

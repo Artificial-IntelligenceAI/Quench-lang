@@ -50,6 +50,18 @@ no-number = "carries-on"
 # is one Unicode scalar, which needs no table and never changes.
 characters = "clusters"
 
+# Also changes what a program answers, and named for the two operations because those
+# are the only two it touches. What `min` and `max` do when one side is not a number.
+#
+# `call min['nan', *5.0*]` is `5` under `skips` and a not-a-number under `spreads`, and
+# both are somebody's idea of right: C's `fmin` skips, Java's `Math.min` spreads, and
+# IEEE 754-2019 specifies both because 2008 tried to have one and nobody agreed which.
+#
+# `skips` is the default on the reading that a not-a-number in a `min` is usually a
+# measurement that failed rather than an error to carry -- which is what the standard's
+# `minimumNumber` is for and why it exists at all.
+min-max = "skips"
+
 [build]
 # Changes what gets delivered, never what a program answers -- every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`, or

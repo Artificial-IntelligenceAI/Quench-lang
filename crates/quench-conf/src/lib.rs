@@ -165,6 +165,27 @@ pub enum Characters {
     Letters,
 }
 
+/// What `min` and `max` do when one side is not a number.
+///
+/// **Semantic**, and named for the two operations because those are the only two it
+/// touches. `call min['nan', *5.0*]` is `5` under one and a not-a-number under the
+/// other, and both are somebody's idea of right: C's `fmin` skips, Java's `Math.min`
+/// spreads, and IEEE 754-2019 specifies both because 2008 tried to have one and nobody
+/// agreed which.
+///
+/// The default is [`MinMax::Skips`], on the reading that a not-a-number in a `min` is
+/// usually a measurement that failed rather than an error to propagate — which is what
+/// `minimumNumber` is for and why the standard has it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MinMax {
+    /// A not-a-number loses to a real number. `minimumNumber` and `maximumNumber`.
+    #[default]
+    Skips,
+    /// A not-a-number wins, the way it does in every other float operation.
+    /// `minimum` and `maximum`.
+    Spreads,
+}
+
 /// Which engine runs a program.
 ///
 /// **Delivery.** Every engine gives the same answer — that is the entire point of the
@@ -187,12 +208,46 @@ pub struct Settings {
     pub no_number: NoNumber,
     /// `[defaults] characters`
     pub characters: Characters,
+    /// `[defaults] min-max`
+    pub min_max: MinMax,
     /// `[run] engine`
     pub engine: Engine,
     /// `[build] optimise`
     pub optimise: Optimise,
     /// `[defaults] overflow`
     pub overflow: Overflow,
+}
+
+/// Every setting there is, and which section it belongs to.
+///
+/// The diagnostic for a key that is not understood reads this rather than a list
+/// somebody has to remember to update — which is exactly what went wrong: `characters`
+/// was added and the sentence listing `[defaults]` was not, and the test that checked
+/// the sentence passed because it was checking the same stale words.
+/// `tests/settings.rs` holds the two against each other now.
+pub const KEYS: &[(&str, &str)] = &[
+    ("defaults", "division"),
+    ("defaults", "overflow"),
+    ("defaults", "logic"),
+    ("defaults", "no-number"),
+    ("defaults", "characters"),
+    ("defaults", "min-max"),
+    ("build", "optimise"),
+    ("run", "engine"),
+];
+
+/// The keys of one section, written out for a reader.
+fn keys_of(section: &str) -> String {
+    let all: Vec<String> = KEYS
+        .iter()
+        .filter(|(had, _)| *had == section)
+        .map(|(_, key)| format!("`{key}`"))
+        .collect();
+    match all.split_last() {
+        None => "nothing yet".to_string(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// Read a `QNL-Config.toml`, reporting everything wrong with it rather than the first
@@ -273,6 +328,11 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 _ => errors
                     .push(bad_value(span_of(value), key, value, &["clusters", "letters"])),
             },
+            ("defaults", "min-max") => match value {
+                "skips" => settings.min_max = MinMax::Skips,
+                "spreads" => settings.min_max = MinMax::Spreads,
+                _ => errors.push(bad_value(span_of(value), key, value, &["skips", "spreads"])),
+            },
             ("defaults", "overflow") => match value {
                 "wrap" => settings.overflow = Overflow::Wrap,
                 "trap" => settings.overflow = Overflow::Trap,
@@ -304,12 +364,7 @@ pub fn read(text: &str) -> (Settings, Vec<Diagnostic>) {
                 Diagnostic::new("E0704", format!("`{key}` is not a setting `[{section}]` has."))
                     .primary(span_of(key), "here")
                     .rule("a setting that is not understood is refused rather than ignored, since a project that set it meant something by it")
-                    .tip(match section {
-                        "defaults" => "`[defaults]` holds `division`, `logic`, `no-number` and `overflow`.",
-                        "build" => "`[build]` holds `optimise`.",
-                        "run" => "`[run]` holds `engine`.",
-                        _ => "that section holds nothing yet.",
-                    })
+                    .tip(format!("`[{section}]` holds {}.", keys_of(section)))
                     .fix("check the spelling, or remove the line"),
             ),
         }

@@ -932,7 +932,17 @@ fn emit(
                     qir::Host::FloatAlone
                 }
                 2 => {
-                    given.push(b.const_i64(i64::from(*which)));
+                    // `min` and `max` are two operations each, and which pair a program
+                    // gets is the project's decision -- written in here as a different
+                    // instruction rather than as a mode an engine reads, the same way
+                    // `division` and `overflow` are.
+                    let spreading = w.settings.min_max == quench_conf::MinMax::Spreads;
+                    let which = match (*which, spreading) {
+                        (1, true) => 4,
+                        (2, true) => 5,
+                        (other, _) => i64::from(other),
+                    };
+                    given.push(b.const_i64(which));
                     qir::Host::FloatPaired
                 }
                 _ => qir::Host::FloatFused,

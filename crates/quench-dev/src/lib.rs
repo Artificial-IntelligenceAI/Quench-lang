@@ -688,11 +688,13 @@ const ALONE: [quench_num::Alone; 6] = [
     quench_num::Alone::Truncate,
 ];
 
-const PAIRED: [quench_num::Paired; 4] = [
+const PAIRED: [quench_num::Paired; 6] = [
     quench_num::Paired::CopySign,
     quench_num::Paired::Minimum,
     quench_num::Paired::Maximum,
     quench_num::Paired::Remainder,
+    quench_num::Paired::MinimumSpreading,
+    quench_num::Paired::MaximumSpreading,
 ];
 
 /// Called by compiled code. Not called by anything else.

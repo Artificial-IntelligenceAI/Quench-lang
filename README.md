@@ -62,7 +62,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Lowering** (`quench-lower`) | **Working** — the checked tree turned into QIR, settings written in as instructions |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
-| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Five semantic knobs, so the oracle proves thirty-two languages |
+| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Six semantic knobs, so the oracle proves sixty-four languages |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch` for the one conversion |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, `Decimal` behind `d32` and `d64`, and the half of IEEE 754's maths the standard actually requires |
@@ -244,7 +244,9 @@ Both print the same thing, which is not a coincidence — it is
   oracle to catch. `round` breaks ties to the **even** one — `*2.5*` is `2` and `*3.5*`
   is `4` — because that is `roundToIntegralTiesToEven` and not what most languages'
   `round` does. `min` and `max` are 754-2019's `minimumNumber` and `maximumNumber`: a
-  not-a-number loses to a real number rather than poisoning it. `remainder` is the odd
+  not-a-number loses to a real number rather than poisoning it — **and which of those
+  it does is `[defaults] min-max`**, because both are somebody's idea of right and the
+  standard specifies both. `remainder` is the odd
   one: its answer is **exact**, never rounded, which is why it can be checked against
   arithmetic that does not round at all rather than trusted.
 - **`exp`, `ln` and `pow` are worked out rather than asked for.** IEEE only
@@ -490,7 +492,7 @@ There are four semantic ones: `[defaults] division` (truncated or floored), `ove
 stops). Each is threaded all the way through — the generator picks a configuration per
 seed, both engines carry the choice as **separate QIR instructions** rather than as a
 mode they interpret, and a disagreement names the settings it happened under. So the
-oracle proves thirty-two languages rather than one, three ways of running each, since it
+oracle proves sixty-four languages rather than one, three ways of running each, since it
 sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 28 seconds.
 
 `logic` is the one worth reading the note for: it was **not** a semantic setting until

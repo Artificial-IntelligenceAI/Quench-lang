@@ -50,6 +50,13 @@ pub enum Paired {
     Minimum,
     /// `maximumNumber`, the same the other way up.
     Maximum,
+    /// `minimum` of IEEE 754-2019: a not-a-number wins, the way it does everywhere else
+    /// in floating point. Which of these two a program gets is `[defaults] min-max`,
+    /// and they are separate operations here rather than one with a mode, because every
+    /// semantic setting in Quench is carried as a separate instruction.
+    MinimumSpreading,
+    /// `maximum`, the same the other way up.
+    MaximumSpreading,
     /// IEEE `remainder`: `x − y × n`, where `n` is the integer nearest `x / y` and a tie
     /// goes to the even one. Not `%`, which takes `n` toward zero and can give an answer
     /// as large as `y`; this one is never larger than half of `y`, and can differ from
@@ -89,6 +96,12 @@ pub fn paired64(op: Paired, a: f64, b: f64) -> f64 {
         Paired::Minimum => smaller64(a, b),
         Paired::Maximum => larger64(a, b),
         Paired::Remainder => remainder64(a, b),
+        Paired::MinimumSpreading => {
+            if a.is_nan() || b.is_nan() { f64::NAN } else { smaller64(a, b) }
+        }
+        Paired::MaximumSpreading => {
+            if a.is_nan() || b.is_nan() { f64::NAN } else { larger64(a, b) }
+        }
     }
 }
 
@@ -98,6 +111,12 @@ pub fn paired32(op: Paired, a: f32, b: f32) -> f32 {
         Paired::Minimum => smaller32(a, b),
         Paired::Maximum => larger32(a, b),
         Paired::Remainder => remainder32(a, b),
+        Paired::MinimumSpreading => {
+            if a.is_nan() || b.is_nan() { f32::NAN } else { smaller32(a, b) }
+        }
+        Paired::MaximumSpreading => {
+            if a.is_nan() || b.is_nan() { f32::NAN } else { larger32(a, b) }
+        }
     }
 }
 

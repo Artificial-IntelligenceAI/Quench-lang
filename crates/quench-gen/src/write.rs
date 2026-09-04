@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Characters, Division, Logic, NoNumber, Overflow, Settings};
+use quench_conf::{Characters, Division, Logic, MinMax, NoNumber, Overflow, Settings};
 use quench_qir::{BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Ty, Value};
 
 /// A deterministic scrambler. Every program is a pure function of its seed, so a
@@ -67,6 +67,7 @@ pub fn settings_for(seed: u64) -> Settings {
         logic: if rng.upto(2) == 0 { Logic::StopsEarly } else { Logic::AsksBoth },
         no_number: if rng.upto(2) == 0 { NoNumber::CarriesOn } else { NoNumber::Stops },
         characters: if rng.upto(2) == 0 { Characters::Clusters } else { Characters::Letters },
+        min_max: if rng.upto(2) == 0 { MinMax::Skips } else { MinMax::Spreads },
         overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
         ..Settings::default()
     }
@@ -320,7 +321,13 @@ pub fn program_under(
                     }
                     1 => {
                         let y = rng.pick(&floats);
-                        let which = b.const_i64(rng.upto(4) as i64);
+                        let pick = rng.upto(4) as i64;
+                        let spreading = settings.min_max == MinMax::Spreads;
+                        let which = b.const_i64(match (pick, spreading) {
+                            (1, true) => 4,
+                            (2, true) => 5,
+                            (other, _) => other,
+                        });
                         b.call_host_giving(Host::FloatPaired, &[x, y, which, width], float_ty)
                     }
                     _ => {
