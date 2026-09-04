@@ -519,6 +519,11 @@ html {
 /* Answers are sentences of very different lengths, so the columns are given
    their share rather than fighting over it. */
 .compare { table-layout: fixed; }
+
+/* The sheet's own table keeps its last column on one line, for the short states
+   in About. This table's last column is a paragraph, and must wrap like one.
+   Written with the same weight as the rule it is undoing, or it loses to it. */
+.compare td:last-child, .compare th:last-child { white-space: normal; }
 .compare th, .compare td { overflow-wrap: anywhere; }
 .compare thead th:first-child, .compare tbody th { width: 22%; }
 .compare thead th:not(:first-child) { width: 39%; }
