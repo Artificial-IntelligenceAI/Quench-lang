@@ -234,7 +234,6 @@ pub const KEYS: &[(&str, &str)] = &[
     ("defaults", "min-max"),
     ("build", "optimise"),
     ("run", "engine"),
-    ("program", "files"),
 ];
 
 /// The keys of one section, written out for a reader.
@@ -262,15 +261,20 @@ fn keys_of(section: &str) -> String {
 /// invite it to be counted among the knobs.
 pub struct Config {
     pub settings: Settings,
-    /// `[program] files`. Empty when the file did not say, which means the program is
-    /// the one file it was given.
-    pub files: Vec<String>,
+    /// `[program.files]` — each file of the program, as the name it is imported by and
+    /// the path it is read from. Empty when the file did not say, which means the
+    /// program is the one file it was given.
+    ///
+    /// The name is *chosen* rather than taken from the filename, which is the whole
+    /// point of it: a filename is not an interface, and renaming a file should not
+    /// rename a module. See `notes/five-lines-a-name-can-cross.md`.
+    pub files: Vec<(String, String)>,
     pub errors: Vec<Diagnostic>,
 }
 
 pub fn read(text: &str) -> Config {
     let mut settings = Settings::default();
-    let mut files: Vec<String> = Vec::new();
+    let mut files: Vec<(String, String)> = Vec::new();
     let mut errors = Vec::new();
     let mut section = String::new();
     let mut at = 0usize;
@@ -296,15 +300,52 @@ pub fn read(text: &str) -> Config {
 
         if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             let name = name.trim();
-            if !matches!(name, "defaults" | "run" | "build" | "program") {
+            if !matches!(name, "defaults" | "run" | "build" | "program.files") {
                 errors.push(
                     Diagnostic::new("E0701", format!("`[{name}]` is not a section this reads."))
                         .primary(span_of(trimmed), "here")
-                        .rule("the sections are `[defaults]` for what a program means, `[build]` for what gets delivered, `[run]` for how it runs, and `[program]` for what the program is made of")
+                        .rule("the sections are `[defaults]` for what a program means, `[build]` for what gets delivered, `[run]` for how it runs, and `[program.files]` for what the program is made of")
                         .fix("remove it, or move its settings into a section that exists"),
                 );
             }
             section = name.to_string();
+            continue;
+        }
+
+        // `[program.files]` is the one section whose keys are the *writer's* names
+        // rather than settings, so any key is allowed and a quoted one may hold whatever
+        // a name holds -- spaces, an apostrophe, an emoji -- the way every other name in
+        // Quench can.
+        if section == "program.files" {
+            match a_named_file(trimmed) {
+                Some((name, path)) if !name.is_empty() && !path.is_empty() => {
+                    if let Some((first, _)) = files.iter().find(|(had, _)| *had == name) {
+                        let _ = first;
+                        errors.push(
+                            Diagnostic::new("E0707", format!("`{name}` names two files."))
+                                .primary(span_of(trimmed), "here")
+                                .rule("a name is one file, because it is the module that file's declarations go into")
+                                .fix("give one of them another name"),
+                        );
+                    } else if files.iter().any(|(_, had)| *had == path) {
+                        errors.push(
+                            Diagnostic::new("E0707", format!("`{path}` is listed twice."))
+                                .primary(span_of(trimmed), "here")
+                                .rule("one file is one module, so reading it under two names would be two modules of one text")
+                                .fix("remove one of them"),
+                        );
+                    } else {
+                        files.push((name, path));
+                    }
+                }
+                _ => errors.push(
+                    Diagnostic::new("E0706", "this is not a file of the program.")
+                        .primary(span_of(trimmed), "here")
+                        .rule("each line of `[program.files]` is the name a file is imported by, then the path it is read from")
+                        .tip("the name is chosen rather than taken from the filename, so renaming the file does not rename the module.")
+                        .fix("`maths = \"src/maths.qnl\"`, or `\"a name with spaces\" = \"odd.qnl\"`"),
+                ),
+            }
             continue;
         }
 
@@ -366,16 +407,6 @@ pub fn read(text: &str) -> Config {
                     &["none", "speed", "speed-and-size"],
                 )),
             },
-            ("program", "files") => match listed_files(value) {
-                Some(named) if !named.is_empty() => files = named,
-                _ => errors.push(
-                    Diagnostic::new("E0706", "`files` is the list of files the program is made of.")
-                        .primary(span_of(value.trim()), "here")
-                        .rule("it is written as a list of quoted names, and there is at least one")
-                        .tip("the order does not matter; a file says what it uses with `import`.")
-                        .fix("`files = [\"main.qnl\", \"maths.qnl\"]`"),
-                ),
-            },
             ("run", "engine") => match value {
                 "dev-jit" => settings.engine = Engine::DevJit,
                 "interpreter" => settings.engine = Engine::Interpreter,
@@ -400,23 +431,26 @@ pub fn read(text: &str) -> Config {
     Config { settings, files, errors }
 }
 
-/// `["main.qnl", "maths.qnl"]` — the one setting whose value is a list.
+/// `maths = "src/maths.qnl"` — one file of the program, named and located.
 ///
-/// Hand-read like the rest of the file, and deliberately strict: a name is between
-/// quotes, and anything else is refused rather than guessed at.
-fn listed_files(value: &str) -> Option<Vec<String>> {
-    let inside = value.trim().strip_prefix('[')?.strip_suffix(']')?;
-    if inside.trim().is_empty() {
-        return Some(Vec::new());
-    }
-    inside
-        .split(',')
-        .map(|part| {
-            let part = part.trim();
-            let name = part.strip_prefix('"')?.strip_suffix('"')?;
-            (!name.is_empty()).then(|| name.to_string())
-        })
-        .collect()
+/// The name may be quoted, because a name in Quench holds whatever a line holds and this
+/// one is written between marks at every `import`. So the `=` is looked for *after* a
+/// quoted key rather than anywhere in the line, or a name holding one would split in the
+/// wrong place.
+fn a_named_file(line: &str) -> Option<(String, String)> {
+    let (name, rest) = match line.strip_prefix('"') {
+        Some(after) => {
+            let close = after.find('"')?;
+            (after[..close].to_string(), &after[close + 1..])
+        }
+        None => {
+            let split = line.find('=')?;
+            (line[..split].trim().to_string(), &line[split..])
+        }
+    };
+    let path = rest.trim_start().strip_prefix('=')?.trim();
+    let path = path.strip_prefix('"')?.strip_suffix('"')?;
+    Some((name, path.to_string()))
 }
 
 fn bad_value(span: Span, key: &str, given: &str, allowed: &[&str]) -> Diagnostic {

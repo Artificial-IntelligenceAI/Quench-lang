@@ -224,15 +224,21 @@ Both print the same thing, which is not a coincidence — it is
   implementation detail of the module around it. A name never reaches further than the
   module around it does, so `'maths'.'trig'.'x'` asks three questions rather than one.
 
-  **A program can be several files**, and `[program] files` in `QNL-Config.toml` says
+  **A program can be several files**, and `[program.files]` in `QNL-Config.toml` says
   which — the manifest is the authority on what the program *is*, and `import` in a file
   says which of them *it* uses, so a reader sees where a name came from without leaving
-  the line. A file is a module named after itself, so two files may each hold a `'size'`.
+  the line. A file is a module, so two files may each hold a `'size'`.
 
   ```toml
-  [program]
-  files = ["main.qnl", "maths.qnl"]
+  [program.files]
+  main = "main.qnl"
+  maths = "arithmetic.qnl"
   ```
+
+  The name a file is imported by is **chosen there, not taken from the filename**:
+  `arithmetic.qnl` is the module `maths`. A filename is not an interface, so renaming the
+  file breaks no caller, a file may sit in a directory without the directory leaking into
+  the name, and two files may share a stem.
 
   Then `main.qnl` opens with `import ['maths'];` and reaches into it with
   `call 'maths'.'sin'[*8.0*]`. There is no block for that here because a file which

@@ -1,4 +1,6 @@
-# A file is a module named after itself, so everything here is reached as `'maths'.…`.
+# This file is `arithmetic.qnl` and its module is `maths`, because `[program.files]` says
+# so. The two need not agree: a filename is not an interface, and renaming this file does
+# not rename the module or break a single caller.
 
 # `export` and `program` still cannot be told apart -- that needs a second *program*
 # using this one as a library. `file` finally can: nothing outside this file may name

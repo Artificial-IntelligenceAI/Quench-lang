@@ -1,4 +1,10 @@
-# What the program is made of. A file says what it *uses* with `import`; this says what
-# there is to use. See `notes/five-lines-a-name-can-cross.md`.
-[program]
-files = ["main.qnl", "maths.qnl", "text.qnl"]
+# What the program is made of: the name each file is imported by, then the path it is
+# read from. The name is *chosen* rather than taken from the filename — renaming
+# `arithmetic.qnl` should not rename the module, and a filename is not an interface.
+#
+# A file says what it *uses* with `import`; this says what there is to use. See
+# `notes/five-lines-a-name-can-cross.md`.
+[program.files]
+main = "main.qnl"
+maths = "arithmetic.qnl"
+text = "text.qnl"

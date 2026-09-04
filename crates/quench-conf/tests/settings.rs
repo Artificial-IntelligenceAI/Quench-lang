@@ -160,24 +160,70 @@ fn every_setting_the_reader_knows_is_a_setting_it_lists() {
 
 #[test]
 fn a_program_says_which_files_it_is_made_of() {
-    let read = quench_conf::read("[program]\nfiles = [\"main.qnl\", \"maths.qnl\"]\n");
+    let read = quench_conf::read(
+        "[program.files]\nmain = \"main.qnl\"\nmaths = \"src/maths.qnl\"\n",
+    );
     assert!(read.errors.is_empty(), "{:#?}", read.errors);
-    assert_eq!(read.files, ["main.qnl", "maths.qnl"]);
+    assert_eq!(
+        read.files,
+        [
+            ("main".to_string(), "main.qnl".to_string()),
+            ("maths".to_string(), "src/maths.qnl".to_string()),
+        ]
+    );
 
-    // Empty means the file said nothing, which means the program is the one file it was
-    // given -- so a list written empty is a mistake rather than a way to say that.
-    let none = quench_conf::read("");
-    assert!(none.files.is_empty());
+    // The name is chosen, not taken from the filename -- which is the whole point of
+    // it, since a filename is not an interface.
+    let renamed = quench_conf::read("[program.files]\nmaths = \"src/arithmetic-v2.qnl\"\n");
+    assert_eq!(renamed.files, [("maths".to_string(), "src/arithmetic-v2.qnl".to_string())]);
 
-    for wrong in ["files = []", "files = \"main.qnl\"", "files = [main.qnl]", "files = [\"\"]"] {
-        let text = format!("[program]\n{wrong}\n");
+    // And it holds whatever a name holds, because it is written between marks at every
+    // `import`.
+    let odd = quench_conf::read("[program.files]\n\"a name with spaces\" = \"odd.qnl\"\n");
+    assert!(odd.errors.is_empty(), "{:#?}", odd.errors);
+    assert_eq!(odd.files, [("a name with spaces".to_string(), "odd.qnl".to_string())]);
+
+    // Saying nothing means the program is the one file it was given.
+    assert!(quench_conf::read("").files.is_empty());
+
+    for wrong in ["maths", "maths =", "= \"x.qnl\"", "maths = x.qnl", "\"unclosed = \"x.qnl\""] {
+        let text = format!("[program.files]\n{wrong}\n");
         let codes: Vec<String> =
             quench_conf::read(&text).errors.iter().map(|e| e.code.clone()).collect();
         assert_eq!(codes, ["E0706"], "`{wrong}` should be refused: {codes:?}");
     }
 
+    // One name is one file, and one file is one name.
+    for twice in [
+        "[program.files]\nmaths = \"a.qnl\"\nmaths = \"b.qnl\"\n",
+        "[program.files]\none = \"a.qnl\"\ntwo = \"a.qnl\"\n",
+    ] {
+        let codes: Vec<String> =
+            quench_conf::read(twice).errors.iter().map(|e| e.code.clone()).collect();
+        assert_eq!(codes, ["E0707"], "{twice}");
+    }
+
     // And the section is a section now, which the sentence naming them has to know.
     let unknown = quench_conf::read("[nope]\n").errors;
     let rendered = quench_diag::report(&SourceFile::new("QNL-Config.toml", "[nope]\n"), &unknown);
-    assert!(rendered.contains("`[program]`"), "{rendered}");
+    assert!(rendered.contains("`[program.files]`"), "{rendered}");
+}
+
+#[test]
+fn the_files_section_is_not_a_settings_section() {
+    // Every other section has a fixed set of keys, and `KEYS` is held against the
+    // parser so neither can drift. `[program.files]` is the exception on purpose: its
+    // keys are the writer's names, so it is not in `KEYS` and must not be, or the guard
+    // above would demand a bad-value error from a key that has no fixed values.
+    assert!(
+        !quench_conf::KEYS.iter().any(|(section, _)| *section == "program.files"),
+        "`[program.files]` holds names rather than settings, so it is not in `KEYS`"
+    );
+    // And any key at all is taken there, which is what that means.
+    for name in ["maths", "a", "🔥"] {
+        let text = format!("[program.files]\n\"{name}\" = \"x.qnl\"\n");
+        let read = quench_conf::read(&text);
+        assert!(read.errors.is_empty(), "`{name}` should be a name: {:#?}", read.errors);
+        assert_eq!(read.files, [(name.to_string(), "x.qnl".to_string())]);
+    }
 }

@@ -172,11 +172,14 @@ own.
 
 Three things were getting called "modules". Two are built.
 
-**What the program is** comes from `QNL-Config.toml`, not from the source:
+**What the program is** comes from `QNL-Config.toml`, not from the source — and each
+file is given the name it will be imported by:
 
 ```toml
-[program]
-files = ["main.qnl", "maths.qnl", "text.qnl"]
+[program.files]
+main = "main.qnl"
+maths = "arithmetic.qnl"
+text = "text.qnl"
 ```
 
 **What a file uses** comes from the file:
@@ -199,9 +202,23 @@ hold a `'size'` and nothing collides, and a module *inside* an imported file is 
 link: `call 'maths'.'exact'.'third'[]`. Which does mean a module comes from two places, a
 block and a file, exactly as it does in Rust.
 
-The name is the one thing about a module not written where a reader is — it comes from
-the filename — and that is the argument for `import` naming it at the top of every file
-that uses it.
+### The name is chosen, not taken from the filename
+
+`arithmetic.qnl` above is the module `maths`. The two need not agree, and that is the
+point: **a filename is not an interface.** Renaming the file renames nothing and breaks
+no caller; a file may sit in a directory without the directory leaking into the name; and
+two files may share a stem, which the first cut had to refuse outright.
+
+Rust splits this. Within a crate a module is named by its filename *and* declared with
+`mod maths;` in the parent, so the two have to agree — and `#[path = "…"]` exists for
+when they cannot. Across crates the name comes from the manifest instead, renameable
+there or with `use x as y`. Quench has no dependencies yet, only files, and its files are
+already doing the job crates do at that boundary — so the manifest names them, one level
+down from where Rust does it.
+
+What it costs is that a reader with `arithmetic.qnl` open cannot see what it is called
+from inside it. Which is the argument for `import` naming it at the top of every file
+that uses one: the name is written where it is *used*, which is where it matters.
 
 ### `file` finally means something
 

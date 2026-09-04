@@ -154,15 +154,21 @@ struct Program {
 ///
 /// `[program] files` says what those are. When it says nothing, the program is the one
 /// file it was given -- which is what every program was until it could be more.
-fn gather(path: &str, listed: &[String]) -> Result<Program, String> {
-    let named: Vec<String> = if listed.is_empty() {
-        vec![path.to_string()]
+fn gather(path: &str, listed: &[(String, String)]) -> Result<Program, String> {
+    // The name a file's declarations go into is *chosen*, in `[program.files]`, rather
+    // than taken from the filename -- so renaming a file does not rename a module, a
+    // file may sit in a directory without the directory leaking into the name, and two
+    // files may share a stem. When the program is one file there is nobody to name it
+    // to, so it is `main`.
+    let named: Vec<(String, String)> = if listed.is_empty() {
+        vec![("main".to_string(), path.to_string())]
     } else {
-        if !listed.iter().any(|file| same_file(file, path)) {
+        if !listed.iter().any(|(_, file)| same_file(file, path)) {
+            let all: Vec<&str> = listed.iter().map(|(_, file)| file.as_str()).collect();
             return Err(format!(
-                "`{path}` is not one of the files `[program] files` lists.\n\
+                "`{path}` is not one of the files `[program.files]` lists.\n\
                  it lists {}.",
-                listed.join(", ")
+                all.join(", ")
             ));
         }
         listed.to_vec()
@@ -171,30 +177,16 @@ fn gather(path: &str, listed: &[String]) -> Result<Program, String> {
     let mut whole = String::new();
     let mut files = Vec::new();
     let mut parts = Vec::new();
-    for name in &named {
-        // The module a file gives its declarations is its own name without the ending.
-        // Which is the one thing about a module that is not written where a reader is,
-        // and is why `import` names it at the top of every file that uses it.
-        let stem = std::path::Path::new(name)
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().to_string())
-            .unwrap_or_else(|| name.clone());
-        if let Some(other) = parts.iter().find(|part: &&quench_check::Part| part.name == stem) {
-            let _ = other;
-            return Err(format!(
-                "two files of this program are both called `{stem}`.\n\
-                 a file is a module named after itself, so two of a name is two modules of a name."
-            ));
-        }
-        let text = std::fs::read_to_string(name)
-            .map_err(|why| format!("cannot read {name}: {why}"))?;
+    for (name, at_path) in &named {
+        let text = std::fs::read_to_string(at_path)
+            .map_err(|why| format!("cannot read {at_path}: {why}"))?;
         let at = whole.len();
         whole.push_str(&text);
         // A newline between, so the last line of one file and the first of the next are
         // two lines however the file ended.
         whole.push('\n');
-        files.push((at, SourceFile::new(name, text), stem.clone()));
-        parts.push(quench_check::Part { at, name: stem });
+        files.push((at, SourceFile::new(at_path, text), name.clone()));
+        parts.push(quench_check::Part { at, name: name.clone() });
     }
     Ok(Program { whole, files, parts })
 }
