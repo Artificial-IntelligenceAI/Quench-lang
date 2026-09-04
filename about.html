@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-theme="glass">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About Quench</title>
+<link rel="stylesheet" href="styles.css">
+<script>
+  try {
+    var saved = localStorage.getItem("quench.theme");
+    if (saved === "glass" || saved === "solarized-dark" || saved === "solarized-light") {
+      document.documentElement.dataset.theme = saved;
+    }
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<nav class="bar glass">
+  <span class="wordmark">Quench</span>
+  <ul class="pages">
+      <li><a class="page" href="index.html">Start Page</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Tools</span></li>
+      <li><a class="page" href="about.html" aria-current="page">About</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Full Docs</span></li>
+      <li><a class="page" href="licence.html">Licence</a></li>
+  </ul>
+  <div class="themes" role="group" aria-label="Theme">
+    <button type="button" data-set-theme="glass" aria-pressed="true"
+            data-tip="Liquid glass. Frosted panels that bend the backdrop at their rim.">Glass</button>
+    <button type="button" data-set-theme="solarized-dark" aria-pressed="false"
+            data-tip="Solarized Dark. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Dark</button>
+    <button type="button" data-set-theme="solarized-light" aria-pressed="false"
+            data-tip="Solarized Light. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Light</button>
+  </div>
+</nav>
+
+<main class="prose">
+  <article class="sheet glass">
+    <button type="button" class="copy" aria-label="Copy">
+      <svg class="mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+        <path d="M5 15V5a2 2 0 0 1 2-2h10"></path>
+      </svg>
+      <svg class="done" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+        <path d="M4 12.5 9 17.5 20 6.5"></path>
+      </svg>
+    </button>
+    <h1>About</h1>
+
+    <p class="lead">Quench is a language built around three things: <strong>explicit syntax</strong>,
+    <strong>okay performance</strong>, and <strong>very helpful error messages</strong>.</p>
+
+    <p>It is under development, and nothing in it is stable. Stability is not a guarantee.</p>
+
+    <h2>Compile once, run anywhere</h2>
+    <p>A program compiles to one artefact — serialised QIR — and that artefact runs on
+    whatever machine it lands on. The machine decides how. Because it travels, QIR is not
+    allowed to know what machine it is for: no pointer width, no calling convention,
+    nothing target-specific anywhere in it.</p>
+
+    <h2>Four ways, and they must agree</h2>
+    <p>Two of the four run today.</p>
+    <table>
+      <thead><tr><th>Way</th><th>Its job</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>Interpreter</td><td>Being believed. It generates no code and lowers nothing, so when the engines disagree it is the one that is right.</td><td>Working</td></tr>
+        <tr><td>Dev JIT · Cranelift</td><td>The edit loop. Deliberately unoptimised, which is what keeps it fast and what keeps it honest.</td><td>Working</td></tr>
+        <tr><td>Hot JIT · LLVM</td><td>Running a travelling artefact fast.</td><td>Not started</td></tr>
+        <tr><td>AOT native · LLVM</td><td>Shipping. Spends the <em>anywhere</em> to make a binary for one machine, at the last possible moment.</td><td>Not started</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Agreement is a test, not a hope</h2>
+    <p>A generator writes programs that are guaranteed to compile, and every one of them is
+    run by every way at every optimisation level. The answers must match — including
+    <em>how a program stops</em>, since stopping in the same place for the same reason is as
+    much an agreement as printing the same number.</p>
+
+    <p>Where it stands: <strong>200,000 programs, 600,000 comparisons, 28 seconds</strong> on ten cores.
+    That rate used to be four times quicker, and got slower on purpose: a generated program
+    used to be arithmetic and loops, and now it allocates arrays, reads exact rationals and
+    decimals, joins text and prints — and every one of those is compared.</p>
+
+    <p>Any disagreement is a bug in at least one engine, and the seed that produced it is kept
+    so it can be replayed.</p>
+  </article>
+</main>
+
+<footer>
+  <span>MIT OR Apache-2.0</span>
+  <a href="https://github.com/Artificial-IntelligenceAI/Quench-lang">Source</a>
+</footer>
+
+<div id="tip" role="tooltip" hidden></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

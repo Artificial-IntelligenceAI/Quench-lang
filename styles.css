@@ -21,6 +21,7 @@
   --panel: rgba(255, 255, 255, 0.09);
   --rule: rgba(255, 255, 255, 0.18);
   --glass-blur: 26px;
+  --base: #0a0f1e;
 }
 
 [data-theme="solarized-dark"] {
@@ -30,6 +31,7 @@
   --panel: #073642;
   --rule: #586e75;
   --accent: #2aa198;
+  --base: #002b36;
 }
 
 [data-theme="solarized-light"] {
@@ -39,6 +41,7 @@
   --panel: #eee8d5;
   --rule: #93a1a1;
   --accent: #268bd2;
+  --base: #fdf6e3;
 }
 
 * { box-sizing: border-box; }
@@ -50,8 +53,24 @@ body {
   flex-direction: column;
   font-family: var(--font);
   color: var(--ink);
-  background: var(--backdrop) fixed;
+  overscroll-behavior: none;
+}
+
+/* The backdrop is its own fixed layer rather than a fixed-attachment background.
+   Two reasons. `background: var(--backdrop) fixed` pinned only the last of the
+   five gradients — the shorthand hands one keyword to one layer — so the other
+   four scrolled away with the page and left a band of nothing behind them. And a
+   fixed-attachment background has to be repainted on every scroll, which is what
+   made the band flicker rather than simply sit there. This layer is composited
+   once and never moves. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: var(--backdrop);
   background-size: cover;
+  background-position: center;
 }
 
 /* --- The material ------------------------------------------------------- */
@@ -85,6 +104,7 @@ body {
   background-image: var(--backdrop);
   background-attachment: fixed;
   background-size: cover;
+  background-position: center;
   transform: scale(var(--lens-scale));
   filter: blur(var(--lens-blur)) saturate(150%);
   -webkit-mask: radial-gradient(115% 115% at 50% 50%, transparent 52%, #000 88%);
@@ -236,7 +256,7 @@ main { gap: 22px; align-content: center; }
 
 /* --- Copying a number --------------------------------------------------- */
 
-.stat .copy {
+.copy {
   position: absolute;
   top: 10px;
   right: 10px;
@@ -258,21 +278,22 @@ main { gap: 22px; align-content: center; }
 /* Shown on hover, but never hidden from a keyboard or a touch screen, neither
    of which has a pointer to hover with. */
 .stat:hover .copy,
-.stat .copy:focus-visible,
-.stat .copy.copied { opacity: 1; }
+.sheet:hover .copy,
+.copy:focus-visible,
+.copy.copied { opacity: 1; }
 
 @media (hover: none) {
-  .stat .copy { opacity: 1; }
+  .copy { opacity: 1; }
 }
 
-.stat .copy:hover {
+.copy:hover {
   color: var(--ink);
   background: color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
-.stat .copy:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.copy:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
-.stat .copy.copied { color: var(--ink); }
+.copy.copied { color: var(--ink); }
 
 .copy svg {
   fill: none;
@@ -314,3 +335,95 @@ main { gap: 22px; align-content: center; }
 }
 
 #tip.shown { opacity: 1; transform: translateY(0); }
+
+/* --- The bar's pages ---------------------------------------------------- */
+
+.bar { width: min(1080px, calc(100% - 24px)); gap: 12px; }
+
+.pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.page {
+  display: block;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+a.page:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
+a.page:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+.page[aria-current="page"] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+/* Present, and plainly not ready. Dimmer than the rest and not a link, so it
+   cannot be clicked into a page that does not exist. */
+.soon { opacity: 0.42; cursor: default; }
+
+/* --- Pages that are mostly words ---------------------------------------- */
+
+.prose { padding: 96px 16px 40px; place-items: start center; }
+
+.sheet {
+  width: min(760px, 100%);
+  padding: 34px 38px 38px;
+  text-align: left;
+  line-height: 1.65;
+  font-size: 15px;
+}
+
+/* Paragraphs need a backing that short labels do not: a wall of text over a
+   moving gradient is where this material stops being readable. */
+[data-theme="glass"] .sheet { background-color: rgba(12, 16, 32, 0.62); }
+
+.sheet h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.02em; }
+.sheet h2 { margin: 30px 0 8px; font-size: 18px; letter-spacing: -0.01em; }
+.sheet p, .sheet ul { margin: 0 0 14px; }
+.sheet ul { padding-left: 20px; }
+.sheet li { margin-bottom: 6px; }
+.sheet .lead { font-size: 17px; }
+.sheet a { color: inherit; }
+.sheet code { font-family: var(--mono); font-size: 0.9em; }
+
+.sheet table { width: 100%; border-collapse: collapse; margin: 4px 0 16px; font-size: 14px; }
+.sheet th, .sheet td {
+  text-align: left;
+  vertical-align: top;
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.sheet th { font-weight: 500; color: var(--ink-dim); font-size: 12px;
+            letter-spacing: 0.06em; text-transform: uppercase; }
+.sheet td:last-child, .sheet th:last-child { padding-right: 0; white-space: nowrap; }
+
+@media (max-width: 620px) {
+  .bar { flex-wrap: wrap; border-radius: 20px; }
+  .sheet td:last-child, .sheet th:last-child { white-space: normal; }
+}
+
+/* No moving highlight on a sheet. A white glow drifting under a paragraph is a
+   thing to read through rather than a thing to look at, and the panels are small
+   enough to keep it. */
+.sheet { background-image: none; }
+
+/* A sheet's own button sits clear of its padding rather than tight to the rim. */
+.sheet .copy { top: 14px; right: 14px; }
+
+/* The elastic overscroll, where the page pulls away from its own edge and shows
+   a band of nothing behind it. Every site does it; none of them means to. */
+html {
+  overscroll-behavior: none;
+  background-color: var(--base);
+}

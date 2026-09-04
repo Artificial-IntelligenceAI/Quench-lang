@@ -5,11 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quench</title>
 <link rel="stylesheet" href="styles.css">
+<script>
+  try {
+    var saved = localStorage.getItem("quench.theme");
+    if (saved === "glass" || saved === "solarized-dark" || saved === "solarized-light") {
+      document.documentElement.dataset.theme = saved;
+    }
+  } catch (e) {}
+</script>
 </head>
 <body>
 
 <nav class="bar glass">
   <span class="wordmark">Quench</span>
+  <ul class="pages">
+      <li><a class="page" href="index.html" aria-current="page">Start Page</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Tools</span></li>
+      <li><a class="page" href="about.html">About</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Full Docs</span></li>
+      <li><a class="page" href="licence.html">Licence</a></li>
+  </ul>
   <div class="themes" role="group" aria-label="Theme">
     <button type="button" data-set-theme="glass" aria-pressed="true"
             data-tip="Liquid glass. Frosted panels that bend the backdrop at their rim.">Glass</button>

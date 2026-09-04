@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-theme="glass">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quench licence</title>
+<link rel="stylesheet" href="styles.css">
+<script>
+  try {
+    var saved = localStorage.getItem("quench.theme");
+    if (saved === "glass" || saved === "solarized-dark" || saved === "solarized-light") {
+      document.documentElement.dataset.theme = saved;
+    }
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<nav class="bar glass">
+  <span class="wordmark">Quench</span>
+  <ul class="pages">
+      <li><a class="page" href="index.html">Start Page</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Tools</span></li>
+      <li><a class="page" href="about.html">About</a></li>
+      <li><span class="page soon" data-tip="Not built yet. It will be here when there is something true to put on it.">Full Docs</span></li>
+      <li><a class="page" href="licence.html" aria-current="page">Licence</a></li>
+  </ul>
+  <div class="themes" role="group" aria-label="Theme">
+    <button type="button" data-set-theme="glass" aria-pressed="true"
+            data-tip="Liquid glass. Frosted panels that bend the backdrop at their rim.">Glass</button>
+    <button type="button" data-set-theme="solarized-dark" aria-pressed="false"
+            data-tip="Solarized Dark. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Dark</button>
+    <button type="button" data-set-theme="solarized-light" aria-pressed="false"
+            data-tip="Solarized Light. The glass switches off — the palette is tuned for contrast, and frosting undoes that.">Light</button>
+  </div>
+</nav>
+
+<main class="prose">
+  <article class="sheet glass">
+    <button type="button" class="copy" aria-label="Copy">
+      <svg class="mark" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+        <path d="M5 15V5a2 2 0 0 1 2-2h10"></path>
+      </svg>
+      <svg class="done" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+        <path d="M4 12.5 9 17.5 20 6.5"></path>
+      </svg>
+    </button>
+    <h1>Licence</h1>
+
+    <p class="lead">Quench is dual licensed. In SPDX terms: <code>MIT OR Apache-2.0</code>.</p>
+
+    <p>Copyright © 2026 Tankun Sriket. Licensed under either of</p>
+    <ul>
+      <li><strong>Apache License, Version 2.0</strong> —
+        <a href="https://www.apache.org/licenses/LICENSE-2.0">apache.org/licenses/LICENSE-2.0</a></li>
+      <li><strong>MIT License</strong> —
+        <a href="https://opensource.org/licenses/MIT">opensource.org/licenses/MIT</a></li>
+    </ul>
+
+    <p>at your option. <strong>You do not have to comply with both.</strong> Pick whichever one
+    suits you and comply with that one.</p>
+
+    <h2>Contribution</h2>
+    <p>Unless you explicitly state otherwise, any contribution intentionally submitted for
+    inclusion in this work by you, as defined in the Apache-2.0 licence, shall be dual
+    licensed as above, without any additional terms or conditions.</p>
+
+    <h2>Provenance</h2>
+    <p><code>quench-diag</code> is derived from <code>luarust-diag</code> in Luarust, which is MIT
+    and copyright the same author. Relicensing it under the dual licence here is the copyright
+    holder&rsquo;s to do.</p>
+
+    <p>No third-party code is vendored into the repository — every file in it was written for
+    it. There is one third-party <em>dependency</em>, Cranelift, which <code>quench-dev</code>
+    builds on and which brings a tree of sixty crates behind it. All of them are permissive:
+    Apache-2.0 WITH LLVM-exception for Cranelift and its own dependencies, MIT OR Apache-2.0
+    for most of the rest, and MIT, Zlib or BSD-2-Clause for a handful. Nothing in the tree is
+    copyleft, and nothing in it puts a condition on Quench&rsquo;s own licence.</p>
+  </article>
+</main>
+
+<footer>
+  <span>MIT OR Apache-2.0</span>
+  <a href="https://github.com/Artificial-IntelligenceAI/Quench-lang">Source</a>
+</footer>
+
+<div id="tip" role="tooltip" hidden></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

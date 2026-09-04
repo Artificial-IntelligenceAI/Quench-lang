@@ -57,7 +57,7 @@ for (const button of buttons) {
   });
 }
 
-for (const panel of document.querySelectorAll<HTMLElement>(".glass")) {
+for (const panel of document.querySelectorAll<HTMLElement>(".glass:not(.sheet)")) {
   trackSheen(panel);
 }
 
@@ -157,20 +157,24 @@ function say(message: string): void {
   }
 }
 
-void countTheLanguage().then(
-  (counted) => {
-    show("reserved", counted.reserved);
-    show("words", counted.words);
-    show("symbols", counted.symbols);
-    const drift = counted.confirmed === counted.words
-      ? "all of them found in it"
-      : `${counted.words - counted.confirmed} of them no longer in it`;
-    say(`Read from the source on main, just now: ${String(counted.words)} words, ${drift}.`);
-  },
-  (reason: unknown) => {
-    say(`Could not reach the source, so nothing above is claimed: ${String(reason)}`);
-  },
-);
+/* Only the start page carries the panels. The other pages share this script and
+   have no numbers on them, so they do not go asking for the source. */
+if (document.getElementById("reserved") !== null) {
+  void countTheLanguage().then(
+    (counted) => {
+      show("reserved", counted.reserved);
+      show("words", counted.words);
+      show("symbols", counted.symbols);
+      const drift = counted.confirmed === counted.words
+        ? "all of them found in it"
+        : `${counted.words - counted.confirmed} of them no longer in it`;
+      say(`Read from the source on main, just now: ${String(counted.words)} words, ${drift}.`);
+    },
+    (reason: unknown) => {
+      say(`Could not reach the source, so nothing above is claimed: ${String(reason)}`);
+    },
+  );
+}
 
 /* --- Copying a number --------------------------------------------------- */
 
@@ -226,12 +230,12 @@ function copyTheOldWay(text: string): boolean {
 
 for (const button of document.querySelectorAll<HTMLButtonElement>(".copy")) {
   button.addEventListener("click", () => {
-    const panel = button.closest(".stat");
-    const reading = panel === null ? null : readingOf(panel);
-    if (reading === null) {
+    const target = copyTargetOf(button);
+    if (target === null) {
       /* Nothing was counted, so there is nothing to hand over. */
       return;
     }
+    const reading = target.text;
 
     /* Done inside the gesture, so that it still works when the promise below is
        refused — by then the click is over and the old way is no longer allowed. */
@@ -251,6 +255,34 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(".copy")) {
   });
 }
 
+interface CopyTarget {
+  readonly text: string;
+  readonly description: string;
+}
+
+/** What a copy button is standing next to. A panel hands over its one reading;
+    a sheet hands over everything written on it. */
+function copyTargetOf(button: Element): CopyTarget | null {
+  const panel = button.closest(".stat");
+  if (panel !== null) {
+    const reading = readingOf(panel);
+    return reading === null ? null : { text: reading, description: `Copy “${reading}”` };
+  }
+
+  const sheet = button.closest<HTMLElement>(".sheet");
+  if (sheet !== null) {
+    /* `innerText` rather than `textContent`, because it is the laid-out text:
+       headings and paragraphs come out on their own lines instead of running
+       together. The button contributes nothing, being two drawings. */
+    const written = sheet.innerText.replace(/\n{3,}/g, "\n\n").trim();
+    return written === ""
+      ? null
+      : { text: written, description: "Copy everything written here" };
+  }
+
+  return null;
+}
+
 /* --- Descriptions ------------------------------------------------------- */
 
 const tip = document.getElementById("tip");
@@ -263,9 +295,8 @@ function describe(control: HTMLElement): string | null {
     return written;
   }
   if (control.classList.contains("copy")) {
-    const panel = control.closest(".stat");
-    const reading = panel === null ? null : readingOf(panel);
-    return reading === null ? "Nothing counted yet, so nothing to copy." : `Copy “${reading}”`;
+    const target = copyTargetOf(control);
+    return target === null ? "Nothing counted yet, so nothing to copy." : target.description;
   }
   return null;
 }
