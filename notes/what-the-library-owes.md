@@ -165,18 +165,49 @@ forever, to say something an import would say properly later.
 was never going to come, and the price of waiting was paid in every program written
 meanwhile — which is the argument for spending a rename early rather than late.
 
-### What self-hosting it would take
+### What self-hosting it would take — less than it looks, and more
 
-Not much, and none of it exists.
+The first answer written here was that a float of *chosen precision* was the gap, and
+that was wrong. It is not a possibility gap. Checked rather than assumed, all three legs
+already exist:
 
-- **A float of chosen precision.** The gap. `e` never rounds, so a series in it explodes
-  its denominators; `b64` is fixed at fifty-three bits. `sin` computes in a float with
-  *p* bits and Ziv's loop doubles *p* until the rounding is provable, and Quench has no
-  way to say that.
-- **A correctly-rounded exact-to-float conversion**, which is the last step of every one
-  of them. Still a host call — but *one* instead of twenty-eight.
-- **A float's bits**, for argument reduction: which quarter-turn `1e300` falls in needs π
-  to a thousand bits, and finding that out starts with the exponent.
+**A float becomes an exact**, through text, losslessly:
+
+```quench
+var.immut.b64 ['x'] = [*0.1* + *0.2*];
+var.immut.e ['exact'] = [call as.e[call stitch['x']]];
+# 7500000000000001/25000000000000000 — and correctly *not* 3/10
+```
+
+**The arithmetic** is unbounded exact rationals, which `e` already is.
+
+**An exact becomes a float** — not directly, since `as.b64` refuses a ratio, but by
+writing the decimal digits and reading them back, and `as.b64` is correctly rounded:
+
+```quench
+var.immut.b64 ['near'] = [call as.b64[*0.30000000000000004*]];  # the same bits
+```
+
+So `sin` is writable in Quench source *today*: convert in, sum the series in `e`, run
+Ziv's test with exact comparisons, long-divide to twenty digits, convert back. The
+language is accidentally complete for it, and `stitch` with `is`/`as` are what made it
+so — none of that was built with this in mind.
+
+What is missing is **speed**, and fatally rather than annoyingly. Every term of the
+series is an exact rational whose denominator multiplies out and never shrinks; reducing
+`1e300` needs π to a thousand bits *as a ratio*; and the long division is hand-rolled per
+call. `Wide` exists in the Rust implementation for exactly this reason — a mantissa held
+at a fixed width per attempt, rather than a denominator nobody bounded.
+
+So the answer in three parts:
+
+- **To be possible:** nothing. It already is.
+- **To be usable:** a float of chosen precision — a mantissa width picked while running,
+  which Ziv's loop doubles.
+- **To be tolerable to write:** direct `b64` to `e` and back. Quench has **no conversion
+  between number types at all** — every one goes through text — and that is a bigger
+  question than the maths, since it is the rule that nothing converts on its own meeting
+  the fact that sometimes something must.
 
 Everything else on the list below is already Quench source waiting to be typed. Sorting,
 searching, reversing, minimum-of-an-array, matrices: they wanted generics, arrays whose
