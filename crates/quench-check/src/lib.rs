@@ -224,6 +224,46 @@ enum Size {
     Grows(Span),
 }
 
+/// The functions the language provides, and what each takes.
+///
+/// A bare word after `call` is one of these and nothing else — anything a writer named
+/// is written between marks. Kept in one place so that a diagnostic listing them cannot
+/// go stale, which is what happened to the list in E0104 twice in one day.
+///
+/// The maths here is the half of IEEE 754 that the standard *requires* to be correctly
+/// rounded, which is what makes it safe: every engine must give identical bits. `sin`,
+/// `log` and the rest are only *recommended*, so three engines calling three C libraries
+/// would be three answers, and they wait for one implementation written here.
+pub const PROVIDED: &[(&str, Provides)] = &[
+    ("count", Provides::Count),
+    ("stitch", Provides::Stitch),
+    ("sqrt", Provides::Alone(0)),
+    ("abs", Provides::Alone(1)),
+    ("floor", Provides::Alone(2)),
+    ("ceil", Provides::Alone(3)),
+    ("round", Provides::Alone(4)),
+    ("trunc", Provides::Alone(5)),
+    ("copysign", Provides::Paired(0)),
+    ("min", Provides::Paired(1)),
+    ("max", Provides::Paired(2)),
+    ("fma", Provides::Fused),
+];
+
+/// What one of [`PROVIDED`] is, and how the checker reads it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Provides {
+    /// How many things are in something.
+    Count,
+    /// A list of pieces, joined, converting whatever is not text.
+    Stitch,
+    /// One float in, one out. The number is which.
+    Alone(u8),
+    /// Two floats in, one out.
+    Paired(u8),
+    /// Three floats in, one out, rounded once.
+    Fused,
+}
+
 /// One variable.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Local {
@@ -290,6 +330,9 @@ pub enum Value {
     /// `copy 'xs'` — a new array holding the same things. `share 'xs'` needs no node of
     /// its own: it is the handle, which is what naming a variable already gives.
     Copied(Box<Value>),
+    /// One of the maths functions IEEE 754 requires, on however wide a float it was
+    /// given. `which` is the number the lowering writes beside it.
+    Maths { which: u8, of: Vec<Value>, width: u8 },
     /// How many characters a piece of text has, asked while it runs. Which of the two
     /// answers it gives is `[defaults] characters`, and the lowering picks it.
     CountText(Box<Value>),
@@ -1898,6 +1941,63 @@ impl<'a> Checker<'a> {
         self.at(name, &one.terms, close)
     }
 
+    /// `call sqrt['x']` — the maths IEEE 754 requires, on whatever width it was given.
+    ///
+    /// Every argument is a float and they are all the same width, which is also the
+    /// width of the answer. A `b16` goes through as the `f32` it is carried in and is
+    /// put back afterwards, exactly as `+` on one is.
+    fn maths(&mut self, call: &ast::Call, name: &str, wants: usize, which: u8) -> Option<Value> {
+        if call.args.len() != wants {
+            self.errors.push(
+                Diagnostic::new("E0494", format!("`{name}` takes {}.", counted(wants, "number")))
+                    .primary(call.word.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                    .rule("a call brings one value for each thing it takes, in the same order")
+                    .fix(format!("give it {}", counted(wants, "number"))),
+            );
+            return None;
+        }
+
+        let mut built = Vec::with_capacity(wants);
+        let mut width: Option<u8> = None;
+        for given in &call.args {
+            let outer = std::mem::replace(&mut self.reading, Ty::F64);
+            let value = self.tree(given);
+            self.reading = outer;
+            let value = value?;
+            let found = self.type_of(&value, given.span)?;
+            let each = match found {
+                Ty::F64 => 64u8,
+                Ty::F32 => 32,
+                Ty::F16 => 16,
+                other => {
+                    self.errors.push(
+                        Diagnostic::new("E0494", format!("`{name}` works on binary floats, and this is {} `{}`.", other.article(), other.name()))
+                            .primary(given.span, format!("{} `{}`", other.article(), other.name()))
+                            .rule("the maths IEEE 754 settles is about `b16`, `b32` and `b64`, which are the types it settles")
+                            .tip("`e` never rounds, so it has no need of these, and a decimal's are a different specification.")
+                            .fix("use a `b64`, a `b32` or a `b16`"),
+                    );
+                    return None;
+                }
+            };
+            match width {
+                None => width = Some(each),
+                Some(first) if first != each => {
+                    self.errors.push(
+                        Diagnostic::new("E0494", format!("`{name}` takes one width, and was given two."))
+                            .primary(given.span, format!("a `{}`", found.name()))
+                            .rule("nothing converts on its own, so two float widths never meet")
+                            .fix("make them the same width"),
+                    );
+                    return None;
+                }
+                Some(_) => {}
+            }
+            built.push(value);
+        }
+        Some(Value::Maths { which, of: built, width: width.expect("at least one argument") })
+    }
+
     /// `call stitch[*n is * 'n']` — the text of all of it, joined.
     ///
     /// The list is a `print`'s: pieces side by side, of whatever types. What it adds
@@ -2166,19 +2266,25 @@ impl<'a> Checker<'a> {
             };
             return self.called(which, call);
         }
-        if self.text(call.name) == "stitch" {
-            return self.stitched(call);
-        }
-        if self.text(call.name) != "count" {
-            let name = self.text(call.name).to_string();
+        let name = self.text(call.name).to_string();
+        let Some((_, provides)) = PROVIDED.iter().find(|(word, _)| *word == name) else {
+            let all: Vec<String> =
+                PROVIDED.iter().map(|(word, _)| format!("`{word}`")).collect();
             self.errors.push(
                 Diagnostic::new("E0455", format!("there is nothing called `{name}`."))
                     .primary(call.name, "here")
                     .rule("a bare word after `call` is something the language provides, and this names none of them")
-                    .tip("`count` and `stitch` are the ones that come with the language.")
+                    .tip(format!("they are {}.", all.join(", ")))
                     .fix(format!("`call '{name}'[…]` if you declared it with `fn`")),
             );
             return None;
+        };
+        match provides {
+            Provides::Stitch => return self.stitched(call),
+            Provides::Alone(which) => return self.maths(call, &name, 1, *which),
+            Provides::Paired(which) => return self.maths(call, &name, 2, *which),
+            Provides::Fused => return self.maths(call, &name, 3, 0),
+            Provides::Count => {}
         }
 
         let [one] = call.args.as_slice() else {
@@ -2442,6 +2548,11 @@ impl<'a> Checker<'a> {
             Value::Copy(local) => Some(self.locals[local.0 as usize].ty.clone()),
             Value::Array { .. } => None,
             Value::Join(_) | Value::Said { .. } => Some(Ty::Str),
+            Value::Maths { width, .. } => Some(match width {
+                16 => Ty::F16,
+                32 => Ty::F32,
+                _ => Ty::F64,
+            }),
             Value::Not(_) => Some(Ty::Bool),
             Value::Count(_) | Value::CountText(_) => {
                 Some(Ty::Int { bits: 64, signed: true })

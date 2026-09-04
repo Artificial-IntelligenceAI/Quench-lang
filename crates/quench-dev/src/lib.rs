@@ -676,6 +676,66 @@ extern "C" fn say_array(rt: *mut Runtime, handle: i64, kind: i64, depth: i64) ->
     keep_text(written)
 }
 
+/// The maths functions, in the order the lowering writes their numbers. Shared with the
+/// interpreter by both reading `quench_num`, which is what makes them one implementation
+/// rather than two that have to be kept level.
+const ALONE: [quench_num::Alone; 6] = [
+    quench_num::Alone::Sqrt,
+    quench_num::Alone::Abs,
+    quench_num::Alone::Floor,
+    quench_num::Alone::Ceiling,
+    quench_num::Alone::Round,
+    quench_num::Alone::Truncate,
+];
+
+const PAIRED: [quench_num::Paired; 3] = [
+    quench_num::Paired::CopySign,
+    quench_num::Paired::Minimum,
+    quench_num::Paired::Maximum,
+];
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn float_alone(_rt: *mut Runtime, bits: i64, which: i64, width: i64) -> i64 {
+    let op = ALONE[which as usize];
+    match width {
+        64 => quench_num::maths::alone64(op, f64::from_bits(bits as u64)).to_bits() as i64,
+        _ => i64::from(
+            quench_num::maths::alone32(op, f32::from_bits(bits as u32)).to_bits(),
+        ),
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn float_paired(_rt: *mut Runtime, a: i64, b: i64, which: i64, width: i64) -> i64 {
+    let op = PAIRED[which as usize];
+    match width {
+        64 => quench_num::maths::paired64(op, f64::from_bits(a as u64), f64::from_bits(b as u64))
+            .to_bits() as i64,
+        _ => i64::from(
+            quench_num::maths::paired32(op, f32::from_bits(a as u32), f32::from_bits(b as u32))
+                .to_bits(),
+        ),
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn float_fused(_rt: *mut Runtime, a: i64, b: i64, c: i64, width: i64) -> i64 {
+    match width {
+        64 => quench_num::maths::fused64(
+            f64::from_bits(a as u64),
+            f64::from_bits(b as u64),
+            f64::from_bits(c as u64),
+        )
+        .to_bits() as i64,
+        _ => i64::from(quench_num::maths::fused32(
+            f32::from_bits(a as u32),
+            f32::from_bits(b as u32),
+            f32::from_bits(c as u32),
+        )
+        .to_bits()),
+    }
+}
+
 /// Called by compiled code. Not called by anything else.
 extern "C" fn text_clusters(_rt: *mut Runtime, at: i64) -> i64 {
     HEAP.with(|h| quench_text::grapheme::count(h.borrow().said(at)) as i64)
@@ -1086,6 +1146,9 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
+    builder.symbol("quench_float_alone", float_alone as *const u8);
+    builder.symbol("quench_float_paired", float_paired as *const u8);
+    builder.symbol("quench_float_fused", float_fused as *const u8);
     builder.symbol("quench_text_clusters", text_clusters as *const u8);
     builder.symbol("quench_text_letters", text_letters as *const u8);
     builder.symbol("quench_print_float", print_float as *const u8);
@@ -1166,6 +1229,9 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
+        (qir::Host::FloatAlone, "quench_float_alone"),
+        (qir::Host::FloatPaired, "quench_float_paired"),
+        (qir::Host::FloatFused, "quench_float_fused"),
         (qir::Host::TextClusters, "quench_text_clusters"),
         (qir::Host::TextLetters, "quench_text_letters"),
         (qir::Host::PrintFloat, "quench_print_float"),

@@ -449,6 +449,18 @@ pub enum Host {
     /// `(handle, elements, depth)` — the same square brackets a `print` shows.
     SayArray,
 
+    /// `(float, which, width)` — `sqrt`, `abs`, `floor`, `ceil`, `round` or `trunc`.
+    ///
+    /// One host for the family rather than six, because unlike a setting these are not
+    /// a choice the project made — they are which function was written, and the name is
+    /// right there in the source beside the call. `which` is a [`quench_num::Alone`].
+    FloatAlone,
+    /// `(a, b, which, width)` — `copysign`, `min` or `max`. `which` is a
+    /// [`quench_num::Paired`].
+    FloatPaired,
+    /// `(a, b, c, width)` — multiply and add with one rounding rather than two.
+    FloatFused,
+
     /// `(text)` — how many characters a piece of text has.
     ///
     /// Two of them, because `[defaults] characters` is semantic and every semantic
@@ -505,6 +517,9 @@ impl Host {
             Host::SayExact => "say-exact",
             Host::SayDecimal => "say-decimal",
             Host::SayArray => "say-array",
+            Host::FloatAlone => "float-alone",
+            Host::FloatPaired => "float-paired",
+            Host::FloatFused => "float-fused",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
             Host::PowI64 => "pow-i64",
@@ -545,6 +560,9 @@ impl Host {
             }
             Host::DecimalCompare => &[Ty::Decimal, Ty::Decimal],
             Host::PrintDecimal => &[Ty::I64, Ty::Decimal],
+            Host::FloatAlone => &[Ty::F64, Ty::I64, Ty::I64],
+            Host::FloatPaired => &[Ty::F64, Ty::F64, Ty::I64, Ty::I64],
+            Host::FloatFused => &[Ty::F64, Ty::F64, Ty::F64, Ty::I64],
             Host::TextClusters | Host::TextLetters => &[Ty::Text],
             Host::SayI64 | Host::SayU64 => &[Ty::I64],
             Host::SayBool => &[Ty::Bool],
@@ -556,7 +574,7 @@ impl Host {
         }
     }
 
-    /// Which parameter is *whatever it was handed*, rather than a type fixed here.
+    /// Which parameters are *whatever they were handed*, rather than types fixed here.
     ///
     /// Two kinds of thing are polymorphic. An array's slot is an `i64` however wide
     /// what is in it, so no runtime needs telling — but the IR does, because a value
@@ -564,14 +582,19 @@ impl Host {
     /// [`Host::ArrayGet`] is asked for its answer's type where it is called. And a
     /// binary float arrives in the same register whichever of the three it is, so the
     /// ones that take a float take any of them.
-    pub fn takes_an_element(self) -> Option<usize> {
+    pub fn takes_an_element(self) -> &'static [usize] {
         match self {
-            Host::ArraySet => Some(2),
-            Host::ArrayPush => Some(1),
-            Host::PrintFloat => Some(1),
-            Host::SayFloat => Some(0),
-            Host::ToB16 => Some(0),
-            _ => None,
+            Host::ArraySet => &[2],
+            Host::ArrayPush => &[1],
+            Host::PrintFloat => &[1],
+            Host::SayFloat => &[0],
+            Host::ToB16 => &[0],
+            // Every float a maths function is handed is the same width as the answer,
+            // and the width rides alongside as a number the call site wrote down.
+            Host::FloatAlone => &[0],
+            Host::FloatPaired => &[0, 1],
+            Host::FloatFused => &[0, 1, 2],
+            _ => &[],
         }
     }
 
@@ -605,6 +628,8 @@ impl Host {
             | Host::SayDecimal
             | Host::SayArray => Ty::Text,
             Host::ToB16 => Ty::F32,
+            // Whatever width it was handed, which the call site says.
+            Host::FloatAlone | Host::FloatPaired | Host::FloatFused => Ty::F64,
             Host::ExactRead
             | Host::ExactAdd
             | Host::ExactSub

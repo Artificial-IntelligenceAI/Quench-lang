@@ -2001,3 +2001,89 @@ fn count_takes_an_array_or_a_piece_of_text_and_nothing_else() {
     assert!(rendered.contains("`count` was given an `i64`"), "{rendered}");
     assert!(rendered.contains("an array and a piece of text"), "{rendered}");
 }
+
+#[test]
+fn the_maths_ieee_requires_is_the_maths_there_is() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['two'] = [*2.0*];
+    var.immut.b64 ['half'] = [*0.5*];
+    var.immut.b64 ['neg'] = [*-2.5*];
+    print.stdout[call stitch[
+        call sqrt['two'] str:* *
+        call abs['neg'] str:* *
+        call floor['neg'] str:* *
+        call ceil['neg'] str:* *
+        call trunc['neg'] str:* *
+        call min['two', 'half'] str:* *
+        call max['two', 'half'] str:* *
+        call copysign['two', 'neg'] str:* *
+        call fma['two', 'half', 'half']
+    ]];
+}
+"),
+        "1.4142135623730951 2.5 -3.0 -2.0 -2.0 0.5 2.0 -2.0 1.5",
+    );
+}
+
+#[test]
+fn round_breaks_a_tie_to_the_even_one() {
+    // IEEE says `roundToIntegralTiesToEven`. Rust's own `f64::round` breaks ties away
+    // from zero, so writing this in terms of it would have been quietly wrong in both
+    // engines at once — which is the one kind of wrong the oracle cannot see.
+    assert_eq!(
+        said("\
+START {
+    var.immut.b64 ['a'] = [*2.5*];
+    var.immut.b64 ['b'] = [*3.5*];
+    var.immut.b64 ['c'] = [*-2.5*];
+    print.stdout[call stitch[call round['a'] str:* * call round['b'] str:* * call round['c']]];
+}
+"),
+        "2.0 4.0 -2.0",
+        "two and four, not three and four",
+    );
+}
+
+#[test]
+fn the_maths_works_on_every_width_and_keeps_it() {
+    assert_eq!(
+        said("\
+START {
+    var.immut.b32 ['a'] = [*2.0*];
+    var.immut.b16 ['b'] = [*2.0*];
+    print.stdout[call stitch[call sqrt['a'] str:* * call sqrt['b']]];
+}
+"),
+        "1.4142135 1.4140625",
+        "a `b32`'s answer and a `b16`'s, each rounded to its own width",
+    );
+}
+
+#[test]
+fn the_maths_takes_floats_of_one_width_and_says_so() {
+    for (source, expected) in [
+        (
+            "START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['x'] = [call sqrt['n']]; print.stdout['x']; }",
+            "works on binary floats",
+        ),
+        (
+            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b32 ['b'] = [*1.0*]; var.immut.b64 ['x'] = [call min['a', 'b']]; print.stdout['x']; }",
+            "takes one width, and was given two",
+        ),
+        (
+            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b64 ['x'] = [call sqrt['a', 'a']]; print.stdout['x']; }",
+            "`sqrt` takes one number",
+        ),
+    ] {
+        let rendered = report(source);
+        assert!(rendered.contains(expected), "{source}\n{rendered}");
+        assert!(rendered.contains("Error code: E0494"), "{source}\n{rendered}");
+    }
+
+    // And a bare word that is none of them lists the ones that are.
+    let unknown = report("START { var.immut.b64 ['x'] = [call sin[*1.0*]]; print.stdout['x']; }");
+    assert!(unknown.contains("there is nothing called `sin`"), "{unknown}");
+    assert!(unknown.contains("`sqrt`"), "{unknown}");
+}

@@ -119,7 +119,7 @@ Each of these is waiting on something, and the something is named.
 | --- | --- |
 | ~~Number → text — `stitch`~~ | **built** |
 | Text: length, slice, search, case, trim, split | bytes-or-characters |
-| The IEEE-required maths | nothing |
+| ~~The IEEE-required maths~~ | **built** |
 | The IEEE-recommended maths | somebody writing it, once, for every engine |
 | Input: stdin, arguments, files | failure that is not a stop |
 | Output: files, streams beyond the two | failure that is not a stop |

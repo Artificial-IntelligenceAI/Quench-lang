@@ -913,6 +913,38 @@ fn emit(
             };
             b.call_host(host, &[text])
         }
+        // A `b16` goes through as the `f32` it is carried in and is put back after, the
+        // same way `+` on one is: an `f32` has the twenty-four bits binary16's eleven
+        // ask for, so one wider operation rounded once is binary16's own answer.
+        Value::Maths { which, of, width } => {
+            let args: Vec<qir::Value> =
+                of.iter().map(|value| emit(b, module, value, held, w)).collect();
+            let ty = match width {
+                16 => qir::Ty::F16,
+                32 => qir::Ty::F32,
+                _ => qir::Ty::F64,
+            };
+            let said = b.const_i64(i64::from(*width));
+            let mut given = args;
+            let host = match given.len() {
+                1 => {
+                    given.push(b.const_i64(i64::from(*which)));
+                    qir::Host::FloatAlone
+                }
+                2 => {
+                    given.push(b.const_i64(i64::from(*which)));
+                    qir::Host::FloatPaired
+                }
+                _ => qir::Host::FloatFused,
+            };
+            given.push(said);
+            let answer = b.call_host_giving(host, &given, ty);
+            if *width == 16 {
+                b.call_host_giving(qir::Host::ToB16, &[answer], qir::Ty::F16)
+            } else {
+                answer
+            }
+        }
         Value::Not(of) => {
             let value = emit(b, module, of, held, w);
             b.not(value)

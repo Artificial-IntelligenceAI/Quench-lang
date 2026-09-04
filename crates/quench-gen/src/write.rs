@@ -202,7 +202,7 @@ pub fn program_under(
 
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(22) {
+        match rng.upto(24) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -283,6 +283,37 @@ pub fn program_under(
                     b.bin(op, lhs, rhs)
                 };
                 numbers.push(value);
+            }
+            16 => {
+                // The maths IEEE requires. Every engine must give identical bits, so
+                // this is the cheapest coverage there is -- and the one place where a
+                // shared implementation is the *point* rather than a risk, because the
+                // standard says what the answer is.
+                let x = rng.pick(&floats);
+                let width = b.const_i64(match float_ty {
+                    Ty::F64 => 64,
+                    Ty::F32 => 32,
+                    _ => 16,
+                });
+                let mut made = match rng.upto(3) {
+                    0 => {
+                        let which = b.const_i64(rng.upto(6) as i64);
+                        b.call_host_giving(Host::FloatAlone, &[x, which, width], float_ty)
+                    }
+                    1 => {
+                        let y = rng.pick(&floats);
+                        let which = b.const_i64(rng.upto(3) as i64);
+                        b.call_host_giving(Host::FloatPaired, &[x, y, which, width], float_ty)
+                    }
+                    _ => {
+                        let (y, z) = (rng.pick(&floats), rng.pick(&floats));
+                        b.call_host_giving(Host::FloatFused, &[x, y, z, width], float_ty)
+                    }
+                };
+                if half {
+                    made = b.call_host_giving(Host::ToB16, &[made], float_ty);
+                }
+                floats.push(made);
             }
             15 => {
                 // `stitch`: the same formatting a `print` does, handed back instead of
