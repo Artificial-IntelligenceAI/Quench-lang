@@ -228,6 +228,7 @@ function copyTheOldWay(text: string): boolean {
   return done;
 }
 
+wire("copying", () => {
 for (const button of document.querySelectorAll<HTMLButtonElement>(".copy")) {
   button.addEventListener("click", () => {
     const target = copyTargetOf(button);
@@ -254,6 +255,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(".copy")) {
     );
   });
 }
+});
 
 interface CopyTarget {
   readonly text: string;
@@ -281,6 +283,18 @@ function copyTargetOf(button: Element): CopyTarget | null {
   }
 
   return null;
+}
+
+/** Runs one page's worth of wiring. Every section below is independent, but they
+    share a file and a top level, so without this a throw in an early one silently
+    takes every later one with it — and the language picker, being last, would be
+    the first thing to disappear. */
+function wire(what: string, work: () => void): void {
+  try {
+    work();
+  } catch (reason: unknown) {
+    console.error(`${what} did not start:`, reason);
+  }
 }
 
 /* --- Descriptions ------------------------------------------------------- */
@@ -337,6 +351,7 @@ function showTip(control: HTMLElement): void {
   tip.classList.add("shown");
 }
 
+wire("descriptions", () => {
 for (const control of document.querySelectorAll<HTMLElement>("[data-tip], .copy")) {
   control.addEventListener("pointerenter", (event: PointerEvent) => {
     /* A touch has no hover, and a tooltip that appears on tap is just a delay. */
@@ -356,6 +371,7 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
 });
 
 window.addEventListener("scroll", hideTip, { passive: true });
+});
 
 /* --- Comparing two languages -------------------------------------------- */
 
@@ -496,9 +512,14 @@ function compare(left: HTMLSelectElement, right: HTMLSelectElement): void {
   }
 }
 
+wire("the language picker", () => {
 const leftPick = document.getElementById("left");
 const rightPick = document.getElementById("right");
 if (leftPick instanceof HTMLSelectElement && rightPick instanceof HTMLSelectElement) {
+  /* Populated fresh every load. Anything a browser restored into these from a
+     previous visit is discarded rather than argued with. */
+  leftPick.replaceChildren();
+  rightPick.replaceChildren();
   fillPicker(leftPick, "quench");
   fillPicker(rightPick, "go");
   const again = (): void => {
@@ -508,3 +529,4 @@ if (leftPick instanceof HTMLSelectElement && rightPick instanceof HTMLSelectElem
   rightPick.addEventListener("change", again);
   again();
 }
+});
