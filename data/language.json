@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "b9d9c86",
+    "commit": "ec7b5f8",
     "date": "2026-09-04",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,8 +13,8 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 83,
-  "confirmed": 83,
+  "words": 85,
+  "confirmed": 85,
   "missing": [],
   "categories": [
     {
@@ -163,10 +163,12 @@
     {
       "id": "provided",
       "label": "Provided",
-      "count": 30,
+      "count": 32,
       "words": [
         "count",
         "stitch",
+        "is",
+        "as",
         "sqrt",
         "abs",
         "floor",

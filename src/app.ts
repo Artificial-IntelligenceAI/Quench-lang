@@ -457,7 +457,7 @@ const LANGUAGES: readonly Language[] = [
       tenths: "Exactly 0.3 under `e`, its unbounded exact rationals. The binary floats are there when asked for by name.",
       precedence: "Only what mathematics settled. Everything programming invented takes brackets — `mod`, `and` against `or`, bitwise.",
       output: "Said every time: `print.stdout[…]` or `print.stderr[…]`. There is no default.",
-      conversion: "None. `call stitch[…]` is the one conversion in the language, and it is written down.",
+      conversion: "None on its own, and both directions are written. `call stitch[…]` makes text of a number; `call as.i64[…]` reads one back, and stops the program unless `call is.i64[…]` was asked first.",
       running: "Compiles once to one artefact; the machine decides how to run it. Two of four ways exist today.",
     },
   },
