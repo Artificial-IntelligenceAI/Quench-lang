@@ -1,0 +1,59 @@
+# A function may leave the type to whoever calls it. `any` and `number` are the two
+# holes there are, and a hole is not a name -- it is Quench's word for a place a type
+# goes. See `notes/a-hole-is-not-a-name.md`.
+
+# `any` takes all sixteen types, and in exchange its body may only do what works on
+# every one of them: hold it, copy it, hand it back, and `==` it.
+fn.file.any ['echo'] [immut.any 'x'] {
+    give ['x'];
+}
+
+fn.file.bool ['same'] [immut.any 'a', immut.any 'b'] {
+    give ['a' == 'b'];
+}
+
+# `number` takes the number types only, and buys `<`, `>`, `+`, `-`, `x` and `/`. It
+# does not buy `mod` or `^`, because neither of those works on *every* number.
+fn.file.number ['bigger of'] [immut.number 'a', immut.number 'b'] {
+    if 'a' > 'b' {
+        give ['a'];
+    } else {
+        give ['b'];
+    }
+}
+
+# A hole reaches inside an array, and a body may declare one of its own.
+fn.file.number ['largest'] [immut.arr.number (3) 'xs'] {
+    var.mut.number ['best'] = ['xs'[*1*]];
+    loop.temp.range.i64 ['i'] = [*2*, *3*] {
+        if 'xs'['i'] > 'best' {
+            set ['best'] = ['xs'['i']];
+        }
+    }
+    give ['best'];
+}
+
+# A function with a hole may call another one. What this asks of `'echo'` is not known
+# until this itself has been copied, which is why the copying is a worklist.
+fn.file.any ['twice through'] [immut.any 'x'] {
+    give [call 'echo'[call 'echo'['x']]];
+}
+
+START {
+    # Nothing at a call says a type. The argument says it, and saying it twice would
+    # only be a chance to disagree.
+    var.immut.str ['kept'] = [call 'echo'[str:*kept*]];
+    var.immut.e ['ratio'] = [call 'echo'[e:*3/4*]];
+    print.stdout['kept' str:* * 'ratio' \n];
+
+    # A written value does carry its own type here, because a written value holds
+    # nothing until a type reads it and a hole has not said which it is yet.
+    print.stdout[call 'same'[str:*a*, str:*a*] str:* * call 'same'[i64:*1*, i64:*2*] \n];
+    print.stdout[call 'bigger of'[i64:*3*, i64:*9*] str:* * call 'bigger of'[b64:*2.5*, b64:*1.5*] \n];
+
+    var.immut.arr.i64 (3) ['ns'] = [[*10* *30* *20*]];
+    var.immut.arr.b64 (3) ['fs'] = [[*1.5* *9.25* *0.5*]];
+    print.stdout[call 'largest'[share 'ns'] str:* * call 'largest'[share 'fs'] \n];
+
+    print.stdout[call 'twice through'[str:*through*] str:* * call 'twice through'[i64:*7*] \n];
+}

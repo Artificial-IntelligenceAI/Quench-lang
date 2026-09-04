@@ -501,12 +501,29 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(Kind::OpenList, "a call")?;
+        // A call's arguments are values of their own, so a type written on one of them
+        // is answering to the *callee* rather than to whatever declaration this call
+        // happens to sit inside. Without this, `var.immut.str ['s'] = [call 'echo'[str:*a*]]`
+        // is told it said `str` twice -- and for a call with a hole in it, the type on
+        // the argument is the only thing that says what the hole is.
+        let outer = std::mem::take(&mut self.typed_in_a_value);
         let mut args = Vec::new();
+        let mut ok = true;
         while !matches!(self.peek().kind, Kind::CloseList | Kind::End) {
-            args.push(self.value()?);
+            match self.value() {
+                Some(value) => args.push(value),
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
             if self.eat(Kind::Comma).is_none() {
                 break;
             }
+        }
+        self.typed_in_a_value = outer;
+        if !ok {
+            return None;
         }
         let close = self.expect(Kind::CloseList, "a call")?;
         Some(ast::Call { word, name, marked, chain, args, close })

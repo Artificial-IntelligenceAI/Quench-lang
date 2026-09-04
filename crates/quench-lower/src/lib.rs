@@ -154,6 +154,10 @@ fn lower_func(
 /// What a QIR value of this type looks like.
 fn qir_ty(ty: &Ty) -> qir::Ty {
     match ty {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
         // Every whole-number type rides in an `i64`, held normalised for its width.
         Ty::Int { .. } => qir::Ty::I64,
         Ty::Bool => qir::Ty::Bool,
@@ -248,7 +252,7 @@ fn lower_body(
                 b.ret(answer);
                 return true;
             }
-            Stmt::Do { func, args } => {
+            Stmt::Do { func, args, .. } => {
                 let given: Vec<qir::Value> = args
                     .iter()
                     .map(|arg| emit(b, module, arg, held, w))
@@ -277,6 +281,10 @@ fn lower_body(
                         Printed::Value { value, ty } => {
                             let value = emit(b, module, value, held, w);
                             let host = match ty {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
                                 Ty::Str => qir::Host::PrintText,
                                 Ty::Int { bits: 64, signed: false } => qir::Host::PrintU64,
                                 Ty::Int { .. } => qir::Host::PrintI64,
@@ -580,6 +588,10 @@ fn element_type(array: &Value, w: &Where<'_>) -> Option<Ty> {
 /// What an array holds at the bottom, and how many allocations lie under the top one.
 fn elements(of: &Ty) -> (qir::Elements, i64) {
     match of {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
         Ty::Int { .. } => (qir::Elements::I64, 0),
         Ty::Bool => (qir::Elements::Bool, 0),
         Ty::Str => (qir::Elements::Text, 0),
@@ -764,6 +776,10 @@ fn flat_index(
 /// digits for a decimal, and nothing at all for an `e` or a `bool`.
 fn reading_of(ty: &Ty) -> (qir::Reading, i64, i64) {
     match ty {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
         Ty::Int { bits, signed } => {
             (qir::Reading::Whole, i64::from(*bits), i64::from(*signed))
         }
@@ -867,7 +883,7 @@ fn emit(
             let value = constant.value.clone();
             emit(b, module, &value, held, w)
         }
-        Value::Call { func, args } => {
+        Value::Call { func, args, .. } => {
             let given: Vec<qir::Value> =
                 args.iter().map(|arg| emit(b, module, arg, held, w)).collect();
             let ret =
@@ -898,6 +914,10 @@ fn emit(
         Value::Said { of, ty } => {
             let value = emit(b, module, of, held, w);
             match ty {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
                 Ty::Int { bits: 64, signed: false } => {
                     b.call_host(qir::Host::SayU64, &[value])
                 }
@@ -938,6 +958,10 @@ fn emit(
         Value::Read { ty, text } => {
             let text = emit(b, module, text, held, w);
             match ty {
+        // Gone before anything reaches here: a function with a hole in it is a
+        // pattern, and the checker writes out one real function per type it was used
+        // at. See `notes/a-hole-is-not-a-name.md`.
+        Ty::Hole(_) => unreachable!("the checker fills every hole before lowering"),
                 Ty::Int { bits, signed } => {
                     let bits = b.const_i64(i64::from(*bits));
                     let signed = b.const_i64(i64::from(*signed));

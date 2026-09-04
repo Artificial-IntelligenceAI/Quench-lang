@@ -10,6 +10,8 @@
 //! is unclosed and the parser can say a comma is missing, but "you called that `b16` and
 //! gave it text" is this, and so is "you have declared that twice".
 
+mod holes;
+
 use quench_diag::{Diagnostic, Span};
 use quench_num::{whole_range, Whole};
 use quench_parse::{ast, counted, Parsed};
@@ -52,6 +54,14 @@ pub enum Ty {
     /// coefficient and an exponent do not fit in a register — and what it buys over an
     /// `e` is that it stops growing.
     Decimal { digits: u32 },
+    /// `any` or `number` — the hole a generic function left for its caller.
+    ///
+    /// Gone by the time anything runs. The checker fills it in with whatever the call
+    /// site supplied and writes out one real function per type it was used at, so QIR,
+    /// the interpreter and the Dev JIT never learn the word — which they could not, since
+    /// a slot is an `i64` whatever is in it and only the type says whether the collector
+    /// should follow it.
+    Hole(Hole),
     /// `arr.i64 (2 3)` — one allocation, laid out row by row.
     ///
     /// One `arr` link is one allocation however many dimensions it has, which is what
@@ -73,6 +83,7 @@ impl Ty {
             }
             Ty::Str => "str".to_string(),
             Ty::Bool => "bool".to_string(),
+            Ty::Hole(hole) => hole.word().to_string(),
             Ty::Exact => "e".to_string(),
             // Named for the bits the format has, the way `b32` is, even though what
             // Quench keeps is the digits: `d32` is what IEEE calls it.
@@ -110,6 +121,8 @@ impl Ty {
             // aloud and `u` starts with a consonant when it is.
             Ty::Int { signed: true, .. } | Ty::Arr { .. } | Ty::Exact => "an",
             Ty::Int { signed: false, .. } => "a",
+            Ty::Hole(Hole::Any) => "an",
+            Ty::Hole(Hole::Number) => "a",
             Ty::Str | Ty::Bool | Ty::F64 | Ty::F32 | Ty::F16 | Ty::Decimal { .. } => "a",
         }
     }
@@ -196,6 +209,65 @@ impl Visibility {
     }
 }
 
+/// What a function left open for the caller to fill.
+///
+/// Not a name, because it does not name anything: a hole is a place a type goes, and
+/// the caller's argument is what decides which. So it is a bare word the language
+/// provides, like `arr` and `nothing`, and there is exactly one per function — every
+/// `any` in a signature is the *same* `any`, which is the whole of what makes
+/// `[immut.arr.any 'xs']` and an answer of `any` mean "one of those".
+///
+/// Two words rather than one, because the two things Quench can say about a type it has
+/// not seen are the two things it currently knows: everything compares for equality, and
+/// only numbers order. See `notes/a-hole-is-not-a-name.md`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hole {
+    /// Any of the sixteen. The body may hold it, copy it, hand it back and `==` it, and
+    /// nothing else — because that is all that works on every type.
+    Any,
+    /// The number types only, which buys the body `<`, `>`, `+`, `-`, `x` and `/` and
+    /// costs it every caller holding a `str`, a `bool` or an array.
+    Number,
+}
+
+impl Hole {
+    /// Every hole word there is, which is the list `from_word` below answers to.
+    pub const ALL: &[&str] = &["any", "number"];
+
+    fn from_word(word: &str) -> Option<Hole> {
+        match word {
+            "any" => Some(Hole::Any),
+            "number" => Some(Hole::Number),
+            _ => None,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Hole::Any => "any",
+            Hole::Number => "number",
+        }
+    }
+
+    /// Whether a type may fill it.
+    pub fn takes(self, ty: &Ty) -> bool {
+        match self {
+            // A hole holds one value, and an array of holes is one allocation of them.
+            // Nothing is refused here: what a body may *do* with it is the restriction.
+            Hole::Any => true,
+            Hole::Number => matches!(
+                ty,
+                Ty::Int { .. }
+                    | Ty::Exact
+                    | Ty::F64
+                    | Ty::F32
+                    | Ty::F16
+                    | Ty::Decimal { .. }
+            ),
+        }
+    }
+}
+
 /// One function.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Func {
@@ -204,6 +276,10 @@ pub struct Func {
     pub visibility: Option<Visibility>,
     /// `None` is `nothing` — the function gives no answer back.
     pub returns: Option<Ty>,
+    /// The hole this function opened, if any. `None` on everything handed to the
+    /// lowering, because a function with a hole in it is not something to compile — it
+    /// is a pattern, and what gets compiled are the copies made from it.
+    pub hole: Option<Hole>,
     /// How many of `locals` are parameters. They are the first ones, in order.
     pub takes: usize,
     pub locals: Vec<Local>,
@@ -241,8 +317,10 @@ enum Size {
 /// something. So this is a list beside the code rather than the code itself, and
 /// `tests/means.rs` earns it back by putting every word through the position it belongs
 /// to and refusing to let one go missing.
-pub const CHAIN_LINKS: &[&str] =
-    &["mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing"];
+pub const CHAIN_LINKS: &[&str] = &[
+    "mut", "immut", "arr", "grow", "temp", "perm", "range", "while", "nothing", "any",
+    "number",
+];
 
 /// What a written value may be when the type reading it is `bool`.
 pub const LITERALS: &[&str] = &["true", "false"];
@@ -413,7 +491,12 @@ pub enum Value {
     /// A top-level constant, written in where it was named.
     Const(u32),
     /// `add[*1*, *2*]` — the answer a function gave back.
-    Call { func: u32, args: Vec<Value> },
+    ///
+    /// `fill` is what the callee's hole turned out to be, worked out from the arguments
+    /// at the call site. It is `Some` only between the checker deciding it and the
+    /// copies being made — after that the call names a real function and there is
+    /// nothing left to fill.
+    Call { func: u32, args: Vec<Value>, fill: Option<Ty> },
 }
 
 pub use quench_parse::OpKind;
@@ -531,7 +614,7 @@ pub enum Stmt {
     /// early way out rather than an answer.
     Give(Option<Value>),
     /// A call written for what it does. The answer, if there is one, is dropped.
-    Do { func: u32, args: Vec<Value> },
+    Do { func: u32, args: Vec<Value>, fill: Option<Ty> },
     /// `set` — changing something that already exists.
     Assign { to: Place, value: Value },
     /// `add` — one more on the end of a growing array.
@@ -608,6 +691,8 @@ struct Signature {
     name: String,
     visibility: Option<Visibility>,
     returns: Option<Ty>,
+    /// The hole this function opened, if it opened one. At most one, always.
+    hole: Option<Hole>,
     /// One per parameter, in order.
     takes: Vec<Ty>,
     /// The name, for pointing at.
@@ -625,6 +710,8 @@ pub fn check(source: &str) -> Checked {
         scope: vec![HashMap::new()],
         depth: 0,
         returns: None,
+        hole: None,
+        opening: false,
         signatures: Vec::new(),
         named: HashMap::new(),
         constants: Vec::new(),
@@ -673,11 +760,23 @@ pub fn check(source: &str) -> Checked {
             locals: std::mem::take(&mut checker.locals),
             body,
             at: start.word,
+            hole: None,
         });
         funcs.len() - 1
     });
 
-    Checked { funcs, constants: checker.constants, start, errors: checker.errors }
+    // The copies, made here rather than anywhere later, so that what leaves the checker
+    // is a program with no holes in it. Skipped when something is already wrong: a call
+    // whose argument did not check has no fill worked out, and copying against that
+    // would turn one error into several.
+    let mut errors = checker.errors;
+    let (funcs, start) = if errors.is_empty() {
+        holes::fill_in(funcs, start, &mut errors)
+    } else {
+        (funcs, start)
+    };
+
+    Checked { funcs, constants: checker.constants, start, errors }
 }
 
 struct Checker<'a> {
@@ -700,6 +799,15 @@ struct Checker<'a> {
     constants: Vec<Constant>,
     /// Constant name to its place in `constants`.
     known: HashMap<String, u32>,
+    /// The hole the function being read or checked opened, if it opened one.
+    ///
+    /// One per function, so this is a single slot rather than a list. While a signature
+    /// is being read it is being *discovered*, and while a body is being checked it is
+    /// already known and every `any` written inside has to be that same one.
+    hole: Option<Hole>,
+    /// True only while a signature is being read, which is the one place a hole word may
+    /// introduce a hole rather than refer to one.
+    opening: bool,
     /// True while a top-level constant is being read, where the chain carries a
     /// visibility and carries no answer about changing.
     at_top: bool,
@@ -845,6 +953,17 @@ impl<'a> Checker<'a> {
 
     /// What a function looks like from the outside, read before any body is.
     fn signature(&mut self, func: &ast::Func) {
+        // The one place a hole word opens a hole rather than referring to one. Set and
+        // cleared out here rather than inside, because `read_signature` leaves by
+        // several doors and a flag cleared at three of four is a flag that is wrong.
+        self.hole = None;
+        self.opening = true;
+        self.read_signature(func);
+        self.opening = false;
+        self.hole = None;
+    }
+
+    fn read_signature(&mut self, func: &ast::Func) {
         let name = self.named(func.name);
         let word = func.chain[0];
         let visibility = self.seen_by(&func.chain, word, "function");
@@ -924,11 +1043,13 @@ impl<'a> Checker<'a> {
             return;
         }
 
+        let hole = self.hole;
         self.named.insert(name.clone(), self.signatures.len() as u32);
         self.signatures.push(Signature {
             name,
             visibility,
             returns,
+            hole,
             takes,
             at: func.name,
             list: func.takes,
@@ -1164,6 +1285,9 @@ impl<'a> Checker<'a> {
         if let Some(ty) = Ty::simple(word) {
             return Some(ty);
         }
+        if let Some(asked) = Hole::from_word(word) {
+            return self.a_hole(asked, link);
+        }
         {
             self.errors.push(
                 Diagnostic::new("E0402", format!("`{word}` is not a type."))
@@ -1176,6 +1300,47 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// `any` or `number` where a type would go.
+    ///
+    /// Three answers, and which one depends on where it was written. Opening a signature
+    /// introduces the hole; writing it again anywhere in that function refers to the same
+    /// one; writing it anywhere else is a mistake, because a hole belongs to a function
+    /// and there is no function here to fill it.
+    fn a_hole(&mut self, asked: Hole, link: Span) -> Option<Ty> {
+        match self.hole {
+            // The first one in a signature is what opens it.
+            None if self.opening => {
+                self.hole = Some(asked);
+                Some(Ty::Hole(asked))
+            }
+            Some(already) if already == asked => Some(Ty::Hole(asked)),
+            // A second, different hole word. Refused rather than given a second hole,
+            // because `any` and `number` promise different things and a function with
+            // two holes needs names for them — which is the decision maps will force and
+            // this one does not.
+            Some(already) => {
+                self.errors.push(
+                    Diagnostic::new("E0500", format!("this function opened `{}`, and this says `{}`.", already.word(), asked.word()))
+                        .primary(link, format!("`{}` here", asked.word()))
+                        .rule("a function has one hole, and every mention of it says the same word")
+                        .tip("`any` and `number` are different holes: one takes every type and forbids `<`, and the other takes the numbers and allows it.")
+                        .fix(format!("say `{}` here too", already.word())),
+                );
+                None
+            }
+            None => {
+                self.errors.push(
+                    Diagnostic::new("E0501", format!("`{}` is a hole, and there is no function here to fill it.", asked.word()))
+                        .primary(link, "here")
+                        .rule("a hole is opened by a function's signature and filled by whoever calls it")
+                        .tip("inside such a function it may be written again, and it means that same hole. Nowhere else can.")
+                        .fix("name a type"),
+                );
+                None
+            }
+        }
+    }
+
     /// A whole function: its parameters put in scope, then its body.
     fn function(&mut self, func: &ast::Func) -> Option<Func> {
         let name = self.named(func.name);
@@ -1183,6 +1348,10 @@ impl<'a> Checker<'a> {
         let signature = &self.signatures[which as usize];
         let (visibility, returns) = (signature.visibility, signature.returns.clone());
         let takes: Vec<Ty> = signature.takes.clone();
+        // Known now rather than discovered, so a hole word written in the body refers to
+        // the one the signature opened and cannot open a second.
+        let hole = signature.hole;
+        self.hole = hole;
 
         let params: Vec<(Span, Span, Ty)> = func
             .params
@@ -1205,6 +1374,7 @@ impl<'a> Checker<'a> {
             );
         }
 
+        self.hole = None;
         Some(Func {
             name,
             visibility,
@@ -1213,6 +1383,7 @@ impl<'a> Checker<'a> {
             locals: std::mem::take(&mut self.locals),
             body,
             at: func.name,
+            hole,
         })
     }
 
@@ -1345,7 +1516,10 @@ impl<'a> Checker<'a> {
                 }
                 "arr" if ty_span.is_none() => arrays.push(*link),
                 word if ty_span.is_none() => {
-                    if Ty::simple(word).is_none() {
+                    // A hole is a type inside the function that opened it, which is
+                    // what makes `var.mut.number ['best']` the way a body holds one of
+                    // whatever it was handed.
+                    if Ty::simple(word).is_none() && Hole::from_word(word).is_none() {
                         self.errors.push(
                             Diagnostic::new("E0402", format!("`{word}` is not a type."))
                                 .primary(*link, "here")
@@ -1393,17 +1567,10 @@ impl<'a> Checker<'a> {
             None
         })?;
 
-        let word = self.text(ty_span);
-        let mut ty = Ty::simple(word);
-        if ty.is_none() {
-            self.errors.push(
-                Diagnostic::new("E0402", format!("`{word}` is not a type."))
-                    .primary(ty_span, "here")
-                    .rule("a chain says the type of what it is describing")
-                    .tip("the types are the numbers, `e`, `bool` and `str`.")
-                    .fix("check the spelling"),
-            );
-        }
+        // `a_type` rather than `Ty::simple`, because a hole is a type here too -- and
+        // saying so in one place is what makes writing it outside a function that opened
+        // one a refusal with a reason rather than "not a type".
+        let mut ty = self.a_type(ty_span);
 
         // The same three questions a parameter and a return type get, asked by the same
         // code: how many `arr` links, what they hold, and what shape.
@@ -1614,6 +1781,39 @@ impl<'a> Checker<'a> {
 
         match ty {
             Ty::Arr { .. } => unreachable!("handled above"),
+            // A hole holds whatever the caller put in it, so nothing may be *written*
+            // at one -- `*1*` is a number under `i64` and four characters under `str`,
+            // and a hole has not said which it is. What does work is naming something
+            // already of that type, which is every use a body has for one.
+            Ty::Hole(_) => match value.terms.as_slice() {
+                [] => None,
+                [one] => {
+                    let built = self.term(one)?;
+                    let found = self.type_of(&built, one.span())?;
+                    if &found != ty {
+                        self.errors.push(
+                            Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                                .primary(one.span(), format!("{} `{}`", found.article(), found.name()))
+                                .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                                .rule("a hole is one type, the same one everywhere in a signature — and the caller decides which")
+                                .fix(format!("name something the function was given, or declare it `{}`", found.name())),
+                        );
+                        return None;
+                    }
+                    Some(built)
+                }
+                terms => {
+                    let all = terms[0].span().to(terms[terms.len() - 1].span());
+                    self.errors.push(
+                        Diagnostic::new("E0408", format!("{} `{}` is one value, not several.", ty.article(), ty.name()))
+                            .primary(all, format!("{} pieces here", terms.len()))
+                            .secondary(ty_span, format!("declared `{}` here", ty.name()))
+                            .rule("pieces side by side build text, and a hole is not known to be text")
+                            .fix("write it as one value"),
+                    );
+                    None
+                }
+            },
             // `*1.5*`, `*-0.25*`, `*3*`. A decimal point here is the nearest value of
             // this width to what was written, which is what a binary float is and why
             // `e` exists.
@@ -2225,7 +2425,7 @@ impl<'a> Checker<'a> {
 
     /// A call to a function the writer declared.
     fn called(&mut self, which: u32, call: &ast::Call) -> Option<Value> {
-        let args = self.arguments(which, call.name, &call.args, call.close)?;
+        let (args, fill) = self.arguments(which, call.name, &call.args, call.close)?;
         if self.signatures[which as usize].returns.is_none() {
             let said = self.signatures[which as usize].name.clone();
             let at = self.signatures[which as usize].at;
@@ -2238,7 +2438,7 @@ impl<'a> Checker<'a> {
             );
             return None;
         }
-        Some(Value::Call { func: which, args })
+        Some(Value::Call { func: which, args, fill })
     }
 
     fn at(&mut self, name: Span, indices: &[ast::Term], close: Span) -> Option<Value> {
@@ -2574,6 +2774,20 @@ impl<'a> Checker<'a> {
             }
             ast::Term::Piece(ast::Piece::Written { ty: None, mark }) => {
                 let digits = unmarked(self.text(*mark));
+                // A hole is not a type yet, so there is nothing here to read the value.
+                // Which is the ordinary rule -- `*1000*` is a number under one type and
+                // four characters under another -- arriving in the one place where the
+                // chain genuinely cannot say, so the value has to.
+                if let Ty::Hole(hole) = self.reading {
+                    self.errors.push(
+                        Diagnostic::new("E0509", "this written value is what says which type the hole is, so it has to say.")
+                            .primary(*mark, "no type in front of it")
+                            .rule(format!("`{}` is filled by what the argument holds, and a written value holds nothing until a type reads it", hole.word()))
+                            .tip("naming a variable says it instead, because a variable was declared with a type.")
+                            .fix(format!("`str:{}`, or whichever type was meant", self.text(*mark))),
+                    );
+                    return None;
+                }
                 if matches!(self.reading, Ty::F64 | Ty::F32 | Ty::F16) {
                     let reading = self.reading.clone();
                     return self.a_float(&digits, &reading, *mark);
@@ -2739,7 +2953,13 @@ impl<'a> Checker<'a> {
             Value::Read { ty, .. } => Some(ty.clone()),
             Value::Copied(of) => self.type_of(of, span),
             Value::Const(which) => Some(self.constants[*which as usize].ty.clone()),
-            Value::Call { func, .. } => self.signatures[*func as usize].returns.clone(),
+            Value::Call { func, fill, .. } => {
+                let returns = self.signatures[*func as usize].returns.clone()?;
+                Some(match fill {
+                    Some(fill) => holes::filled(&returns, fill),
+                    None => returns,
+                })
+            }
             Value::At { array, .. } => match self.type_of(array, span)? {
                 Ty::Arr { of, .. } => Some(*of),
                 other => Some(other),
@@ -2778,6 +2998,19 @@ impl<'a> Checker<'a> {
                     return None;
                 }
 
+                // A `number` hole is every number type at once, so it has whatever
+                // all of them have -- which is the four operations and the four
+                // comparisons, and is the whole reason the word exists beside `any`.
+                if l == r && l == Ty::Hole(Hole::Any) {
+                    self.errors.push(
+                        Diagnostic::new("E0502", format!("`{}` works on numbers, and `any` is not known to be one.", op.written()))
+                            .primary(span, "here")
+                            .rule("a hole written `any` may be filled with a `str`, a `bool` or an array, and none of those orders or adds")
+                            .tip("`==` does work on an `any`, because every type answers that one.")
+                            .fix("say `number` instead of `any`, and the caller may only bring a number"),
+                    );
+                    return None;
+                }
                 if l != r
                     || !matches!(
                         l,
@@ -2787,6 +3020,7 @@ impl<'a> Checker<'a> {
                             | Ty::F32
                             | Ty::F16
                             | Ty::Decimal { .. }
+                            | Ty::Hole(Hole::Number)
                     )
                 {
                     self.errors.push(
@@ -2795,6 +3029,25 @@ impl<'a> Checker<'a> {
                             .rule("arithmetic and ordering are for numbers, and nothing converts on its own")
                             .tip("an `i64` and an `e` are both numbers and are not the same number, so neither becomes the other.")
                             .fix("use the same kind of number on both sides"),
+                    );
+                    return None;
+                }
+
+                // The two a `number` hole does not get. `mod` is refused on a float, a
+                // decimal and an `e`, and `^` is refused on everything but a `b64` -- so
+                // neither works on *every* number, and a hole has only what all of them
+                // have.
+                if l == Ty::Hole(Hole::Number) && matches!(op, OpKind::Mod | OpKind::Pow) {
+                    self.errors.push(
+                        Diagnostic::new("E0503", format!("`{}` does not work on every number, and `number` is every number.", op.written()))
+                            .primary(span, "here")
+                            .rule("a hole has what all the types filling it have, and this one is refused on some of them")
+                            .tip(if *op == OpKind::Mod {
+                                "`mod` asks what a division left over, and a float, a decimal and an `e` leave nothing."
+                            } else {
+                                "`^` is worked out rather than asked of a library, and that is built for `b64` alone."
+                            })
+                            .fix("say the type you meant, rather than a hole"),
                     );
                     return None;
                 }
@@ -3125,10 +3378,11 @@ impl<'a> Checker<'a> {
             );
             return;
         };
-        let Some(args) = self.arguments(which, call.name, &call.args, call.close) else {
+        let Some((args, fill)) = self.arguments(which, call.name, &call.args, call.close)
+        else {
             return;
         };
-        self.body.push(Stmt::Do { func: which, args });
+        self.body.push(Stmt::Do { func: which, args, fill });
     }
 
     /// Look a call up, and check what it was given against what it takes.
@@ -3138,10 +3392,11 @@ impl<'a> Checker<'a> {
         at_name: Span,
         given: &[ast::Value],
         close: Span,
-    ) -> Option<Vec<Value>> {
+    ) -> Option<(Vec<Value>, Option<Ty>)> {
         let signature = &self.signatures[which as usize];
         let name = signature.name.clone();
         let (wanted, at, list) = (signature.takes.clone(), signature.at, signature.list);
+        let hole = signature.hole;
         if given.len() != wanted.len() {
             self.errors.push(
                 Diagnostic::new(
@@ -3160,11 +3415,106 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        let mut args = Vec::new();
+        let Some(hole) = hole else {
+            let mut args = Vec::new();
+            for (value, ty) in given.iter().zip(&wanted) {
+                args.push(self.value(value, ty, at)?);
+            }
+            return Some((args, None));
+        };
+
+        // The arguments are what say what the hole is. Nothing at the call site names a
+        // type, for the same reason nothing names one anywhere else it can be worked
+        // out — `is.i64` says which type because text cannot say, and an argument can.
+        let mut fill: Option<(Ty, Span)> = None;
+        let mut built: Vec<Option<(Value, Ty)>> = Vec::with_capacity(wanted.len());
         for (value, ty) in given.iter().zip(&wanted) {
-            args.push(self.value(value, ty, at)?);
+            if !holes::mentioned(ty) {
+                built.push(None);
+                continue;
+            }
+            let outer = std::mem::replace(&mut self.reading, Ty::Hole(hole));
+            let made = self.tree_or_leaf(value);
+            self.reading = outer;
+            let made = made?;
+            let found = self.type_of(&made, value.span)?;
+            let Some(said) = holes::solve(ty, &found) else {
+                self.errors.push(
+                    Diagnostic::new("E0505", format!("this is {} `{}`, and `'{name}'` takes {} `{}`.", found.article(), found.name(), ty.article(), ty.name()))
+                        .primary(value.span, format!("{} `{}`", found.article(), found.name()))
+                        .secondary(list, format!("takes {} `{}`", ty.article(), ty.name()))
+                        .rule("a hole is filled by what the argument holds, and the shape around it still has to match")
+                        .tip("`arr.any` takes an array of something. It does not take the something.")
+                        .fix("pass an argument of that shape"),
+                );
+                return None;
+            };
+            match &fill {
+                None => fill = Some((said, value.span)),
+                Some((first, at_first)) if first != &said => {
+                    let (first, at_first) = (first.clone(), *at_first);
+                    self.errors.push(
+                        Diagnostic::new("E0506", format!("`'{name}'` has one hole, and this call gives it two types."))
+                            .secondary(at_first, format!("filled with `{}` here", first.name()))
+                            .primary(value.span, format!("and with `{}` here", said.name()))
+                            .rule("every mention of a hole in one signature is the same hole, so one call fills it once")
+                            .tip("that is what makes `[immut.any 'a', immut.any 'b']` mean two of the same thing.")
+                            .fix("pass two of the same type"),
+                    );
+                    return None;
+                }
+                Some(_) => {}
+            }
+            built.push(Some((made, found)));
         }
-        Some(args)
+
+        let Some((fill, at_fill)) = fill else {
+            self.errors.push(
+                Diagnostic::new("E0507", format!("nothing here says what `'{name}'`'s `{}` is.", hole.word()))
+                    .primary(at_name.to(close), "here")
+                    .secondary(list, "and nothing it takes mentions the hole")
+                    .rule("a hole is worked out from the arguments, so it has to appear in what the function takes")
+                    .tip("a function whose hole is only in what it gives back has nothing to work it out from, and there is no way to say it at the call.")
+                    .fix("take something of that type, or say a real type"),
+            );
+            return None;
+        };
+        if !hole.takes(&fill) {
+            self.errors.push(
+                Diagnostic::new("E0508", format!("`'{name}'` takes a `number`, and this is {} `{}`.", fill.article(), fill.name()))
+                    .primary(at_fill, format!("{} `{}`", fill.article(), fill.name()))
+                    .secondary(list, "`number` here")
+                    .rule("a `number` hole is filled by a number type, because the body is allowed to order and add what goes in it")
+                    .tip("`any` is the hole that takes everything, and in exchange its body may only hold, hand back and `==`.")
+                    .fix("pass a number, or have it say `any`"),
+            );
+            return None;
+        }
+
+        // And now the ordinary check, against the type the hole turned out to be. So a
+        // wrong argument to a generic function gets the same error a wrong argument to
+        // any other one gets.
+        let mut args = Vec::new();
+        for ((value, ty), made) in given.iter().zip(&wanted).zip(built) {
+            match made {
+                Some((made, found)) => {
+                    let asked = holes::filled(ty, &fill);
+                    if found != asked {
+                        self.errors.push(
+                            Diagnostic::new("E0406", format!("this is {} `{}`, and it is being given to {} `{}`.", found.article(), found.name(), asked.article(), asked.name()))
+                                .primary(value.span, format!("{} `{}`", found.article(), found.name()))
+                                .secondary(at_fill, format!("the hole was filled with `{}` here", fill.name()))
+                                .rule("nothing converts on its own — two types meet only where something says they should")
+                                .fix("pass the same type"),
+                        );
+                        return None;
+                    }
+                    args.push(made);
+                }
+                None => args.push(self.value(value, ty, at)?),
+            }
+        }
+        Some((args, Some(fill)))
     }
 
     // --- looping ----------------------------------------------------------------------
@@ -3469,6 +3819,7 @@ impl<'a> Checker<'a> {
                     let word = self.text(*span);
                     match Ty::simple(word) {
                         Some(Ty::Arr { .. }) => unreachable!("`arr` is not a simple type"),
+                        Some(Ty::Hole(_)) => unreachable!("a hole word is not a simple type"),
                         Some(ty @ (Ty::F64 | Ty::F32 | Ty::F16)) => {
                             let written = unmarked(self.text(*mark));
                             if let Some(value) = self.a_float(&written, &ty, *mark) {

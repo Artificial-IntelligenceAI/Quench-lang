@@ -2351,3 +2351,119 @@ START {
 ";
     assert_eq!(said(source), "42\n");
 }
+
+#[test]
+fn a_function_may_leave_the_type_to_its_caller() {
+    // One pattern, three functions by the time anything runs. See
+    // `notes/a-hole-is-not-a-name.md`.
+    let source = "\
+fn.file.any ['echo'] [immut.any 'x'] {
+    give ['x'];
+}
+
+START {
+    var.immut.str ['a'] = [call 'echo'[str:*kept*]];
+    var.immut.i64 ['b'] = [call 'echo'[i64:*42*]];
+    var.immut.e ['c'] = [call 'echo'[e:*3/4*]];
+    print.stdout['a' str:* * 'b' str:* * 'c' \\n];
+}
+";
+    assert_eq!(said(source), "kept 42 3/4\n");
+}
+
+#[test]
+fn a_number_hole_may_order_and_add_and_an_any_may_not() {
+    let source = "\
+fn.file.number ['bigger of'] [immut.number 'a', immut.number 'b'] {
+    if 'a' > 'b' {
+        give ['a'];
+    } else {
+        give ['b'];
+    }
+}
+
+fn.file.bool ['same'] [immut.any 'a', immut.any 'b'] {
+    give ['a' == 'b'];
+}
+
+START {
+    print.stdout[call 'bigger of'[i64:*3*, i64:*9*] str:* * call 'bigger of'[b64:*2.5*, b64:*1.5*] \\n];
+    print.stdout[call 'same'[str:*a*, str:*a*] str:* * call 'same'[i64:*1*, i64:*2*] \\n];
+}
+";
+    assert_eq!(said(source), "9 2.5\ntrue false\n");
+}
+
+#[test]
+fn a_hole_reaches_inside_an_array_and_a_body_may_hold_one() {
+    let source = "\
+fn.file.number ['largest'] [immut.arr.number (3) 'xs'] {
+    var.mut.number ['best'] = ['xs'[*1*]];
+    loop.temp.range.i64 ['i'] = [*2*, *3*] {
+        if 'xs'['i'] > 'best' {
+            set ['best'] = ['xs'['i']];
+        }
+    }
+    give ['best'];
+}
+
+fn.file.any ['first of'] [immut.arr.any (3) 'xs'] {
+    give ['xs'[*1*]];
+}
+
+START {
+    var.immut.arr.i64 (3) ['ns'] = [[*10* *30* *20*]];
+    var.immut.arr.str (3) ['ws'] = [[*alpha* *beta* *gamma*]];
+    var.immut.arr.b64 (3) ['fs'] = [[*1.5* *9.25* *0.5*]];
+    print.stdout[call 'largest'[share 'ns'] str:* * call 'largest'[share 'fs'] \\n];
+    print.stdout[call 'first of'[share 'ws'] \\n];
+}
+";
+    assert_eq!(said(source), "30 9.25\nalpha\n");
+}
+
+#[test]
+fn a_pattern_may_call_a_pattern() {
+    // The case that makes this a worklist rather than a loop: what `'twice through'`
+    // asks of `'echo'` is not known until `'twice through'` itself has been copied.
+    let source = "\
+fn.file.any ['echo'] [immut.any 'x'] {
+    give ['x'];
+}
+
+fn.file.any ['twice through'] [immut.any 'x'] {
+    give [call 'echo'[call 'echo'['x']]];
+}
+
+START {
+    print.stdout[call 'twice through'[str:*a*] str:* * call 'twice through'[i64:*7*] \\n];
+}
+";
+    assert_eq!(said(source), "a 7\n");
+}
+
+#[test]
+fn nothing_below_the_checker_knows_a_hole_existed() {
+    // The claim the whole approach rests on. Three copies of one pattern, three real
+    // functions in the module, each with the signature its own type asked for -- and no
+    // instruction anywhere that a generic function was ever written.
+    let out = quench_check::check(
+        "\
+fn.file.any ['echo'] [immut.any 'x'] { give ['x']; }
+START {
+    print.stdout[call 'echo'[str:*a*] call 'echo'[i64:*1*] call 'echo'[b64:*0.5*]];
+}
+",
+    );
+    assert!(out.ok());
+    assert!(
+        out.funcs.iter().all(|f| f.hole.is_none()),
+        "a pattern reached the lowering: {:?}",
+        out.funcs.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
+    let names: Vec<&str> = out.funcs.iter().map(|f| f.name.as_str()).collect();
+    for made in ["echo (str)", "echo (i64)", "echo (b64)"] {
+        assert!(names.contains(&made), "no copy called `{made}`: {names:?}");
+    }
+    assert!(!names.contains(&"echo"), "the pattern itself was kept: {names:?}");
+}

@@ -1094,3 +1094,118 @@ START {
     );
     assert!(both.ok());
 }
+
+#[test]
+fn a_hole_belongs_to_the_function_that_opened_it() {
+    let outside = errors("START { var.immut.any ['x'] = [*1*]; }");
+    assert!(outside.contains("`any` is a hole, and there is no function here to fill it."), "{outside}");
+    assert!(outside.contains("Error code: E0501"), "{outside}");
+
+    // Inside one, it is a type like any other -- which is how a body holds one of
+    // whatever it was handed.
+    let inside = check(
+        "\
+fn.file.number ['doubled'] [immut.number 'n'] {
+    var.immut.number ['twice'] = ['n' + 'n'];
+    give ['twice'];
+}
+START { print.stdout[call 'doubled'[i64:*2*]]; }
+",
+    );
+    assert!(inside.ok());
+}
+
+#[test]
+fn a_function_has_one_hole() {
+    let two = errors(
+        "fn.file.any ['f'] [immut.number 'a'] { give ['a']; } START { print.stdout[str:*x*]; }",
+    );
+    assert!(two.contains("this function opened `any`, and this says `number`."), "{two}");
+    assert!(two.contains("Error code: E0500"), "{two}");
+
+    // And one call fills it once, so two arguments of one hole are two of one type.
+    let mixed = errors(
+        "\
+fn.file.bool ['same'] [immut.any 'a', immut.any 'b'] { give ['a' == 'b']; }
+START { print.stdout[call 'same'[i64:*1*, str:*x*]]; }
+",
+    );
+    assert!(mixed.contains("has one hole, and this call gives it two types."), "{mixed}");
+    assert!(mixed.contains("Error code: E0506"), "{mixed}");
+}
+
+#[test]
+fn what_a_hole_may_do_is_what_every_type_filling_it_may_do() {
+    // `any` may be a `str`, and a `str` does not order.
+    let ordering = errors(
+        "fn.file.bool ['f'] [immut.any 'a', immut.any 'b'] { give ['a' < 'b']; } START { print.stdout[str:*x*]; }",
+    );
+    assert!(ordering.contains("`<` works on numbers, and `any` is not known to be one."), "{ordering}");
+    assert!(ordering.contains("Error code: E0502"), "{ordering}");
+
+    // And `number` is every number, so it does not get the two that some numbers refuse.
+    for op in ["mod", "^"] {
+        let source = format!(
+            "fn.file.number ['f'] [immut.number 'a'] {{ give ['a' {op} 'a']; }} START {{ print.stdout[str:*x*]; }}"
+        );
+        let rendered = errors(&source);
+        assert!(rendered.contains("does not work on every number"), "{rendered}");
+        assert!(rendered.contains("Error code: E0503"), "{rendered}");
+    }
+}
+
+#[test]
+fn a_number_hole_takes_a_number() {
+    let rendered = errors(
+        "fn.file.number ['f'] [immut.number 'a'] { give ['a']; } START { print.stdout[call 'f'[str:*x*]]; }",
+    );
+    assert!(rendered.contains("`'f'` takes a `number`, and this is a `str`."), "{rendered}");
+    assert!(rendered.contains("Error code: E0508"), "{rendered}");
+}
+
+#[test]
+fn a_hole_is_worked_out_from_the_arguments_and_so_has_to_be_in_them() {
+    let rendered = errors(
+        "fn.file.any ['f'] [immut.i64 'a'] { give [call 'f'[i64:*1*]]; } START { print.stdout[str:*x*]; }",
+    );
+    assert!(rendered.contains("nothing here says what `'f'`'s `any` is."), "{rendered}");
+    assert!(rendered.contains("Error code: E0507"), "{rendered}");
+}
+
+#[test]
+fn a_written_value_at_a_hole_says_its_own_type() {
+    // The ordinary rule, arriving where the chain genuinely cannot say.
+    let rendered = errors(
+        "fn.file.any ['f'] [immut.any 'a'] { give ['a']; } START { print.stdout[call 'f'[*1*]]; }",
+    );
+    assert!(rendered.contains("this written value is what says which type the hole is"), "{rendered}");
+    assert!(rendered.contains("Error code: E0509"), "{rendered}");
+}
+
+#[test]
+fn a_pattern_asked_for_endlessly_is_refused_rather_than_waited_for() {
+    // A hole handed an array of itself is a wider type every time round, so the list of
+    // copies never ends. Rust stops at a depth for the same reason.
+    let rendered = errors(
+        "\
+fn.file.i64 ['deeper'] [immut.any 'x'] {
+    var.immut.arr.any (2) ['pair'] = [['x' 'x']];
+    give [call 'deeper'[share 'pair']];
+}
+START { print.stdout[call 'deeper'[i64:*1*]]; }
+",
+    );
+    assert!(rendered.contains("is asked for at more types than this can write out."), "{rendered}");
+    assert!(rendered.contains("Error code: E0504"), "{rendered}");
+}
+
+#[test]
+fn the_hole_words_are_words_the_language_lists() {
+    // The guard that caught six stale lists in a day, pointed at this one.
+    for word in quench_check::Hole::ALL {
+        assert!(
+            quench_check::CHAIN_LINKS.contains(word),
+            "`{word}` is a hole word and `quench words` has never heard of it"
+        );
+    }
+}

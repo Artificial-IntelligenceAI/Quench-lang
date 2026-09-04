@@ -147,6 +147,37 @@ Both print the same thing, which is not a coincidence — it is
   already builds one value out of pieces and cannot also separate two; an index writes
   its dimensions side by side instead, matching the shape it indexes into. See
   [notes/what-a-function-has-to-say.md](notes/what-a-function-has-to-say.md).
+- **A function may leave the type to its caller, and the hole is a bare word.**
+  `any` takes all sixteen types; `number` takes the number ones. Both are Quench's
+  words, like `arr` and `nothing`, because **a hole is not a name** — it names nothing,
+  it is a place a type goes, so it never wanted marks.
+
+  ```quench
+  fn.file.number ['bigger of'] [immut.number 'a', immut.number 'b'] {
+      if 'a' > 'b' { give ['a']; } else { give ['b']; }
+  }
+
+  START {
+      print.stdout[call 'bigger of'[i64:*3*, i64:*9*] str:* * call 'bigger of'[b64:*2.5*, b64:*1.5*] \n];
+  }
+  ```
+
+  ```text
+  9 2.5
+  ```
+
+  There is **one hole per function** and every mention of it is the same one, which is
+  what makes `[immut.any 'a', immut.any 'b']` two of the same thing. Nothing at the call
+  says a type: the argument says it, the way an argument always has. What each hole
+  allows is exactly what *all* the types filling it allow — so `any` gets `==` and
+  little else, `number` gets `+` and `<`, and neither gets `mod` or `^`, because those
+  are refused on some numbers.
+
+  It **compiles away**. A generic function is a pattern, and the checker writes out one
+  real function per type it was used at, so QIR and both engines never learn the word.
+  That is forced rather than chosen: a slot is an `i64` whatever is in it, and one copy
+  serving every type would have to tag every value so the collector knew what to follow.
+  See [notes/a-hole-is-not-a-name.md](notes/a-hole-is-not-a-name.md).
 - **Constants outside, functions at the top, variables inside.**
   `const.export.i64 ['LIMIT'] = [*100*];`. A constant has no storage — its value is
   written in wherever it is named — so `set` on one is refused. A constant *array* does

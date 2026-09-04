@@ -95,7 +95,8 @@ if call is.i64['line'] {
 `as.i64` on `hello` stops, exactly like an index off the end, and a writer who asked
 first never reaches it. No new statement, nothing added to a signature, and the oracle
 does not grow — which the alternatives all did, since a value that is either an answer
-or a reason wants generics, and Quench has none.
+or a reason wants generics of the kind Quench still has none of — a type that is one
+thing *or* another. The holes it has since grown are the other kind.
 
 The reasoning, the four shapes turned down, and the one place this genuinely will not
 reach — files, where a check cannot be made honest — are in
@@ -161,9 +162,10 @@ Each of these is waiting on something, and the something is named.
 | ~~The IEEE-recommended maths~~ | **built** |
 | Input: stdin, arguments | nothing — a check comes first |
 | Input and output: files | a check that cannot race the world |
-| Sorting, searching, reversing | generics, and a way to say "a type that orders" |
-| Maps | generics, hashing, and a decided iteration order |
+| Sorting, searching, reversing | an array whose length the type does not fix |
+| Maps | two holes at once, hashing, and a decided iteration order |
 | Matrices | modules |
+| ~~Generics~~ | **built** — `any` and `number`, one hole per function |
 | The maths behind `import` | modules |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
@@ -191,11 +193,12 @@ outside, anything the machine does that Quench cannot express. Number formatting
 `sqrt`, opening a file, the bytes of a string.
 
 Not: sorting, searching, reversing, minimum of an array, most of what a person means by
-"the standard library". Those are Quench source once generics and modules exist, and
-they cost nothing per engine forever after.
+"the standard library". Those are Quench source now that there are holes — once modules
+exist, and once an array can be taken without its length — and they cost nothing per
+engine forever after.
 
-Which is an argument for building **generics and modules before the bulk of the
-library**, rather than writing forty host calls that did not have to be host calls.
+Which was an argument for building **generics and modules before the bulk of the
+library**, and half of it is done, rather than writing forty host calls that did not have to be host calls.
 
 ## Before or after the other two backends
 
