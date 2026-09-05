@@ -1,0 +1,48 @@
+import [input];
+import [text];
+
+# What arrived from outside: the arguments the program was started with, and standard
+# input. Four functions behind `input`, bare because they are Quench's.
+#
+#     printf 'Tankun\n42\nand the rest\n' | quench run examples/reading-input.qnl hello there
+
+START {
+    var.immut.arr.str (grow) ['given'] = [call input.arguments[]];
+    print.stdout[str:*started with * call count[share 'given'] str:* arguments* \n];
+
+    if call count[share 'given'] > *0* {
+        print.stdout[str:*the first is * 'given'[*1*] \n];
+    }
+
+    # `more` is the question and `line` is the answer -- the third pair of that shape,
+    # after `is`/`as` and `text.has`/`text.find`. Reading past the end stops the program,
+    # and asking first is what makes that impossible rather than unlikely. The check is
+    # honest because nothing races it: one program reads its own input, in order.
+    if call input.more[] {
+        var.immut.str ['who'] = [call text.trim[call input.line[]]];
+        print.stdout[str:*hello, * 'who' str:*!* \n];
+    }
+
+    # A number off the input is both pairs at once: ask whether there is a line, then
+    # ask whether the line is a number.
+    if call input.more[] {
+        var.immut.str ['said'] = [call text.trim[call input.line[]]];
+        if call is.i64['said'] {
+            var.immut.i64 ['n'] = [call as.i64['said']];
+            var.immut.i64 ['twice'] = ['n' + 'n'];
+            print.stdout[str:*twice that is * 'twice' \n];
+        } else {
+            print.stderr[str:*that was not a number: * 'said' \n];
+        }
+    }
+
+    # `all` takes everything left in one go, for a program that wants the whole of its
+    # input before it starts. Bytes that are not text become the replacement character
+    # rather than stopping the program, because a program that reads is often handed
+    # something it did not choose.
+    var.immut.str ['rest'] = [call input.all[]];
+    print.stdout[str:*and * call count['rest'] str:* characters after that* \n];
+
+    # And once there is nothing left, `more` says so and keeps saying so.
+    print.stdout[str:*more? * call input.more[] \n];
+}

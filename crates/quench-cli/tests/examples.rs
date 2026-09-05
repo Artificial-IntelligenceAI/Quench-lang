@@ -58,7 +58,12 @@ fn every_example_runs_and_both_engines_say_the_same_thing() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ended = quench_interp::run_writing(
             &module,
-            &mut quench_interp::Writing { out: &mut out, err: &mut err },
+            &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut out,
+                err: &mut err,
+                arguments: &[],
+            },
         )
         .expect("it runs");
         assert!(

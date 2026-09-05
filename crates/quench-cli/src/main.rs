@@ -6,13 +6,16 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 quench — a language that would rather say what it means
 
-    quench run <file>           compile it with the Dev JIT and run it
-    quench walk <file>          run it on the interpreter instead
+    quench run <file> [args]    compile it with the Dev JIT and run it
+    quench walk <file> [args]   run it on the interpreter instead
     quench check <file.qnl>     check it and stop
     quench build <file.qnl>     write the artefact, and stop
     quench words                every word the language provides, and where it stands
     quench words --count        how many there are, and how many are behind a module
     quench --help               this
+
+Anything after the file is the program's own, and it reads it with
+`call input.arguments[]`.
 
 `run` and `walk` take source or an artefact. An artefact is compiled QIR, which
 knows nothing about any machine — so one built here runs anywhere this does.
@@ -43,15 +46,31 @@ fn run_artefact(what: &str, path: &str) -> ExitCode {
         }
     };
     match what {
-        "walk" => match quench_interp::run(&module) {
-            Ok(outcome) => report_outcome(outcome),
-            Err(why) => {
-                eprintln!("{why}");
-                ExitCode::FAILURE
+        "walk" => {
+            let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+            let mut read = std::io::BufReader::new(std::io::stdin());
+            let arguments = arguments_given();
+            let mut world = outside(&mut read, &mut out, &mut err, &arguments);
+            match quench_interp::run_writing(&module, &mut world) {
+                Ok(outcome) => report_outcome(outcome),
+                Err(why) => {
+                    eprintln!("{why}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         "run" => match quench_dev::compile(&module) {
-            Ok(compiled) => report_outcome(compiled.outcome()),
+            Ok(compiled) => {
+                // What a program reads and what it was invoked with, handed over before
+                // it starts. The interpreter takes them as arguments; compiled code
+                // calls a plain `extern "C"` function with nowhere to put them, so the
+                // Dev JIT is told separately and both see the same thing.
+                quench_dev::reading(
+                    Box::new(std::io::BufReader::new(std::io::stdin())),
+                    arguments_given(),
+                );
+                report_outcome(compiled.outcome())
+            }
             Err(why) => {
                 eprintln!("{why}");
                 ExitCode::FAILURE
@@ -174,6 +193,27 @@ fn counted_words() -> String {
     )
 }
 
+/// What a program reads, writes and was invoked with.
+///
+/// Built here rather than left to `quench_interp::run`'s own guess, because the guess
+/// was wrong and the two engines disagreed about how many arguments there were: the
+/// convenience skips one, and a program's own arguments begin after `quench`, the verb
+/// and the file. The oracle could not have caught it — it generates nothing that reads —
+/// so it was found by running the same program both ways by hand.
+fn outside<'a>(
+    read: &'a mut dyn std::io::BufRead,
+    out: &'a mut dyn std::io::Write,
+    err: &'a mut dyn std::io::Write,
+    arguments: &'a [String],
+) -> quench_interp::Outside<'a> {
+    quench_interp::Outside { read, out, err, arguments }
+}
+
+/// A program's own arguments: what follows `quench`, the verb and the file.
+fn arguments_given() -> Vec<String> {
+    std::env::args().skip(3).collect()
+}
+
 /// Every file of one program, laid end to end.
 struct Program {
     /// The whole text, with the files in order and a newline between them.
@@ -240,8 +280,15 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // Anything after the file is the *program's*, not this one's -- but only for the two
+    // that run a program. `quench check file junk` quietly ignoring `junk` would be a
+    // command doing something other than what it was asked.
     let (what, path) = match args.as_slice() {
-        [what, path] if !what.starts_with('-') => (what.as_str(), path.as_str()),
+        [what, path, rest @ ..]
+            if !what.starts_with('-') && (rest.is_empty() || matches!(what.as_str(), "run" | "walk")) =>
+        {
+            (what.as_str(), path.as_str())
+        }
         _ => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -308,15 +355,31 @@ fn main() -> ExitCode {
             println!("{path} is fine.");
             ExitCode::SUCCESS
         }
-        "walk" => match quench_interp::run(&module) {
-            Ok(outcome) => report_outcome(outcome),
-            Err(why) => {
-                eprintln!("{why}");
-                ExitCode::FAILURE
+        "walk" => {
+            let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+            let mut read = std::io::BufReader::new(std::io::stdin());
+            let arguments = arguments_given();
+            let mut world = outside(&mut read, &mut out, &mut err, &arguments);
+            match quench_interp::run_writing(&module, &mut world) {
+                Ok(outcome) => report_outcome(outcome),
+                Err(why) => {
+                    eprintln!("{why}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         "run" => match quench_dev::compile(&module) {
-            Ok(compiled) => report_outcome(compiled.outcome()),
+            Ok(compiled) => {
+                // What a program reads and what it was invoked with, handed over before
+                // it starts. The interpreter takes them as arguments; compiled code
+                // calls a plain `extern "C"` function with nowhere to put them, so the
+                // Dev JIT is told separately and both see the same thing.
+                quench_dev::reading(
+                    Box::new(std::io::BufReader::new(std::io::stdin())),
+                    arguments_given(),
+                );
+                report_outcome(compiled.outcome())
+            }
             Err(why) => {
                 eprintln!("{why}");
                 ExitCode::FAILURE

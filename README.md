@@ -370,6 +370,16 @@ Both print the same thing, which is not a coincidence — it is
   of those are about a *position*, which is exactly what that setting decides, while a
   substring is found by its bytes whatever a character is taken to be. Until this, the
   whole of UAX #29 was exercised by `count` alone.
+- **What arrived from outside lives behind `input`.** `call input.arguments[]` gives the
+  words the program was started with, and `call input.line[]`, `call input.all[]` and
+  `call input.more[]` read standard input. `more` is the question and `line` is the
+  answer — the third pair of that shape, after `is`/`as` and `text.has`/`text.find` —
+  and reading past the end stops the program, so asking first is what makes that
+  impossible rather than unlikely. The check is honest here in a way a file's would not
+  be: one program reads its own input, in order, and nothing else can consume a line
+  between the question and the answer. Bytes that are not text become the replacement
+  character rather than stopping anything, because a program that reads is usually handed
+  something it did not choose.
 - **A library is imported, whoever wrote it.** `import ['maths'];` is a file of your
   program and `import [maths];` is one of Quench's own modules — the same marks doing the
   same job, so both may sit in one file. What is *not* a library is the top level:
@@ -380,9 +390,10 @@ Both print the same thing, which is not a coincidence — it is
   Quench's — the maths is twenty-eight functions, and in front of
   everything they made the language read like a calculator with a compiler attached.
   `count`, `stitch`, `is` and `as` are what is left at the top, which is the language
-  rather than a library inside it. It is **not** an import and could not be: `sin` wants
-  a mantissa that grows and Ziv's retry loop, so it is a host call whichever side of a
-  name it sits on.
+  rather than a library inside it. It **is** an import — `import [maths];` — and bare
+  because Quench's owners made it, whatever language they made it in. That every one of
+  the twenty-eight is a host call today is a fact about the mantissa `sin` wants and
+  Ziv's retry loop, not about where the name sits.
 - **The maths IEEE 754 requires, and no more.** `sqrt`, `abs`, `floor`, `ceil`,
   `round`, `trunc`, `copysign`, `min`, `max`, `fma`, `remainder`. The standard *requires* these to be
   correctly rounded, so every engine gives identical bits and there is nothing for the

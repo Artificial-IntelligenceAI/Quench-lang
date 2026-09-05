@@ -467,7 +467,7 @@ pub const LITERALS: &[&str] = &["true", "false"];
 /// and Ziv's retry loop, and the language can express none of it, so every one of them
 /// is a host call whichever side of a namespace it sits on. What a namespace changes is
 /// what a reader has to look at, which was the whole complaint.
-pub const MODULES: &[&str] = &["maths", "text"];
+pub const MODULES: &[&str] = &["maths", "text", "input"];
 
 /// The functions the language provides, and what each takes.
 ///
@@ -498,6 +498,13 @@ pub const PROVIDED: &[(&str, &str, Provides)] = &[
     ("text", "find", Provides::Pieces(2)),
     ("text", "split", Provides::Pieces(3)),
     ("text", "trim", Provides::Pieces(4)),
+    // What arrived from outside before the program did anything. `more` is the question
+    // and `line` is the answer, the third pair of that shape -- and the check is honest
+    // here because nothing races: standard input is read by one program in one order.
+    ("input", "all", Provides::Given(0)),
+    ("input", "line", Provides::Given(1)),
+    ("input", "more", Provides::Given(2)),
+    ("input", "arguments", Provides::Given(3)),
     ("maths", "sqrt", Provides::Alone(0)),
     ("maths", "abs", Provides::Alone(1)),
     ("maths", "floor", Provides::Alone(2)),
@@ -556,6 +563,9 @@ pub enum Provides {
     Power(u8),
     /// One of the five that take text apart. The number is which.
     Pieces(u8),
+    /// One of the four that read what arrived from outside. The number is which, and
+    /// none of them takes anything.
+    Given(u8),
 }
 
 /// One variable.
@@ -636,6 +646,9 @@ pub enum Value {
     /// `call text.slice[…]` and its four neighbours. `which` is the number the lowering
     /// writes beside it, and what each answers with is fixed by that.
     Pieces { which: u8, of: Vec<Value> },
+    /// `call input.line[]` and its three neighbours. Takes nothing, which is why there
+    /// is nothing under it.
+    Given { which: u8 },
     /// How many an array holds, asked while it runs — which is what `count` becomes on
     /// an array that grows, and what it never becomes on one that does not.
     Count(Box<Value>),
@@ -3013,6 +3026,24 @@ impl<'a> Checker<'a> {
     /// Every one of them takes text and known types, so the arguments go through the
     /// ordinary builder rather than a reading of their own — which is what lets a
     /// written value stand where a `str` is wanted without saying `str:` first.
+    /// `call input.line[]` and its three neighbours.
+    ///
+    /// `[]` is written even though there is nothing to write in it, the way a function
+    /// that takes nothing writes it: *takes nothing* is a thing to say, and saying it by
+    /// leaving the brackets off would be saying it with an absence.
+    fn given(&mut self, call: &ast::Call, name: &str, which: u8) -> Option<Value> {
+        if !call.args.is_empty() {
+            self.errors.push(
+                Diagnostic::new("E0521", format!("`input.{name}` takes nothing."))
+                    .primary(call.name.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                    .rule("what arrived from outside arrived before the program did, so there is nothing to ask it for")
+                    .fix(format!("`call input.{name}[]`")),
+            );
+            return None;
+        }
+        Some(Value::Given { which })
+    }
+
     fn pieces(&mut self, call: &ast::Call, name: &str, which: u8) -> Option<Value> {
         let whole = Ty::Int { bits: 64, signed: true };
         let wants: Vec<Ty> = match which {
@@ -3475,6 +3506,7 @@ impl<'a> Checker<'a> {
             Provides::Slow(which) => return self.slowly(call, &name, 1, *which),
             Provides::Power(which) => return self.slowly(call, &name, 2, *which),
             Provides::Pieces(which) => return self.pieces(call, &name, *which),
+            Provides::Given(which) => return self.given(call, &name, *which),
             Provides::Count => {}
         }
 
@@ -3771,6 +3803,15 @@ impl<'a> Checker<'a> {
                 1 => Ty::Bool,
                 2 => Ty::Int { bits: 64, signed: true },
                 // The pieces, in order, however many there turn out to be.
+                _ => Ty::Arr {
+                    of: Box::new(Ty::Str),
+                    shape: Vec::new(),
+                    length: Length::Grows,
+                },
+            }),
+            Value::Given { which } => Some(match which {
+                0 | 1 => Ty::Str,
+                2 => Ty::Bool,
                 _ => Ty::Arr {
                     of: Box::new(Ty::Str),
                     shape: Vec::new(),

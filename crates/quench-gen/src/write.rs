@@ -220,7 +220,7 @@ pub fn program_under(
 
     let steps = rng.upto(30) + 6;
     for _ in 0..steps {
-        match rng.upto(26) {
+        match rng.upto(27) {
             0 => {
                 // The extremes are where the edges are -- `i64::MIN` has no positive
                 // counterpart, and `MIN / -1` is the one division that does not fit --
@@ -919,6 +919,26 @@ pub fn program_under(
                 b.switch_to(join);
                 let answer = b.block_param(join, 0);
                 flags.push(answer);
+            }
+            18 => {
+                // What arrived from outside, which for a generated program is nothing:
+                // both engines are handed empty input on purpose, so `more` is false,
+                // `all` is empty text and `line` stops. Which is the point -- that stop
+                // is a thing the two must agree about, and this is the only way the
+                // oracle ever reaches it.
+                //
+                // An arm of its own rather than a slice of the text step, because it is
+                // not a text operation and taking it from there put `text-compare` under
+                // the floor `reaches.rs` holds it to.
+                match rng.upto(4) {
+                    0 => texts.push(b.call_host(Host::InputAll, &[])),
+                    1 => flags.push(b.call_host(Host::InputMore, &[])),
+                    2 => texts.push(b.call_host(Host::InputLine, &[])),
+                    _ => {
+                        let all = b.call_host(Host::InputArguments, &[]);
+                        numbers.push(b.call_host(Host::ArrayLen, &[all]));
+                    }
+                }
             }
             8 => {
                 // A call whose signature carries a float, when there is one of this

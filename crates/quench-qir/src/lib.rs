@@ -80,6 +80,13 @@ pub enum Trap {
     NotInTheText = 11,
     /// `call text.split['a,b', **]` — cutting text at nothing.
     NoSeparator = 12,
+    /// `call input.line[]` when standard input has ended.
+    ///
+    /// `call input.more[]` is the question that avoids it, and it can be asked because
+    /// nothing races: standard input is read by one program in one order. Which is why
+    /// this is a stop a writer can avoid, and why a *file* — where the world may change
+    /// between the check and the read — is still not built.
+    NoMoreInput = 13,
     /// `call as.i64['hello']` — text read as a type it does not hold.
     ///
     /// The one trap a writer is expected to be able to avoid rather than to be careful
@@ -108,6 +115,7 @@ impl Trap {
         Trap::OutsideTheText,
         Trap::NotInTheText,
         Trap::NoSeparator,
+        Trap::NoMoreInput,
     ];
 
     /// What to call this when telling somebody.
@@ -125,6 +133,7 @@ impl Trap {
             Trap::OutsideTheText => "a character outside the text",
             Trap::NotInTheText => "text that does not hold what was looked for",
             Trap::NoSeparator => "text cut at nothing",
+            Trap::NoMoreInput => "a line asked for after the input ended",
         }
     }
 
@@ -143,6 +152,7 @@ impl Trap {
             10 => Trap::OutsideTheText,
             11 => Trap::NotInTheText,
             12 => Trap::NoSeparator,
+            13 => Trap::NoMoreInput,
             _ => return None,
         })
     }
@@ -552,6 +562,20 @@ pub enum Host {
     /// Can stop.
     TextAsBool,
 
+    /// `()` — the whole of standard input, as text.
+    ///
+    /// Bytes that are not text become the replacement character rather than stopping the
+    /// program. Which is deliberate: the failure model here is that a writer can always
+    /// check first, and there is no way to ask whether bytes you have not read yet are
+    /// valid. A stop nobody can avoid is the thing files are still waiting on.
+    InputAll,
+    /// `()` — the next line, without its ending. Can stop, when there is none.
+    InputLine,
+    /// `()` — whether there is another line. The question that avoids the stop.
+    InputMore,
+    /// `()` — what the program was invoked with, as an array of text that grows.
+    InputArguments,
+
     /// `(text, from, to)` — the characters from one position to another, both counted
     /// from one and both included. Can stop.
     ///
@@ -629,6 +653,10 @@ impl Host {
             Host::FloatPower => "float-power",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
+            Host::InputAll => "input-all",
+            Host::InputLine => "input-line",
+            Host::InputMore => "input-more",
+            Host::InputArguments => "input-arguments",
             Host::TextSliceClusters => "text-slice-clusters",
             Host::TextSliceLetters => "text-slice-letters",
             Host::TextFindClusters => "text-find-clusters",
@@ -692,6 +720,7 @@ impl Host {
             Host::SayExact => &[Ty::Exact],
             Host::SayDecimal => &[Ty::Decimal],
             Host::SayArray => &[Ty::Handle, Ty::I64, Ty::I64],
+            Host::InputAll | Host::InputLine | Host::InputMore | Host::InputArguments => &[],
             Host::TextSliceClusters | Host::TextSliceLetters => {
                 &[Ty::Text, Ty::I64, Ty::I64]
             }
@@ -754,14 +783,21 @@ impl Host {
                 | Host::TextFindClusters
                 | Host::TextFindLetters
                 | Host::TextSplit
+                | Host::InputLine
         )
     }
 
     /// What it gives back. Most give an `i64` nothing is expected to use.
     pub fn result(self) -> Ty {
         match self {
-            Host::ArrayNew | Host::ArrayCopy | Host::TextSplit => Ty::Handle,
-            Host::ArrayEqual | Host::TextReads | Host::TextAsBool | Host::TextHas => Ty::Bool,
+            Host::ArrayNew | Host::ArrayCopy | Host::TextSplit | Host::InputArguments => {
+                Ty::Handle
+            }
+            Host::ArrayEqual
+            | Host::TextReads
+            | Host::TextAsBool
+            | Host::TextHas
+            | Host::InputMore => Ty::Bool,
             Host::TextJoin
             | Host::SayI64
             | Host::SayU64
@@ -772,7 +808,9 @@ impl Host {
             | Host::SayArray
             | Host::TextSliceClusters
             | Host::TextSliceLetters
-            | Host::TextTrim => Ty::Text,
+            | Host::TextTrim
+            | Host::InputAll
+            | Host::InputLine => Ty::Text,
             Host::ToB16 => Ty::F32,
             // Whatever width it was handed, which the call site says.
             Host::FloatAlone

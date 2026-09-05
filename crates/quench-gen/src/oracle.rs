@@ -174,7 +174,12 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                         let walked = quench_interp::run_named_writing(
                             &module,
                             &name,
-                            &mut quench_interp::Writing { out: &mut out, err: &mut err },
+                            &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut out,
+                err: &mut err,
+                arguments: &[],
+            },
                         );
                         let said = String::from_utf8_lossy(&out).into_owned();
                         answers.push((

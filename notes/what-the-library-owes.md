@@ -237,7 +237,7 @@ Each of these is waiting on something, and the something is named.
 | Text: upper and lower | whose Unicode tables — see below |
 | ~~The IEEE-required maths~~ | **built** |
 | ~~The IEEE-recommended maths~~ | **built** |
-| Input: stdin, arguments | nothing — a check comes first |
+| ~~Input: stdin, arguments~~ | **built** — behind `input`, four functions, and the check came first |
 | Input and output: files | a check that cannot race the world |
 | Sorting, searching, reversing | somebody writing them — they are Quench source now |
 | Maps | two holes at once, hashing, and a decided iteration order |
@@ -269,6 +269,36 @@ of the UCD, and a test holding it against the standard library so it is *ours an
 checked* rather than ours and trusted. `White_Space` was done that way here — twenty-five
 code points, verified against `char::is_whitespace` across all 1,114,112 of them. Case is
 a few thousand mappings and the same shape of work.
+
+## Input arrived, and the check it needed was already the rule
+
+This row said *"nothing — a check comes first"*, and that turned out to be the whole
+design rather than a blocker. `call input.more[]` is the question, `call input.line[]`
+is the answer, and a `line` past the end stops the program the way an index off the end
+of an array does. That is the third instance of a shape the language already had twice:
+`is`/`as` on text, `has`/`find` on a substring.
+
+What makes the check *honest* is the thing files do not have. A question about the world
+can be stale by the time the answer runs — the file was there when you asked and gone
+when you opened it — and that is why files are still on the list below. Standard input
+has no such gap: one program reads its own stream, in order, and nothing else can take a
+line out from between the question and the answer. The check does not race anything
+because there is nobody to race.
+
+Four functions, and the fourth is not about the stream at all. `call input.arguments[]`
+gives an `arr.str (grow)` of what the program was started with — Quench's own verb and
+path removed, so a program's first argument is the writer's first argument. The engines
+had disagreed about that number before it was written down here: the CLI handed the JIT
+its arguments and let the interpreter guess with a `skip(1)`, so the same program said
+`0` walked and `2` compiled. One helper now builds the arguments once and both are given
+it. The oracle could not have caught that one, because the oracle runs both engines
+through the same door.
+
+Bytes that are not text do not stop the program — they become the replacement character.
+This is the one place the language is lenient, and deliberately: a program that reads is
+usually handed something it did not choose, and the alternative is a stop that the writer
+had no way to prevent by asking first. Everywhere else, a stop is preventable by a check,
+which is what makes stopping fair.
 
 ## The two that fight the oracle
 

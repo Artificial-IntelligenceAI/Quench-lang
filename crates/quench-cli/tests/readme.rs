@@ -152,7 +152,12 @@ fn a_text_block_after_a_quench_one_is_what_that_program_says() {
         let (mut written, mut wrong) = (Vec::new(), Vec::new());
         quench_interp::run_writing(
             &module,
-            &mut quench_interp::Writing { out: &mut written, err: &mut wrong },
+            &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut written,
+                err: &mut wrong,
+                arguments: &[],
+            },
         )
         .expect("it runs");
         let walked = quench_dev::Printed {

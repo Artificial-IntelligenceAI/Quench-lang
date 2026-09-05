@@ -12,7 +12,12 @@ fn printed(source: &str) -> quench_dev::Printed {
     let (mut out_bytes, mut err_bytes) = (Vec::new(), Vec::new());
     quench_interp::run_writing(
         &module,
-        &mut quench_interp::Writing { out: &mut out_bytes, err: &mut err_bytes },
+        &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut out_bytes,
+                err: &mut err_bytes,
+                arguments: &[],
+            },
     )
     .expect("it runs");
     let walked = quench_dev::Printed {
@@ -878,7 +883,12 @@ fn said_under(source: &str, settings: quench_conf::Settings) -> String {
     let (mut out_bytes, mut err_bytes) = (Vec::new(), Vec::new());
     quench_interp::run_writing(
         &module,
-        &mut quench_interp::Writing { out: &mut out_bytes, err: &mut err_bytes },
+        &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut out_bytes,
+                err: &mut err_bytes,
+                arguments: &[],
+            },
     )
     .expect("it runs");
     let walked = String::from_utf8(out_bytes).expect("text");
@@ -2667,11 +2677,122 @@ fn a_position_is_whatever_a_character_is() {
         let (mut said, mut wrong) = (Vec::new(), Vec::new());
         quench_interp::run_writing(
             &module,
-            &mut quench_interp::Writing { out: &mut said, err: &mut wrong },
+            &mut quench_interp::Outside {
+                read: &mut std::io::empty(),
+                out: &mut said,
+                err: &mut wrong,
+                arguments: &[],
+            },
         )
         .expect("it runs");
         String::from_utf8(said).expect("text")
     };
     assert_eq!(with(quench_conf::Characters::Clusters), "3 3");
     assert_eq!(with(quench_conf::Characters::Letters), "4 4");
+}
+
+/// What both engines printed, given the same input and the same arguments.
+///
+/// Handed to each rather than taken from the real standard input, because two engines
+/// that both read the real one would each consume it and the second would see what the
+/// first left — which is nothing.
+fn told(source: &str, input: &str, arguments: &[&str]) -> quench_dev::Printed {
+    let out = lower(source);
+    assert!(out.ok(), "{}", report(source));
+    let module = out.module.expect("a program");
+    let arguments: Vec<String> = arguments.iter().map(|a| (*a).to_string()).collect();
+
+    let (mut said, mut wrong) = (Vec::new(), Vec::new());
+    let mut read = input.as_bytes();
+    quench_interp::run_writing(
+        &module,
+        &mut quench_interp::Outside {
+            read: &mut read,
+            out: &mut said,
+            err: &mut wrong,
+            arguments: &arguments,
+        },
+    )
+    .expect("it runs");
+    let walked = quench_dev::Printed {
+        out: String::from_utf8(said).expect("text"),
+        err: String::from_utf8(wrong).expect("text"),
+    };
+
+    let (_, compiled) = quench_dev::compile(&module)
+        .expect("it compiles")
+        .run_reading(Box::new(std::io::Cursor::new(input.as_bytes().to_vec())), arguments);
+    assert_eq!(walked, compiled, "the engines said different things about the same input");
+    walked
+}
+
+#[test]
+fn a_program_can_read_what_it_was_given() {
+    let source = "\
+import [input];
+import [text];
+
+START {
+    print.stdout[str:*given * call count[share call input.arguments[]] \\n];
+    loop.while call input.more[] {
+        print.stdout[str:*[* call text.trim[call input.line[]] str:*]* \\n];
+    }
+}
+";
+    let said = told(source, "one\n  two  \nthree", &["alpha", "beta"]);
+    assert_eq!(said.out, "given 2\n[one]\n[two]\n[three]\n");
+
+    // The whole of it at once, and then `text.split` does what `input.line` does -- the
+    // host surface is one call and the rest was already there.
+    let whole = "\
+import [input];
+import [text];
+
+START {
+    var.immut.arr.str (grow) ['lines'] = [call text.split[call input.all[], \\n]];
+    print.stdout[call count[share 'lines'] str:* * 'lines'[*2*] \\n];
+}
+";
+    assert_eq!(told(whole, "a\nb\nc", &[]).out, "3 b\n");
+}
+
+#[test]
+fn a_line_after_the_end_stops_and_more_is_the_question_that_avoids_it() {
+    use quench_qir::{Outcome, Trap};
+
+    let source = "\
+import [input];
+START { print.stdout[call input.line[]]; }
+";
+    let module = lower(source).module.expect("a program");
+    let (mut said, mut wrong) = (Vec::new(), Vec::new());
+    let mut read = std::io::empty();
+    let ended = quench_interp::run_writing(
+        &module,
+        &mut quench_interp::Outside {
+            read: &mut read,
+            out: &mut said,
+            err: &mut wrong,
+            arguments: &[],
+        },
+    )
+    .expect("it runs");
+    assert_eq!(ended, Outcome::Trapped(Trap::NoMoreInput));
+
+    // And nothing to read is what a program given nothing sees, rather than whatever
+    // the last one left behind.
+    assert_eq!(told("import [input];\nSTART { print.stdout[call input.more[]]; }", "", &[]).out, "false");
+}
+
+#[test]
+fn bytes_that_are_not_text_do_not_stop_the_program() {
+    // There is no way to ask whether bytes nobody has read yet are valid, so a stop here
+    // would be one a writer could not avoid -- which is the thing files are still
+    // waiting on. They become the replacement character instead.
+    let source = "\
+import [input];
+START { print.stdout[call count[call input.all[]] \\n]; }
+";
+    let said = told(source, "a\u{FFFD}b", &[]);
+    assert_eq!(said.out, "3\n");
 }

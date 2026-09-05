@@ -125,8 +125,34 @@ impl Compiled {
 
     /// Run the entry, keeping whatever it printed rather than letting it out.
     pub fn run_capturing(&self) -> (qir::Outcome, Printed) {
+        nothing_to_read();
         SINK.with(|sink| *sink.borrow_mut() = Some((Vec::new(), Vec::new())));
         let outcome = self.outcome();
+        let (out, err) = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
+        (
+            outcome,
+            Printed {
+                out: String::from_utf8_lossy(&out).into_owned(),
+                err: String::from_utf8_lossy(&err).into_owned(),
+            },
+        )
+    }
+
+    /// The same, given something to read and something to have been invoked with.
+    ///
+    /// Compiled code calls a plain `extern "C"` function with nowhere to hand it a
+    /// reader, so the Dev JIT is told separately rather than taking it as an argument
+    /// the way the interpreter does. Which is the whole reason this exists: a test that
+    /// hands both engines the same bytes and compares what they said.
+    pub fn run_reading(
+        &self,
+        source: Box<dyn std::io::BufRead>,
+        arguments: Vec<String>,
+    ) -> (qir::Outcome, Printed) {
+        SINK.with(|sink| *sink.borrow_mut() = Some((Vec::new(), Vec::new())));
+        reading(source, arguments);
+        let outcome = self.outcome();
+        nothing_to_read();
         let (out, err) = SINK.with(|sink| sink.borrow_mut().take()).unwrap_or_default();
         (
             outcome,
@@ -434,6 +460,19 @@ thread_local! {
     /// owns its thread.
     static HEAP: std::cell::RefCell<quench_heap::Heap> =
         std::cell::RefCell::new(quench_heap::Heap::default());
+
+    /// Where a running program's input comes from.
+    ///
+    /// Thread-local for the reason the sink is: compiled code calls a plain `extern
+    /// "C"` function with nowhere to hand it a reader. It holds whatever the caller
+    /// gave — the real standard input, or bytes a test wrote — so the two engines can
+    /// be handed the same thing and compared on what they said about it.
+    static SOURCE: std::cell::RefCell<Option<Box<dyn std::io::BufRead>>> =
+        const { std::cell::RefCell::new(None) };
+
+    /// What the program was invoked with. Not a stream: it is there before the program
+    /// starts and does not run out.
+    static ARGUMENTS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 
     /// Where a running program's output goes, when something is collecting it.
     ///
@@ -781,6 +820,90 @@ extern "C" fn text_clusters(_rt: *mut Runtime, at: i64) -> i64 {
 /// Called by compiled code. Not called by anything else.
 extern "C" fn text_letters(_rt: *mut Runtime, at: i64) -> i64 {
     HEAP.with(|h| h.borrow().said(at).chars().count() as i64)
+}
+
+/// Nothing to read and no arguments, which is what a run that was given neither must
+/// see.
+///
+/// Cleared rather than left, because the source is thread-local and a worker in the
+/// oracle runs thousands of programs on one thread: without this, a program that read
+/// would see whatever the last one left, and the two engines would disagree for a reason
+/// that had nothing to do with either.
+pub fn nothing_to_read() {
+    SOURCE.with(|held| *held.borrow_mut() = None);
+    ARGUMENTS.with(|held| held.borrow_mut().clear());
+}
+
+/// What a run reads and what it was invoked with.
+///
+/// Set before a program runs and taken away after, so that one run cannot see the input
+/// of the next. `run` and `run_capturing` leave it empty, which is what makes a program
+/// that reads see the end of the input immediately rather than the terminal's.
+pub fn reading(source: Box<dyn std::io::BufRead>, arguments: Vec<String>) {
+    SOURCE.with(|held| *held.borrow_mut() = Some(source));
+    ARGUMENTS.with(|held| *held.borrow_mut() = arguments);
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_all(rt: *mut Runtime) -> i64 {
+    maybe_collect(rt);
+    let bytes = SOURCE.with(|held| {
+        let mut held = held.borrow_mut();
+        let mut bytes = Vec::new();
+        if let Some(source) = held.as_mut() {
+            let _ = std::io::Read::read_to_end(source, &mut bytes);
+        }
+        bytes
+    });
+    keep_text(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_line(rt: *mut Runtime) -> i64 {
+    maybe_collect(rt);
+    let read = SOURCE.with(|held| {
+        let mut held = held.borrow_mut();
+        let mut bytes = Vec::new();
+        let read = match held.as_mut() {
+            Some(source) => std::io::BufRead::read_until(source, b'\n', &mut bytes).unwrap_or(0),
+            None => 0,
+        };
+        (read, bytes)
+    });
+    let (how_many, mut bytes) = read;
+    if how_many == 0 {
+        stop(rt, qir::Trap::NoMoreInput);
+        return 0;
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    keep_text(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_more(_rt: *mut Runtime) -> i64 {
+    SOURCE.with(|held| {
+        let mut held = held.borrow_mut();
+        let more = match held.as_mut() {
+            Some(source) => std::io::BufRead::fill_buf(source)
+                .map(|held| !held.is_empty())
+                .unwrap_or(false),
+            None => false,
+        };
+        i64::from(more)
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_arguments(rt: *mut Runtime) -> i64 {
+    maybe_collect(rt);
+    let held: Vec<i64> =
+        ARGUMENTS.with(|all| all.borrow().clone()).into_iter().map(keep_text).collect();
+    keep_array(qir::Elements::Text, 0, held)
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -1353,6 +1476,10 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
+    builder.symbol("quench_input_all", input_all as *const u8);
+    builder.symbol("quench_input_line", input_line as *const u8);
+    builder.symbol("quench_input_more", input_more as *const u8);
+    builder.symbol("quench_input_arguments", input_arguments as *const u8);
     builder.symbol("quench_text_slice_clusters", text_slice_clusters as *const u8);
     builder.symbol("quench_text_slice_letters", text_slice_letters as *const u8);
     builder.symbol("quench_text_find_clusters", text_find_clusters as *const u8);
@@ -1451,6 +1578,10 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
+        (qir::Host::InputAll, "quench_input_all"),
+        (qir::Host::InputLine, "quench_input_line"),
+        (qir::Host::InputMore, "quench_input_more"),
+        (qir::Host::InputArguments, "quench_input_arguments"),
         (qir::Host::TextSliceClusters, "quench_text_slice_clusters"),
         (qir::Host::TextSliceLetters, "quench_text_slice_letters"),
         (qir::Host::TextFindClusters, "quench_text_find_clusters"),

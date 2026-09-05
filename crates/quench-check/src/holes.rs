@@ -171,7 +171,8 @@ fn within(value: &mut Value, on: &mut impl FnMut(&mut Value)) {
                 within(arg, on);
             }
         }
-        Value::Text(_)
+        Value::Given { .. }
+        | Value::Text(_)
         | Value::Number { .. }
         | Value::Exact(_)
         | Value::Decimal { .. }

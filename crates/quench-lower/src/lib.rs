@@ -1010,6 +1010,16 @@ fn emit(
         // or the other, the way `count` is. The other three are not: a substring is
         // found by its bytes whatever a character is taken to be, and space is space in
         // either reading.
+        // Nothing to hand them: what arrived from outside arrived before the program.
+        Value::Given { which } => b.call_host(
+            match which {
+                0 => qir::Host::InputAll,
+                1 => qir::Host::InputLine,
+                2 => qir::Host::InputMore,
+                _ => qir::Host::InputArguments,
+            },
+            &[],
+        ),
         Value::Pieces { which, of } => {
             let args: Vec<qir::Value> =
                 of.iter().map(|value| emit(b, module, value, held, w)).collect();

@@ -22,7 +22,7 @@
 
 use quench_heap::Heap;
 use quench_qir as qir;
-use std::io::Write;
+use std::io::{BufRead, Write};
 
 pub use quench_heap::Heap as TheHeap;
 pub use qir::{Outcome, Trap};
@@ -224,12 +224,21 @@ fn no_power(trouble: quench_num::NoPower) -> Trap {
     }
 }
 
-pub struct Writing<'a> {
+pub struct Outside<'a> {
+    /// Standard input, which a program reads with `call input.…`.
+    ///
+    /// Injectable for the same reason the writers are: two engines that both read the
+    /// real standard input would each consume it, and the second would see nothing the
+    /// first did. A test hands both the same bytes and compares what they said.
+    pub read: &'a mut dyn BufRead,
     pub out: &'a mut dyn Write,
     pub err: &'a mut dyn Write,
+    /// What the program was invoked with. Not a stream: it is there before the program
+    /// starts and does not run out.
+    pub arguments: &'a [String],
 }
 
-impl Writing<'_> {
+impl Outside<'_> {
     fn to(&mut self, stream: i64) -> &mut dyn Write {
         if stream == qir::Stream::Err as i64 { self.err } else { self.out }
     }
@@ -238,7 +247,12 @@ impl Writing<'_> {
 /// Run a module from its entry, printing where the program said to.
 pub fn run(module: &qir::Module) -> Result<Outcome, Error> {
     let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
-    run_writing(module, &mut Writing { out: &mut out, err: &mut err })
+    let mut read = std::io::stdin().lock();
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    run_writing(
+        module,
+        &mut Outside { read: &mut read, out: &mut out, err: &mut err, arguments: &arguments },
+    )
 }
 
 /// What the heap looked like when the program ended.
@@ -256,8 +270,10 @@ pub struct Kept {
 /// Run it, and say what the heap looked like afterwards as well as what it answered.
 pub fn run_kept(module: &qir::Module) -> Result<(Outcome, Kept), Error> {
     let (mut out, mut err) = (std::io::sink(), std::io::sink());
+    let mut read = std::io::empty();
     let id = module.entry.ok_or(Error::NoEntry)?;
-    let mut writing = Writing { out: &mut out, err: &mut err };
+    let mut writing =
+        Outside { read: &mut read, out: &mut out, err: &mut err, arguments: &[] };
     let mut heap = Heap::new(module);
     let outcome = match walk_with(module, id, &mut writing, &mut heap) {
         Ok(value) => Outcome::Returned(value),
@@ -270,7 +286,7 @@ pub fn run_kept(module: &qir::Module) -> Result<(Outcome, Kept), Error> {
 ///
 /// Which is how a test reads what a program said, and how the oracle compares what two
 /// engines said rather than only what they returned.
-pub fn run_writing(module: &qir::Module, writing: &mut Writing<'_>) -> Result<Outcome, Error> {
+pub fn run_writing(module: &qir::Module, writing: &mut Outside<'_>) -> Result<Outcome, Error> {
     let id = module.entry.ok_or(Error::NoEntry)?;
     run_id(module, id, writing)
 }
@@ -281,14 +297,19 @@ pub fn run_writing(module: &qir::Module, writing: &mut Writing<'_>) -> Result<Ou
 /// of them without the module having to name it as the entry.
 pub fn run_named(module: &qir::Module, name: &str) -> Result<Outcome, Error> {
     let (mut out, mut err) = (std::io::sink(), std::io::sink());
-    run_named_writing(module, name, &mut Writing { out: &mut out, err: &mut err })
+    let mut read = std::io::empty();
+    run_named_writing(
+        module,
+        name,
+        &mut Outside { read: &mut read, out: &mut out, err: &mut err, arguments: &[] },
+    )
 }
 
 /// The same, keeping what it printed.
 pub fn run_named_writing(
     module: &qir::Module,
     name: &str,
-    writing: &mut Writing<'_>,
+    writing: &mut Outside<'_>,
 ) -> Result<Outcome, Error> {
     let id = module
         .find(name)
@@ -296,7 +317,7 @@ pub fn run_named_writing(
     run_id(module, id, writing)
 }
 
-fn run_id(module: &qir::Module, id: qir::FuncId, writing: &mut Writing<'_>) -> Result<Outcome, Error> {
+fn run_id(module: &qir::Module, id: qir::FuncId, writing: &mut Outside<'_>) -> Result<Outcome, Error> {
     qir::verify(module).map_err(Error::Invalid)?;
     let entry = module.func(id);
     if !entry.params.is_empty() {
@@ -358,7 +379,7 @@ impl Frame {
 }
 
 /// Run, with the calls on a stack here rather than on Rust's.
-fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> Result<i64, Trap> {
+fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Outside<'_>) -> Result<i64, Trap> {
     let mut heap = Heap::new(module);
     walk_with(module, entry, writing, &mut heap)
 }
@@ -366,7 +387,7 @@ fn walk(module: &qir::Module, entry: qir::FuncId, writing: &mut Writing<'_>) -> 
 fn walk_with(
     module: &qir::Module,
     entry: qir::FuncId,
-    writing: &mut Writing<'_>,
+    writing: &mut Outside<'_>,
     heap: &mut Heap,
 ) -> Result<i64, Trap> {
     let mut stack = vec![Frame::new(module, entry, &[])];
@@ -454,7 +475,7 @@ fn evaluate(
     slots: &[i64],
     _module: &qir::Module,
     func: &qir::Function,
-    writing: &mut Writing<'_>,
+    writing: &mut Outside<'_>,
     heap: &mut Heap,
 ) -> Result<i64, Trap> {
     Ok(match inst {
@@ -795,6 +816,46 @@ fn evaluate(
                 // Every one of these is `quench_text::pieces`, called by both engines,
                 // for the reason the grapheme walk is: two answers to "where does `sub`
                 // begin" would eventually be two answers.
+                // The whole of standard input, and a line at a time. Bytes that are
+                // not text become the replacement character rather than stopping: the
+                // failure model here is that a writer can always check first, and there
+                // is no way to ask whether bytes nobody has read yet are valid.
+                qir::Host::InputAll => {
+                    let mut bytes = Vec::new();
+                    let _ = std::io::Read::read_to_end(writing.read, &mut bytes);
+                    let said = String::from_utf8_lossy(&bytes).into_owned();
+                    return Ok(heap.text(said));
+                }
+                qir::Host::InputLine => {
+                    let mut bytes = Vec::new();
+                    let read = writing.read.read_until(b'\n', &mut bytes).unwrap_or(0);
+                    if read == 0 {
+                        return Err(Trap::NoMoreInput);
+                    }
+                    // Without its ending, and a `\r\n` counts as one ending rather than
+                    // leaving a carriage return on the end of every line.
+                    if bytes.last() == Some(&b'\n') {
+                        bytes.pop();
+                        if bytes.last() == Some(&b'\r') {
+                            bytes.pop();
+                        }
+                    }
+                    let said = String::from_utf8_lossy(&bytes).into_owned();
+                    return Ok(heap.text(said));
+                }
+                qir::Host::InputMore => {
+                    let more = writing.read.fill_buf().map(|held| !held.is_empty());
+                    return Ok(i64::from(more.unwrap_or(false)));
+                }
+                qir::Host::InputArguments => {
+                    let held: Vec<i64> = writing
+                        .arguments
+                        .to_vec()
+                        .into_iter()
+                        .map(|argument| heap.text(argument))
+                        .collect();
+                    return Ok(heap.make(qir::Elements::Text, 0, held));
+                }
                 qir::Host::TextSliceClusters | qir::Host::TextSliceLetters => {
                     let clusters = *host == qir::Host::TextSliceClusters;
                     let (from, to) =

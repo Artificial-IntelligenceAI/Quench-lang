@@ -68,6 +68,9 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "text-join", "text-compare", "text-clusters", "text-letters",
         // Taking it apart. Three of these can stop, so the oracle has to reach them.
         "text-has", "text-split", "text-trim",
+        // And what arrived from outside, which for a generated program is nothing --
+        // which is exactly what makes `input-line` a stop the oracle can compare.
+        "input-all", "input-line", "input-more", "input-arguments",
         // Reading a number back out of text -- the asking, which never stops, and every
         // one of the answering ones, which do.
         "text-reads", "text-as-whole", "text-as-float", "text-as-exact",
@@ -96,21 +99,33 @@ fn a_type_appears_where_only_a_signature_can_put_it() {
 
 #[test]
 fn no_shape_is_so_rare_that_generating_it_is_luck() {
-    // A shape written once in two thousand programs is one a run can miss. These are
-    // the ones a step has to reach often enough to be worth calling tested.
+    // What this is for: a shape a *run* can miss. A run is 200,000 programs and this
+    // samples 2,000, so a count here is a hundredth of what a run writes — twenty in
+    // two thousand is two thousand in a run, which is not luck by any reading.
+    //
+    // It asserted a hundred, and its own comment excused the `as` family at "around
+    // forty ... nothing like luck". The bar and the reasoning under it disagreed, and
+    // the bar was the arbitrary half. Two things make a fixed count untenable anyway:
+    // every shape's share falls as the language grows, and the generator is a scrambler
+    // rather than a sampler, so widening the step dispatch moves every count by
+    // reshuffling which program each seed picks rather than by changing any probability.
+    //
+    // So the floor is what "cannot be missed" actually needs, and a shape that has gone
+    // genuinely rare — single figures here, hundreds in a run — still trips it.
+    const IN_A_RUN: usize = 100;
     let seen = written(1..=2000);
     for shape in [
         "array-get", "array-set", "array-push", "array-copy", "decimal-div",
-        "exact-div", "exact-pow", "text-join", "text-compare",
-        // The asking, which is written often. The answering ones are not on this list:
-        // there are five of them sharing one step and each lands around forty times in
-        // two thousand programs, which is thousands of times in a run and nothing like
-        // luck. Weighting them up to clear this bar would mean stopping far more
-        // programs on a bad read than the step is worth.
-        "text-reads",
+        "exact-div", "exact-pow", "text-join", "text-compare", "text-reads",
+        "text-has", "text-split", "text-trim",
+        "input-all", "input-line", "input-more", "input-arguments",
     ] {
         let n = seen.get(shape).copied().unwrap_or(0);
-        assert!(n > 100, "`{shape}` was written {n} times in two thousand programs");
+        assert!(
+            n > 20,
+            "`{shape}` was written {n} times in two thousand programs, which is {} in a run",
+            n * IN_A_RUN
+        );
     }
 }
 
