@@ -1,0 +1,44 @@
+# Taking text apart. Five functions behind `text`, bare because they are Quench's --
+# the same namespace argument `maths` got, for the same reason.
+#
+# `count` and `stitch` stay at the top level: `count` counts an array too, and `stitch`
+# makes text out of anything. These five are about text and nothing else.
+
+START {
+    var.immut.str ['line'] = [*  name: Tankun  *];
+
+    # Space at each end, gone. Unicode's `White_Space`, written down in `quench-text`
+    # rather than borrowed, so the answer cannot move with the compiler that built it.
+    var.immut.str ['tidy'] = [call text.trim['line']];
+    print.stdout[str:*[* 'tidy' str:*]* \n];
+
+    # `has` is the question and `find` is the answer -- the same pair `is` and `as` are,
+    # and for the same reason: `find` on something that is not there stops the program,
+    # and asking first is what makes that impossible rather than unlikely.
+    if call text.has['tidy', *: *] {
+        var.immut.i64 ['at'] = [call text.find['tidy', *: *]];
+        var.immut.i64 ['end'] = [call count['tidy']];
+
+        # Positions count from one and both ends are included, the way an index and a
+        # loop's bounds do.
+        print.stdout[call text.slice['tidy', *1*, 'at' - *1*] \n];
+        print.stdout[call text.slice['tidy', 'at' + *2*, 'end'] \n];
+    }
+
+    # A backwards pair is empty rather than refused, because a backwards range runs no
+    # times and this is that rule rather than a second one.
+    print.stdout[str:*[* call text.slice['tidy', *3*, *2*] str:*]* \n];
+
+    # Splitting gives the pieces in order, as an array that grows. A separator that is
+    # not there gives one piece, which is the whole text -- the answer that makes
+    # splitting and joining give back what went in.
+    var.immut.arr.str (grow) ['fields'] = [call text.split[*a,b,,c*, *,*]];
+    print.stdout['fields' str:* * call count[share 'fields'] \n];
+
+    # `slice` and `find` move with `[defaults] characters`, because both are about a
+    # *position* and that setting is what decides what a position counts. `has`, `split`
+    # and `trim` do not: a substring is found by its bytes whatever a character is taken
+    # to be, and space is space in either reading.
+    var.immut.str ['accented'] = [*café*];
+    print.stdout[call count['accented'] str:* * call text.slice['accented', *4*, *4*] \n];
+}

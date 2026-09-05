@@ -792,6 +792,62 @@ fn evaluate(
                         None => Err(Trap::NotThatNumber),
                     };
                 }
+                // Every one of these is `quench_text::pieces`, called by both engines,
+                // for the reason the grapheme walk is: two answers to "where does `sub`
+                // begin" would eventually be two answers.
+                qir::Host::TextSliceClusters | qir::Host::TextSliceLetters => {
+                    let clusters = *host == qir::Host::TextSliceClusters;
+                    let (from, to) =
+                        (slots[args[1].0 as usize], slots[args[2].0 as usize]);
+                    let taken = quench_text::pieces::slice(
+                        heap.said(slots[args[0].0 as usize]),
+                        from,
+                        to,
+                        clusters,
+                    );
+                    return match taken {
+                        Some(piece) => Ok(heap.text(piece)),
+                        None => Err(Trap::OutsideTheText),
+                    };
+                }
+                qir::Host::TextFindClusters | qir::Host::TextFindLetters => {
+                    let clusters = *host == qir::Host::TextFindClusters;
+                    let (said, sub) = (
+                        heap.said(slots[args[0].0 as usize]).to_string(),
+                        heap.said(slots[args[1].0 as usize]).to_string(),
+                    );
+                    return match quench_text::pieces::find(&said, &sub, clusters) {
+                        Some(at) => Ok(at),
+                        None => Err(Trap::NotInTheText),
+                    };
+                }
+                qir::Host::TextHas => {
+                    let (said, sub) = (
+                        heap.said(slots[args[0].0 as usize]).to_string(),
+                        heap.said(slots[args[1].0 as usize]).to_string(),
+                    );
+                    return Ok(i64::from(quench_text::pieces::has(&said, &sub)));
+                }
+                qir::Host::TextSplit => {
+                    let (said, sep) = (
+                        heap.said(slots[args[0].0 as usize]).to_string(),
+                        heap.said(slots[args[1].0 as usize]).to_string(),
+                    );
+                    if sep.is_empty() {
+                        return Err(Trap::NoSeparator);
+                    }
+                    let pieces = quench_text::pieces::split(&said, &sep);
+                    // The pieces are put away first and the array made round them, so
+                    // nothing half-built is reachable if a collection happens between.
+                    let held: Vec<i64> =
+                        pieces.into_iter().map(|piece| heap.text(piece)).collect();
+                    return Ok(heap.make(qir::Elements::Text, 0, held));
+                }
+                qir::Host::TextTrim => {
+                    let trimmed =
+                        quench_text::pieces::trim(heap.said(slots[args[0].0 as usize]));
+                    return Ok(heap.text(trimmed));
+                }
                 qir::Host::PowI64 | qir::Host::PowI64Trapping => {
                     let (base, exponent) =
                         (slots[args[0].0 as usize], slots[args[1].0 as usize]);

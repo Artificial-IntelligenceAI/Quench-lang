@@ -1487,3 +1487,51 @@ fn two_files_may_each_hold_a_name() {
         ("main", "import ['a'];\nimport ['b'];\nSTART { print.stdout[call 'a'.'size'[] call 'b'.'size'[]]; }"),
     ]));
 }
+
+#[test]
+fn taking_text_apart_says_what_it_takes() {
+    for (source, expected, fix) in [
+        (
+            "START { print.stdout[call text.slice[*abc*]]; }",
+            "`text.slice` takes three things.",
+            "`call text.slice['s', *2*, *4*]`",
+        ),
+        (
+            "START { print.stdout[call text.trim[*a*, *b*]]; }",
+            "`text.trim` takes one thing.",
+            "`call text.trim['s']`",
+        ),
+        (
+            "START { print.stdout[call text.has[*a*, *1*, *2*]]; }",
+            "`text.has` takes two things.",
+            "`call text.has['s', 'in it']`",
+        ),
+    ] {
+        let rendered = errors(source);
+        assert!(rendered.contains(expected), "{rendered}");
+        assert!(rendered.contains(fix), "{rendered}");
+        assert!(rendered.contains("Error code: E0521"), "{rendered}");
+    }
+
+    // What each takes is a real type, so the ordinary refusal does the work.
+    let wrong = errors("START { var.immut.i64 ['n'] = [*1*]; print.stdout[call text.trim['n']]; }");
+    assert!(wrong.contains("this is an `i64`, and it is being given to a `str`."), "{wrong}");
+}
+
+#[test]
+fn a_name_that_moved_says_where_it_went_whichever_module_it_is_in() {
+    // The same message the maths got, and it needed nothing added: it searches every
+    // module rather than the one it was written for.
+    for (source, said, fix) in [
+        ("START { print.stdout[call slice[*a*, *1*, *1*]]; }", "`slice` is in `text`.", "`call text.slice[…]`"),
+        ("START { print.stdout[call sqrt[*1.0*]]; }", "`sqrt` is in `maths`.", "`call maths.sqrt[…]`"),
+    ] {
+        let rendered = errors(source);
+        assert!(rendered.contains(said), "{rendered}");
+        assert!(rendered.contains(fix), "{rendered}");
+        assert!(rendered.contains("Error code: E0520"), "{rendered}");
+    }
+
+    let missing = errors("START { print.stdout[call text.frog[*a*]]; }");
+    assert!(missing.contains("`text` has nothing called `frog`."), "{missing}");
+}

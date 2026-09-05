@@ -1005,6 +1005,26 @@ fn emit(
         // Which of the two answers is the project's decision, written in here as one
         // instruction or the other rather than as a mode an engine reads -- the same
         // way `division` and `overflow` are.
+        // Slicing and finding hand back or take a *position*, and what a position counts
+        // is `[defaults] characters` -- so those two are written in as one instruction
+        // or the other, the way `count` is. The other three are not: a substring is
+        // found by its bytes whatever a character is taken to be, and space is space in
+        // either reading.
+        Value::Pieces { which, of } => {
+            let args: Vec<qir::Value> =
+                of.iter().map(|value| emit(b, module, value, held, w)).collect();
+            let clusters = w.settings.characters == quench_conf::Characters::Clusters;
+            let host = match which {
+                0 if clusters => qir::Host::TextSliceClusters,
+                0 => qir::Host::TextSliceLetters,
+                1 => qir::Host::TextHas,
+                2 if clusters => qir::Host::TextFindClusters,
+                2 => qir::Host::TextFindLetters,
+                3 => qir::Host::TextSplit,
+                _ => qir::Host::TextTrim,
+            };
+            b.call_host(host, &args)
+        }
         Value::CountText(of) => {
             let text = emit(b, module, of, held, w);
             let host = match w.settings.characters {

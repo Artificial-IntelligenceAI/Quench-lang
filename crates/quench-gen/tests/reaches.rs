@@ -66,6 +66,8 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "exact-compare",
         // Text, which is the other thing built while a program runs.
         "text-join", "text-compare", "text-clusters", "text-letters",
+        // Taking it apart. Three of these can stop, so the oracle has to reach them.
+        "text-has", "text-split", "text-trim",
         // Reading a number back out of text -- the asking, which never stops, and every
         // one of the answering ones, which do.
         "text-reads", "text-as-whole", "text-as-float", "text-as-exact",

@@ -2584,3 +2584,84 @@ START {
 ";
     assert_eq!(said(source), "! 3\n");
 }
+
+#[test]
+fn text_can_be_taken_apart() {
+    let source = "\
+START {
+    var.immut.str ['s'] = [*hello, world*];
+    print.stdout[call text.slice['s', *1*, *5*] \\n];
+    print.stdout[call text.has['s', *world*] str:* * call text.has['s', *zebra*] \\n];
+    print.stdout[call text.find['s', *world*] \\n];
+    print.stdout[call text.trim[*  padded  *] str:*<-* \\n];
+    var.immut.arr.str (grow) ['bits'] = [call text.split[*a,b,,c*, *,*]];
+    print.stdout['bits' str:* * call count[share 'bits'] \\n];
+}
+";
+    assert_eq!(said(source), "hello\ntrue false\n8\npadded<-\n[*a* *b* ** *c*] 4\n");
+}
+
+#[test]
+fn a_backwards_slice_is_empty_the_way_a_backwards_range_runs_no_times() {
+    // Not a special case: `loop.temp.range.i64 ['i'] = [*5*, *1*]` runs zero times, and
+    // a piece from a later position to an earlier one is the same rule.
+    let source = "\
+START {
+    var.mut.i64 ['times'] = [*0*];
+    loop.temp.range.i64 ['i'] = [*5*, *1*] { set ['times'] = ['times' + *1*]; }
+    print.stdout['times' str:* * call text.slice[*abc*, *3*, *2*] str:*<-* \\n];
+}
+";
+    assert_eq!(said(source), "0 <-\n");
+}
+
+#[test]
+fn taking_text_apart_stops_where_it_cannot_answer() {
+    use quench_qir::{Outcome, Trap};
+
+    // Each is the refusal its neighbour already had: a position outside the text is an
+    // index off the end, and a needle that is not there is what `has` exists to ask.
+    assert_eq!(
+        ended("START { print.stdout[call text.slice[*abc*, *1*, *9*]]; }"),
+        Outcome::Trapped(Trap::OutsideTheText)
+    );
+    assert_eq!(
+        ended("START { print.stdout[call text.slice[*abc*, *0*, *1*]]; }"),
+        Outcome::Trapped(Trap::OutsideTheText),
+        "counted from one, so nought is no character"
+    );
+    assert_eq!(
+        ended("START { print.stdout[call text.find[*abc*, *z*]]; }"),
+        Outcome::Trapped(Trap::NotInTheText)
+    );
+    assert_eq!(
+        ended("START { var.immut.arr.str (grow) ['b'] = [call text.split[*abc*, **]]; print.stdout['b']; }"),
+        Outcome::Trapped(Trap::NoSeparator)
+    );
+}
+
+#[test]
+fn a_position_is_whatever_a_character_is() {
+    // `count` was the only thing `[defaults] characters` reached, so the whole of UAX
+    // #29 was being exercised by one function. Slicing and finding hand back or take a
+    // *position*, so both move with it; having, splitting and trimming do not.
+    let with = |characters| {
+        let settings = quench_conf::Settings { characters, ..quench_conf::Settings::default() };
+        let source = format!(
+            "START {{\n    var.immut.str ['s'] = [*a{}b*];\n    print.stdout[call count['s'] str:* * call text.find['s', *b*]];\n}}\n",
+            "e\u{301}"
+        );
+        let out = quench_lower::lower_under(&source, settings);
+        assert!(out.ok(), "{:?}", out.errors);
+        let module = out.module.expect("a program");
+        let (mut said, mut wrong) = (Vec::new(), Vec::new());
+        quench_interp::run_writing(
+            &module,
+            &mut quench_interp::Writing { out: &mut said, err: &mut wrong },
+        )
+        .expect("it runs");
+        String::from_utf8(said).expect("text")
+    };
+    assert_eq!(with(quench_conf::Characters::Clusters), "3 3");
+    assert_eq!(with(quench_conf::Characters::Letters), "4 4");
+}

@@ -455,6 +455,19 @@ pub const CHAIN_LINKS: &[&str] = &[
 /// What a written value may be when the type reading it is `bool`.
 pub const LITERALS: &[&str] = &["true", "false"];
 
+/// Every module the language provides. Bare, because they are Quench's.
+///
+/// Two so far. The first exists because twenty-eight of the thirty-two provided were
+/// trigonometry, so a reader of the top-level list would reasonably have concluded that
+/// Quench is a calculator with a compiler attached — and `sin` read like a keyword when
+/// it is a library.
+///
+/// None of these could be an `import`. `sin` wants a mantissa that grows, an exponent
+/// and Ziv's retry loop, and the language can express none of it, so every one of them
+/// is a host call whichever side of a namespace it sits on. What a namespace changes is
+/// what a reader has to look at, which was the whole complaint.
+pub const MODULES: &[&str] = &["maths", "text"];
+
 /// The functions the language provides, and what each takes.
 ///
 /// A bare word after `call` is one of these and nothing else — anything a writer named
@@ -465,19 +478,8 @@ pub const LITERALS: &[&str] = &["true", "false"];
 /// rounded, which is what makes it safe: every engine must give identical bits. `sin`,
 /// `log` and the rest are only *recommended*, so three engines calling three C libraries
 /// would be three answers, and they wait for one implementation written here.
-/// Every module the language provides. Bare, because they are Quench's.
 ///
-/// One so far. It exists because twenty-eight of the thirty-two provided functions were
-/// trigonometry, so a reader of the top-level list would reasonably have concluded that
-/// Quench is a calculator with a compiler attached — and `sin` read like a keyword when
-/// it is a library.
-///
-/// None of these could be an `import`. `sin` wants a mantissa that grows, an exponent
-/// and Ziv's retry loop, and the language can express none of it, so every one of them
-/// is a host call whichever side of a namespace it sits on. What a namespace changes is
-/// what a reader has to look at, which was the whole complaint.
-pub const MODULES: &[&str] = &["maths"];
-
+/// The last column is the module each is in, empty for the four at the top level.
 pub const PROVIDED: &[(&str, &str, Provides)] = &[
     ("", "count", Provides::Count),
     ("", "stitch", Provides::Stitch),
@@ -487,6 +489,14 @@ pub const PROVIDED: &[(&str, &str, Provides)] = &[
     // and a `b64` and an `e` — so the type has to be asked for.
     ("", "is", Provides::Reads),
     ("", "as", Provides::Becomes),
+    // Taking text apart. `count` and `stitch` stay at the top because they are not only
+    // about text -- `count` counts an array too, and `stitch` makes text out of anything.
+    // These five are text and nothing else.
+    ("text", "slice", Provides::Pieces(0)),
+    ("text", "has", Provides::Pieces(1)),
+    ("text", "find", Provides::Pieces(2)),
+    ("text", "split", Provides::Pieces(3)),
+    ("text", "trim", Provides::Pieces(4)),
     ("maths", "sqrt", Provides::Alone(0)),
     ("maths", "abs", Provides::Alone(1)),
     ("maths", "floor", Provides::Alone(2)),
@@ -543,6 +553,8 @@ pub enum Provides {
     Slow(u8),
     /// Two `b64`s in, one out, the same way.
     Power(u8),
+    /// One of the five that take text apart. The number is which.
+    Pieces(u8),
 }
 
 /// One variable.
@@ -620,6 +632,9 @@ pub enum Value {
     /// How many characters a piece of text has, asked while it runs. Which of the two
     /// answers it gives is `[defaults] characters`, and the lowering picks it.
     CountText(Box<Value>),
+    /// `call text.slice[…]` and its four neighbours. `which` is the number the lowering
+    /// writes beside it, and what each answers with is fixed by that.
+    Pieces { which: u8, of: Vec<Value> },
     /// How many an array holds, asked while it runs — which is what `count` becomes on
     /// an array that grows, and what it never becomes on one that does not.
     Count(Box<Value>),
@@ -2942,6 +2957,40 @@ impl<'a> Checker<'a> {
         Some(if sure { Value::Read { ty, text } } else { Value::CanRead { ty, text } })
     }
 
+    /// `call text.slice['s', *2*, *4*]` and its four neighbours.
+    ///
+    /// Every one of them takes text and known types, so the arguments go through the
+    /// ordinary builder rather than a reading of their own — which is what lets a
+    /// written value stand where a `str` is wanted without saying `str:` first.
+    fn pieces(&mut self, call: &ast::Call, name: &str, which: u8) -> Option<Value> {
+        let whole = Ty::Int { bits: 64, signed: true };
+        let wants: Vec<Ty> = match which {
+            0 => vec![Ty::Str, whole.clone(), whole],
+            4 => vec![Ty::Str],
+            _ => vec![Ty::Str, Ty::Str],
+        };
+        let shape = match which {
+            0 => format!("`call text.{name}['s', *2*, *4*]`"),
+            4 => format!("`call text.{name}['s']`"),
+            _ => format!("`call text.{name}['s', 'in it']`"),
+        };
+        if call.args.len() != wants.len() {
+            self.errors.push(
+                Diagnostic::new("E0521", format!("`text.{name}` takes {}.", counted(wants.len(), "thing")))
+                    .primary(call.name.to(call.close), format!("given {}", counted(call.args.len(), "thing")))
+                    .rule("a call brings one value for each thing it takes, in the same order")
+                    .fix(shape),
+            );
+            return None;
+        }
+
+        let mut built = Vec::with_capacity(wants.len());
+        for (given, ty) in call.args.iter().zip(&wants) {
+            built.push(self.value(given, ty, call.name)?);
+        }
+        Some(Value::Pieces { which, of: built })
+    }
+
     fn maths(&mut self, call: &ast::Call, name: &str, wants: usize, which: u8) -> Option<Value> {
         if call.args.len() != wants {
             self.errors.push(
@@ -3355,6 +3404,7 @@ impl<'a> Checker<'a> {
             Provides::Fused => return self.maths(call, &name, 3, 0),
             Provides::Slow(which) => return self.slowly(call, &name, 1, *which),
             Provides::Power(which) => return self.slowly(call, &name, 2, *which),
+            Provides::Pieces(which) => return self.pieces(call, &name, *which),
             Provides::Count => {}
         }
 
@@ -3646,6 +3696,17 @@ impl<'a> Checker<'a> {
             Value::Count(_) | Value::CountText(_) => {
                 Some(Ty::Int { bits: 64, signed: true })
             }
+            Value::Pieces { which, .. } => Some(match which {
+                0 | 4 => Ty::Str,
+                1 => Ty::Bool,
+                2 => Ty::Int { bits: 64, signed: true },
+                // The pieces, in order, however many there turn out to be.
+                _ => Ty::Arr {
+                    of: Box::new(Ty::Str),
+                    shape: Vec::new(),
+                    length: Length::Grows,
+                },
+            }),
             Value::CanRead { .. } => Some(Ty::Bool),
             Value::Read { ty, .. } => Some(ty.clone()),
             Value::Copied(of) => self.type_of(of, span),

@@ -784,6 +784,87 @@ extern "C" fn text_letters(_rt: *mut Runtime, at: i64) -> i64 {
 }
 
 /// Called by compiled code. Not called by anything else.
+fn text_slice(rt: *mut Runtime, at: i64, from: i64, to: i64, clusters: bool) -> i64 {
+    maybe_collect(rt);
+    let taken =
+        HEAP.with(|h| quench_text::pieces::slice(h.borrow().said(at), from, to, clusters));
+    match taken {
+        Some(piece) => keep_text(piece),
+        None => {
+            stop(rt, qir::Trap::OutsideTheText);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_slice_clusters(rt: *mut Runtime, at: i64, from: i64, to: i64) -> i64 {
+    text_slice(rt, at, from, to, true)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_slice_letters(rt: *mut Runtime, at: i64, from: i64, to: i64) -> i64 {
+    text_slice(rt, at, from, to, false)
+}
+
+fn text_find(rt: *mut Runtime, at: i64, sub: i64, clusters: bool) -> i64 {
+    let found = HEAP.with(|h| {
+        let h = h.borrow();
+        quench_text::pieces::find(h.said(at), h.said(sub), clusters)
+    });
+    match found {
+        Some(which) => which,
+        None => {
+            stop(rt, qir::Trap::NotInTheText);
+            0
+        }
+    }
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_find_clusters(rt: *mut Runtime, at: i64, sub: i64) -> i64 {
+    text_find(rt, at, sub, true)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_find_letters(rt: *mut Runtime, at: i64, sub: i64) -> i64 {
+    text_find(rt, at, sub, false)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_has(_rt: *mut Runtime, at: i64, sub: i64) -> i64 {
+    HEAP.with(|h| {
+        let h = h.borrow();
+        i64::from(quench_text::pieces::has(h.said(at), h.said(sub)))
+    })
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_split(rt: *mut Runtime, at: i64, sep: i64) -> i64 {
+    maybe_collect(rt);
+    let (said, sep) = HEAP.with(|h| {
+        let h = h.borrow();
+        (h.said(at).to_string(), h.said(sep).to_string())
+    });
+    if sep.is_empty() {
+        stop(rt, qir::Trap::NoSeparator);
+        return 0;
+    }
+    // The pieces are put away first and the array made round them, so nothing
+    // half-built is reachable if a collection happens between.
+    let held: Vec<i64> =
+        quench_text::pieces::split(&said, &sep).into_iter().map(keep_text).collect();
+    keep_array(qir::Elements::Text, 0, held)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn text_trim(rt: *mut Runtime, at: i64) -> i64 {
+    maybe_collect(rt);
+    let trimmed = HEAP.with(|h| quench_text::pieces::trim(h.borrow().said(at)));
+    keep_text(trimmed)
+}
+
+/// Called by compiled code. Not called by anything else.
 ///
 /// `is`, for every type at once: the kind and whatever it needs arrive as constants the
 /// call site wrote down, and every arm asks the reader the type is written with.
@@ -1272,6 +1353,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
+    builder.symbol("quench_text_slice_clusters", text_slice_clusters as *const u8);
+    builder.symbol("quench_text_slice_letters", text_slice_letters as *const u8);
+    builder.symbol("quench_text_find_clusters", text_find_clusters as *const u8);
+    builder.symbol("quench_text_find_letters", text_find_letters as *const u8);
+    builder.symbol("quench_text_has", text_has as *const u8);
+    builder.symbol("quench_text_split", text_split as *const u8);
+    builder.symbol("quench_text_trim", text_trim as *const u8);
     builder.symbol("quench_text_reads", text_reads as *const u8);
     builder.symbol("quench_text_as_whole", text_as_whole as *const u8);
     builder.symbol("quench_text_as_float", text_as_float as *const u8);
@@ -1363,6 +1451,13 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
+        (qir::Host::TextSliceClusters, "quench_text_slice_clusters"),
+        (qir::Host::TextSliceLetters, "quench_text_slice_letters"),
+        (qir::Host::TextFindClusters, "quench_text_find_clusters"),
+        (qir::Host::TextFindLetters, "quench_text_find_letters"),
+        (qir::Host::TextHas, "quench_text_has"),
+        (qir::Host::TextSplit, "quench_text_split"),
+        (qir::Host::TextTrim, "quench_text_trim"),
         (qir::Host::TextReads, "quench_text_reads"),
         (qir::Host::TextAsWhole, "quench_text_as_whole"),
         (qir::Host::TextAsFloat, "quench_text_as_float"),

@@ -359,6 +359,17 @@ Both print the same thing, which is not a coincidence — it is
   stop, which is the difference between a float and an `e`. `^` and `mod` are refused
   for the same reason they are on a `b64`. Both engines call the *same* arithmetic, so
   they cannot round differently.
+- **Text comes apart behind `text`.** `call text.slice['s', *2*, *4*]`,
+  `call text.has`, `call text.find`, `call text.split`, `call text.trim`. `has` is the
+  question and `find` is the answer — the same pair `is` and `as` are, and for the same
+  reason: `find` on something absent stops the program. Positions count from one and both
+  ends are included, and **a backwards pair is empty rather than refused**, because a
+  backwards `range` runs no times and this is that rule rather than a second one.
+
+  `slice` and `find` move with `[defaults] characters` and the other three do not: both
+  of those are about a *position*, which is exactly what that setting decides, while a
+  substring is found by its bytes whatever a character is taken to be. Until this, the
+  whole of UAX #29 was exercised by `count` alone.
 - **The maths lives behind `maths`.** `call maths.sqrt[*2.0*]`, bare because it is
   Quench's — twenty-eight of the thirty-two provided functions are maths, and in front of
   everything they made the language read like a calculator with a compiler attached.

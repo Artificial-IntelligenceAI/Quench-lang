@@ -67,6 +67,19 @@ pub enum Trap {
     /// An exact number raised to a fraction, whose answer is generally not a ratio —
     /// the square root of two is the oldest number known not to be one.
     FractionalPower = 7,
+    /// `call text.slice['abc', *1*, *9*]` — a character position outside the text.
+    ///
+    /// The same refusal an index off the end of an array gets, and for the same reason:
+    /// `call count['s']` says how many there are, and a writer who asked never reaches
+    /// this. A *backwards* pair is not one of these — that is empty text, the way a
+    /// backwards range runs no times.
+    OutsideTheText = 10,
+    /// `call text.find['abc', 'z']` — text that does not hold what was looked for.
+    ///
+    /// `call text.has[…]` is the question that avoids it, the way `is` avoids `as`.
+    NotInTheText = 11,
+    /// `call text.split['a,b', **]` — cutting text at nothing.
+    NoSeparator = 12,
     /// `call as.i64['hello']` — text read as a type it does not hold.
     ///
     /// The one trap a writer is expected to be able to avoid rather than to be careful
@@ -92,6 +105,9 @@ impl Trap {
         Trap::FractionalPower,
         Trap::NoNumber,
         Trap::NotThatNumber,
+        Trap::OutsideTheText,
+        Trap::NotInTheText,
+        Trap::NoSeparator,
     ];
 
     /// What to call this when telling somebody.
@@ -106,6 +122,9 @@ impl Trap {
             Trap::NoNumber => "an answer that is not a number",
             Trap::FractionalPower => "an exact number raised to a fraction",
             Trap::NotThatNumber => "text that is not a number of that type",
+            Trap::OutsideTheText => "a character outside the text",
+            Trap::NotInTheText => "text that does not hold what was looked for",
+            Trap::NoSeparator => "text cut at nothing",
         }
     }
 
@@ -121,6 +140,9 @@ impl Trap {
             8 => Trap::NoNumber,
             7 => Trap::FractionalPower,
             9 => Trap::NotThatNumber,
+            10 => Trap::OutsideTheText,
+            11 => Trap::NotInTheText,
+            12 => Trap::NoSeparator,
             _ => return None,
         })
     }
@@ -530,6 +552,28 @@ pub enum Host {
     /// Can stop.
     TextAsBool,
 
+    /// `(text, from, to)` — the characters from one position to another, both counted
+    /// from one and both included. Can stop.
+    ///
+    /// Two of them, because a *position* is exactly what `[defaults] characters` decides
+    /// and every semantic setting is carried as a separate instruction rather than as a
+    /// mode an engine reads. The three below need only one each: a substring is found by
+    /// its bytes whatever a character is taken to be, and space is space in either
+    /// reading.
+    TextSliceClusters,
+    TextSliceLetters,
+    /// `(text, sub)` — where `sub` begins, counted from one, in characters. Can stop.
+    TextFindClusters,
+    TextFindLetters,
+    /// `(text, sub)` — whether it is in there at all. The question that avoids the stop
+    /// above, the way `is` avoids `as`.
+    TextHas,
+    /// `(text, separator)` — the pieces, in order, as an array of text that grows. Can
+    /// stop, on a separator with nothing in it.
+    TextSplit,
+    /// `(text)` — the same text with the space at each end taken off.
+    TextTrim,
+
     /// `(base, exponent)` — by squaring, wrapping where it does not fit. Can stop, on a
     /// negative exponent: the answer to that is a fraction and this is a whole number.
     PowI64,
@@ -585,6 +629,13 @@ impl Host {
             Host::FloatPower => "float-power",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
+            Host::TextSliceClusters => "text-slice-clusters",
+            Host::TextSliceLetters => "text-slice-letters",
+            Host::TextFindClusters => "text-find-clusters",
+            Host::TextFindLetters => "text-find-letters",
+            Host::TextHas => "text-has",
+            Host::TextSplit => "text-split",
+            Host::TextTrim => "text-trim",
             Host::TextReads => "text-reads",
             Host::TextAsWhole => "text-as-whole",
             Host::TextAsFloat => "text-as-float",
@@ -641,6 +692,12 @@ impl Host {
             Host::SayExact => &[Ty::Exact],
             Host::SayDecimal => &[Ty::Decimal],
             Host::SayArray => &[Ty::Handle, Ty::I64, Ty::I64],
+            Host::TextSliceClusters | Host::TextSliceLetters => {
+                &[Ty::Text, Ty::I64, Ty::I64]
+            }
+            Host::TextFindClusters | Host::TextFindLetters => &[Ty::Text, Ty::Text],
+            Host::TextHas | Host::TextSplit => &[Ty::Text, Ty::Text],
+            Host::TextTrim => &[Ty::Text],
             Host::TextReads => &[Ty::Text, Ty::I64, Ty::I64, Ty::I64],
             Host::TextAsWhole => &[Ty::Text, Ty::I64, Ty::I64],
             Host::TextAsFloat => &[Ty::Text, Ty::I64],
@@ -692,14 +749,19 @@ impl Host {
                 | Host::TextAsExact
                 | Host::TextAsDecimal
                 | Host::TextAsBool
+                | Host::TextSliceClusters
+                | Host::TextSliceLetters
+                | Host::TextFindClusters
+                | Host::TextFindLetters
+                | Host::TextSplit
         )
     }
 
     /// What it gives back. Most give an `i64` nothing is expected to use.
     pub fn result(self) -> Ty {
         match self {
-            Host::ArrayNew | Host::ArrayCopy => Ty::Handle,
-            Host::ArrayEqual | Host::TextReads | Host::TextAsBool => Ty::Bool,
+            Host::ArrayNew | Host::ArrayCopy | Host::TextSplit => Ty::Handle,
+            Host::ArrayEqual | Host::TextReads | Host::TextAsBool | Host::TextHas => Ty::Bool,
             Host::TextJoin
             | Host::SayI64
             | Host::SayU64
@@ -707,7 +769,10 @@ impl Host {
             | Host::SayFloat
             | Host::SayExact
             | Host::SayDecimal
-            | Host::SayArray => Ty::Text,
+            | Host::SayArray
+            | Host::TextSliceClusters
+            | Host::TextSliceLetters
+            | Host::TextTrim => Ty::Text,
             Host::ToB16 => Ty::F32,
             // Whatever width it was handed, which the call site says.
             Host::FloatAlone

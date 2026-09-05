@@ -151,7 +151,10 @@ fn within(value: &mut Value, on: &mut impl FnMut(&mut Value)) {
                 within(index, on);
             }
         }
-        Value::Join(pieces) | Value::Maths { of: pieces, .. } | Value::Slowly { of: pieces, .. } => {
+        Value::Join(pieces)
+        | Value::Maths { of: pieces, .. }
+        | Value::Slowly { of: pieces, .. }
+        | Value::Pieces { of: pieces, .. } => {
             for piece in pieces {
                 within(piece, on);
             }

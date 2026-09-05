@@ -513,6 +513,60 @@ pub fn program_under(
                     continue;
                 }
 
+                // Taking text apart. Three of these can stop -- a position outside the
+                // text, a needle that is not there, a separator with nothing in it --
+                // and the first two are reached by ordinary numbers and ordinary
+                // needles rather than by anything aimed, because the pools hold both.
+                //
+                // One in four rather than one in three: the shapes already here have a
+                // floor to clear in `reaches.rs`, and taking a third of the text step
+                // put `text-compare` under it.
+                if rng.upto(4) == 0 {
+                    let said = rng.pick(&texts);
+                    match rng.upto(5) {
+                        0 => {
+                            let (from, to) = (rng.pick(&numbers), rng.pick(&numbers));
+                            let host = match settings.characters {
+                                Characters::Clusters => Host::TextSliceClusters,
+                                Characters::Letters => Host::TextSliceLetters,
+                            };
+                            texts.push(b.call_host(host, &[said, from, to]));
+                        }
+                        1 => {
+                            let sub = rng.pick(&texts);
+                            let host = match settings.characters {
+                                Characters::Clusters => Host::TextFindClusters,
+                                Characters::Letters => Host::TextFindLetters,
+                            };
+                            numbers.push(b.call_host(host, &[said, sub]));
+                        }
+                        2 => {
+                            let sub = rng.pick(&texts);
+                            flags.push(b.call_host(Host::TextHas, &[said, sub]));
+                        }
+                        3 => {
+                            // Counted rather than kept: the handle pool holds arrays of
+                            // `i64` and this one holds text, so putting it there would
+                            // hand a later `array-get` the wrong element kind.
+                            //
+                            // A separator with nothing in it is aimed at rather than
+                            // waited for. One text in twelve is empty, and one branch in
+                            // twenty reaches here, which is a stop the oracle would meet
+                            // about once a run -- which is to say, not reliably at all.
+                            let sep = if rng.upto(4) == 0 {
+                                let at = module.intern("");
+                                b.const_text(at)
+                            } else {
+                                rng.pick(&texts)
+                            };
+                            let cut = b.call_host(Host::TextSplit, &[said, sep]);
+                            numbers.push(b.call_host(Host::ArrayLen, &[cut]));
+                        }
+                        _ => texts.push(b.call_host(Host::TextTrim, &[said])),
+                    }
+                    continue;
+                }
+
                 // Reading a number back out of text. `is` never stops and `as` does,
                 // and both are written: stopping in the same place for the same reason
                 // is as much an agreement as answering with the same number.

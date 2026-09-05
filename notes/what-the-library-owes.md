@@ -221,7 +221,8 @@ Each of these is waiting on something, and the something is named.
 | --- | --- |
 | ~~Number → text — `stitch`~~ | **built** |
 | ~~Text → number — `is` and `as`~~ | **built** |
-| Text: length, slice, search, case, trim, split | nothing — `characters` settled it |
+| ~~Text: slice, search, trim, split~~ | **built** — behind `text`, five functions |
+| Text: upper and lower | whose Unicode tables — see below |
 | ~~The IEEE-required maths~~ | **built** |
 | ~~The IEEE-recommended maths~~ | **built** |
 | Input: stdin, arguments | nothing — a check comes first |
@@ -236,6 +237,26 @@ Each of these is waiting on something, and the something is named.
 | ~~The maths behind a namespace~~ | **built** — `call maths.sin[…]`, and not an import |
 | Random numbers | a *specified* algorithm — see below |
 | Time | nothing good |
+
+## Case is not built, and the reason is not effort
+
+`text.upper` and `text.lower` are missing from the five, and it is not because mapping a
+character is hard. Rust's standard library already does it, correctly, from the same
+database this project pins.
+
+The problem is *which* database. `quench-text` writes its tables out and commits them —
+852 lines of grapheme classes and a `White_Space` list — with a stated reason: no
+dependency, no build step, and a version the crate names. Case mapping taken from the
+standard library would be the **one answer in the language that moves with the compiler
+that built it**. An artefact travels: a `.qnlo` whose `trim` behaves the same everywhere
+and whose `upper` does not is exactly the shape of problem
+[what a float is allowed to do](what-a-float-is-allowed-to-do.md) refuses for `sin`.
+
+So it wants what the grapheme tables got: a committed table, derived from a named version
+of the UCD, and a test holding it against the standard library so it is *ours and
+checked* rather than ours and trusted. `White_Space` was done that way here — twenty-five
+code points, verified against `char::is_whitespace` across all 1,114,112 of them. Case is
+a few thousand mappings and the same shape of work.
 
 ## The two that fight the oracle
 

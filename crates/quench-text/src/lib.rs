@@ -9,3 +9,4 @@
 //! that answer is pinned to.
 
 pub mod grapheme;
+pub mod pieces;
