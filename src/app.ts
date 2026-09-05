@@ -223,7 +223,7 @@ if (document.getElementById("reserved") !== null) {
         const inFront = counted.categories.filter((category) =>
           !(category.cliName.startsWith("provided ") && category.cliName !== "provided module"));
         const words = [allOf("everything", "Everything", inFront), ...counted.categories];
-        wirePicker("category", "category-count", "category-words", words, "word");
+        wirePicker("category", "category-count", "category-words", words, "Original Language Word");
         const tokens = [...counted.tokens, allOf("everyKind", "Every kind", counted.tokens)];
         wirePicker("token", "token-count", "token-words", tokens, "kind");
       },
