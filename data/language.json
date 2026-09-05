@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "1fe049a",
+    "commit": "2efb027",
     "date": "2026-09-05",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,12 +13,12 @@
   "reserved": 0,
   "symbols": 21,
   "tokenKinds": 27,
-  "words": 64,
-  "inModules": 33,
-  "toUse": 85,
+  "words": 65,
+  "inModules": 37,
+  "toUse": 86,
   "bothWordAndSymbol": [],
-  "placesAWordMeansSomething": 98,
-  "confirmed": 64,
+  "placesAWordMeansSomething": 103,
+  "confirmed": 65,
   "missing": [],
   "categories": [
     {
@@ -184,10 +184,11 @@
       "id": "providedModule",
       "label": "Provided modules",
       "cliName": "provided module",
-      "count": 2,
+      "count": 3,
       "words": [
         "maths",
-        "text"
+        "text",
+        "input"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
@@ -255,6 +256,20 @@
         "find",
         "split",
         "trim"
+      ],
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
+    },
+    {
+      "id": "provided_input",
+      "label": "Provided \u00b7 input",
+      "cliName": "provided input",
+      "count": 4,
+      "words": [
+        "all",
+        "line",
+        "more",
+        "arguments"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
