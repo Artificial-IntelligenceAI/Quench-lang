@@ -62,6 +62,23 @@ characters = "clusters"
 # `minimumNumber` is for and why it exists at all.
 min-max = "skips"
 
+# Also changes what a program answers, and the only one about bytes rather than about
+# what they mean. What `call input.line[]` and `call input.all[]` do when what they read
+# is not UTF-8 -- the only two operations that can be handed bytes the program did not
+# write.
+#
+# `replaces` turns each bad run into U+FFFD and carries on. `stops` stops.
+#
+# `replaces` is the default, and the reason is the rule the rest of the language keeps:
+# every stop is one a writer could have prevented by asking first. There is no question
+# to ask here. `call input.more[]` says whether there are bytes, not whether they are
+# text, and a question that answered *that* would have to read them -- consuming the
+# thing it was asked about. So `stops` is the one trap nothing can guard, and it is
+# offered rather than imposed. What `replaces` costs is that a program can be handed
+# rubbish and carry on as though it were text, which is right for a filter reading
+# somebody else's output and wrong for a program that must not proceed on nonsense.
+bad-bytes = "replaces"
+
 [build]
 # Changes what gets delivered, never what a program answers -- every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`, or

@@ -227,3 +227,28 @@ fn the_files_section_is_not_a_settings_section() {
         assert_eq!(read.files, [(name.to_string(), "x.qnl".to_string())]);
     }
 }
+
+/// Every key the code understands is written down in the project's own file.
+///
+/// The other direction of the same guard `KEYS` already is. `KEYS` catches a key the
+/// diagnostic forgot to list; nothing caught a key the *documentation* forgot, and
+/// `bad-bytes` was added to the code, to the generator, to the oracle and to the README
+/// while `QNL-Config.toml` -- the file whose whole job is to say what every knob is and
+/// why it defaults where it does -- went on not mentioning it. Read from the file rather
+/// than from a copy, because a copy is the thing that goes stale.
+#[test]
+fn the_projects_own_file_mentions_every_setting() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../QNL-Config.toml");
+    let text = std::fs::read_to_string(path).expect("the project has a settings file");
+
+    let missing: Vec<&str> = quench_conf::KEYS
+        .iter()
+        .map(|(_, key)| *key)
+        .filter(|key| !text.contains(&format!("\n{key} = ")))
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "`QNL-Config.toml` documents every setting, and does not set {missing:?}"
+    );
+}
