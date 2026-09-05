@@ -928,7 +928,6 @@ impl<'a> Parser<'a> {
         let kind = match token.kind {
             Kind::Plus => Add,
             Kind::Minus => Sub,
-            Kind::Times => Mul,
             Kind::Slash => Div,
             Kind::Power => Pow,
             Kind::Less => Lt,

@@ -76,8 +76,6 @@ pub enum Kind {
     /// The exponent is the word `xx`, multiplying twice, and it is a word for the same
     /// reason. `**` was the obvious spelling and is impossible: `*a* ** *b*` lexes that
     /// `**` as an *empty written value*, because the first `*` opens one and the second
-    /// closes it.
-    Times,
     /// `/` or `/`.
     Slash,
     /// `^` — an exponent, as mathematics writes one. The word `xx` says the same thing.
@@ -139,6 +137,79 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Every kind of token there is.
+    ///
+    /// Written down so that something can ask the *other* question: not "is every kind
+    /// here still real" — which catches a removal and nothing else — but "is every kind
+    /// here ever produced". `Kind::Times` was declared, given a spelling in `describe`,
+    /// and matched by the parser, and the lexer never made one; it was two designs old
+    /// and nothing noticed for as long as it existed. See `tests/every_kind.rs`.
+    pub const ALL: &[Kind] = &[
+        Kind::OpenList,
+        Kind::CloseList,
+        Kind::OpenBlock,
+        Kind::CloseBlock,
+        Kind::OpenGroup,
+        Kind::CloseGroup,
+        Kind::Semicolon,
+        Kind::Comma,
+        Kind::Dot,
+        Kind::Colon,
+        Kind::Equals,
+        Kind::EqualTo,
+        Kind::Plus,
+        Kind::Minus,
+        Kind::Slash,
+        Kind::Power,
+        Kind::Less,
+        Kind::Greater,
+        Kind::LessEqual,
+        Kind::GreaterEqual,
+        Kind::NotEqual,
+        Kind::Word,
+        Kind::Number,
+        Kind::Name,
+        Kind::Written,
+        Kind::Escape,
+        Kind::End,
+    ];
+
+    /// Exhaustive on purpose. It exists to stop compiling when a kind is added to the
+    /// enum and not to [`Kind::ALL`], which is the only way that list can go stale in
+    /// the direction that matters.
+    pub fn listed(self) -> bool {
+        match self {
+            Kind::OpenList
+            | Kind::CloseList
+            | Kind::OpenBlock
+            | Kind::CloseBlock
+            | Kind::OpenGroup
+            | Kind::CloseGroup
+            | Kind::Semicolon
+            | Kind::Comma
+            | Kind::Dot
+            | Kind::Colon
+            | Kind::Equals
+            | Kind::EqualTo
+            | Kind::Plus
+            | Kind::Minus
+            | Kind::Slash
+            | Kind::Power
+            | Kind::Less
+            | Kind::Greater
+            | Kind::LessEqual
+            | Kind::GreaterEqual
+            | Kind::NotEqual
+            | Kind::Word
+            | Kind::Number
+            | Kind::Name
+            | Kind::Written
+            | Kind::Escape
+            | Kind::End => {}
+        }
+        Kind::ALL.contains(&self)
+    }
+
     /// What to call this in an error message.
     pub fn describe(self) -> &'static str {
         match self {
@@ -156,7 +227,6 @@ impl Kind {
             Kind::EqualTo => "`==`",
             Kind::Plus => "`+`",
             Kind::Minus => "`-`",
-            Kind::Times => "`x`",
             Kind::Slash => "`/`",
             Kind::Power => "`^`",
             Kind::Less => "`<`",
