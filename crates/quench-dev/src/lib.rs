@@ -845,7 +845,7 @@ pub fn reading(source: Box<dyn std::io::BufRead>, arguments: Vec<String>) {
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn input_all(rt: *mut Runtime) -> i64 {
+fn input_all_with(rt: *mut Runtime, stops: bool) -> i64 {
     maybe_collect(rt);
     let bytes = SOURCE.with(|held| {
         let mut held = held.borrow_mut();
@@ -855,11 +855,29 @@ extern "C" fn input_all(rt: *mut Runtime) -> i64 {
         }
         bytes
     });
-    keep_text(String::from_utf8_lossy(&bytes).into_owned())
+    // `quench_interp::text_of` rather than a second copy of the rule, so the two engines
+    // cannot disagree about where a replacement character goes.
+    match quench_text::pieces::text_of(&bytes, stops) {
+        Some(said) => keep_text(said),
+        None => {
+            stop(rt, qir::Trap::NotText);
+            0
+        }
+    }
 }
 
 /// Called by compiled code. Not called by anything else.
-extern "C" fn input_line(rt: *mut Runtime) -> i64 {
+extern "C" fn input_all_replaces(rt: *mut Runtime) -> i64 {
+    input_all_with(rt, false)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_all_stops(rt: *mut Runtime) -> i64 {
+    input_all_with(rt, true)
+}
+
+/// Called by compiled code. Not called by anything else.
+fn input_line_with(rt: *mut Runtime, stops: bool) -> i64 {
     maybe_collect(rt);
     let read = SOURCE.with(|held| {
         let mut held = held.borrow_mut();
@@ -870,18 +888,29 @@ extern "C" fn input_line(rt: *mut Runtime) -> i64 {
         };
         (read, bytes)
     });
-    let (how_many, mut bytes) = read;
+    let (how_many, bytes) = read;
     if how_many == 0 {
         stop(rt, qir::Trap::NoMoreInput);
         return 0;
     }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
+    // With its ending -- see `Host::InputLineReplaces` in the QIR for why.
+    match quench_text::pieces::text_of(&bytes, stops) {
+        Some(said) => keep_text(said),
+        None => {
+            stop(rt, qir::Trap::NotText);
+            0
         }
     }
-    keep_text(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_line_replaces(rt: *mut Runtime) -> i64 {
+    input_line_with(rt, false)
+}
+
+/// Called by compiled code. Not called by anything else.
+extern "C" fn input_line_stops(rt: *mut Runtime) -> i64 {
+    input_line_with(rt, true)
 }
 
 /// Called by compiled code. Not called by anything else.
@@ -1476,8 +1505,10 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
     builder.symbol("quench_say_exact", say_exact as *const u8);
     builder.symbol("quench_say_decimal", say_decimal as *const u8);
     builder.symbol("quench_say_array", say_array as *const u8);
-    builder.symbol("quench_input_all", input_all as *const u8);
-    builder.symbol("quench_input_line", input_line as *const u8);
+    builder.symbol("quench_input_all_replaces", input_all_replaces as *const u8);
+    builder.symbol("quench_input_all_stops", input_all_stops as *const u8);
+    builder.symbol("quench_input_line_replaces", input_line_replaces as *const u8);
+    builder.symbol("quench_input_line_stops", input_line_stops as *const u8);
     builder.symbol("quench_input_more", input_more as *const u8);
     builder.symbol("quench_input_arguments", input_arguments as *const u8);
     builder.symbol("quench_text_slice_clusters", text_slice_clusters as *const u8);
@@ -1578,8 +1609,10 @@ pub fn compile_with(module: &qir::Module, optimise: Optimise) -> Result<Compiled
         (qir::Host::SayExact, "quench_say_exact"),
         (qir::Host::SayDecimal, "quench_say_decimal"),
         (qir::Host::SayArray, "quench_say_array"),
-        (qir::Host::InputAll, "quench_input_all"),
-        (qir::Host::InputLine, "quench_input_line"),
+        (qir::Host::InputAllReplaces, "quench_input_all_replaces"),
+        (qir::Host::InputAllStops, "quench_input_all_stops"),
+        (qir::Host::InputLineReplaces, "quench_input_line_replaces"),
+        (qir::Host::InputLineStops, "quench_input_line_stops"),
         (qir::Host::InputMore, "quench_input_more"),
         (qir::Host::InputArguments, "quench_input_arguments"),
         (qir::Host::TextSliceClusters, "quench_text_slice_clusters"),

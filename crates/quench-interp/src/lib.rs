@@ -820,27 +820,29 @@ fn evaluate(
                 // not text become the replacement character rather than stopping: the
                 // failure model here is that a writer can always check first, and there
                 // is no way to ask whether bytes nobody has read yet are valid.
-                qir::Host::InputAll => {
+                qir::Host::InputAllReplaces | qir::Host::InputAllStops => {
                     let mut bytes = Vec::new();
                     let _ = std::io::Read::read_to_end(writing.read, &mut bytes);
-                    let said = String::from_utf8_lossy(&bytes).into_owned();
+                    let said = match quench_text::pieces::text_of(&bytes, *host == qir::Host::InputAllStops) {
+                        Some(said) => said,
+                        None => return Err(Trap::NotText),
+                    };
                     return Ok(heap.text(said));
                 }
-                qir::Host::InputLine => {
+                qir::Host::InputLineReplaces | qir::Host::InputLineStops => {
                     let mut bytes = Vec::new();
                     let read = writing.read.read_until(b'\n', &mut bytes).unwrap_or(0);
                     if read == 0 {
                         return Err(Trap::NoMoreInput);
                     }
-                    // Without its ending, and a `\r\n` counts as one ending rather than
-                    // leaving a carriage return on the end of every line.
-                    if bytes.last() == Some(&b'\n') {
-                        bytes.pop();
-                        if bytes.last() == Some(&b'\r') {
-                            bytes.pop();
-                        }
-                    }
-                    let said = String::from_utf8_lossy(&bytes).into_owned();
+                    // With its ending, and with any carriage return before it: a line is
+                    // the bytes that were there, and `text.trim` is what removes an
+                    // ending the writer did not want. Stripping here would delete a
+                    // character the input genuinely held and say nothing about it.
+                    let said = match quench_text::pieces::text_of(&bytes, *host == qir::Host::InputLineStops) {
+                        Some(said) => said,
+                        None => return Err(Trap::NotText),
+                    };
                     return Ok(heap.text(said));
                 }
                 qir::Host::InputMore => {

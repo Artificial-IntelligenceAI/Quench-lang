@@ -68,7 +68,7 @@ Both print the same thing, which is not a coincidence — it is
 | **Lowering** (`quench-lower`) | **Working** — the checked tree turned into QIR, settings written in as instructions |
 | **CLI** (`quench-cli`) | **Working** — `quench run`, `walk`, `check`, `build` |
 | **The artefact** (`quench-qir`) | **Working** — QIR written down and read back, checked the way an arrival is |
-| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Six semantic knobs, so the oracle proves sixty-four languages |
+| **Settings** (`quench-conf`) | **Working** — `QNL-Config.toml`, hand-read, with real diagnostics. Seven semantic knobs, so the oracle proves a hundred and twenty-eight languages |
 | **Type checker** (`quench-check`) | **Working** — names resolved, types checked; every number type, `str`, `bool` and `arr` all the way down, and `stitch`, `is` and `as` for the conversions |
 | **Collector** (`quench-heap`) | **Stage 2** — mark and sweep in both engines, nothing moving. Written here, in Rust, not borrowed |
 | **Numbers** (`quench-num`) | **Working** — `Big` unbounded integers (binary gcd, Knuth division), `Exact` rationals behind `e`, `Decimal` behind `d32` and `d64`, and the half of IEEE 754's maths the standard actually requires |
@@ -378,8 +378,15 @@ Both print the same thing, which is not a coincidence — it is
   impossible rather than unlikely. The check is honest here in a way a file's would not
   be: one program reads its own input, in order, and nothing else can consume a line
   between the question and the answer. Bytes that are not text become the replacement
-  character rather than stopping anything, because a program that reads is usually handed
-  something it did not choose.
+  character, or stop the program, according to **`[defaults] bad-bytes`** — the seventh
+  semantic knob, and the only one whose `stops` arm is a trap no check can prevent, since
+  asking whether unread bytes are text would have to read them. It defaults to
+  `replaces` for that reason.
+
+  `line` hands back the bytes that were **there**, ending included, and `text.trim` is
+  what takes an ending off. A line that came in as `\r\n` really does hold a carriage
+  return, and removing a character the input held without saying so is not a thing the
+  language does.
 - **A library is imported, whoever wrote it.** `import ['maths'];` is a file of your
   program and `import [maths];` is one of Quench's own modules — the same marks doing the
   same job, so both may sit in one file. What is *not* a library is the top level:
@@ -680,13 +687,14 @@ rather than a cost.
 
 So the first kind can grow freely and the second is argued one knob at a time.
 
-There are four semantic ones: `[defaults] division` (truncated or floored), `overflow`
-(wrap or trap), `logic` (stops-early or asks-both) and `no-number` (carries-on or
-stops). Each is threaded all the way through — the generator picks a configuration per
-seed, both engines carry the choice as **separate QIR instructions** rather than as a
-mode they interpret, and a disagreement names the settings it happened under. So the
-oracle proves sixty-four languages rather than one, three ways of running each, since it
-sweeps optimisation levels too. 200,000 programs, 600,000 comparisons, 28 seconds.
+There are seven semantic ones: `[defaults] division` (truncated or floored), `overflow`
+(wrap or trap), `logic` (stops-early or asks-both), `no-number` (carries-on or stops),
+`characters` (clusters or letters), `min-max` (skips or spreads) and `bad-bytes`
+(replaces or stops). Each is threaded all the way through — the generator picks a
+configuration per seed, both engines carry the choice as **separate QIR instructions**
+rather than as a mode they interpret, and a disagreement names the settings it happened
+under. So the oracle proves a hundred and twenty-eight languages rather than one, three
+ways of running each, since it sweeps optimisation levels too.
 
 `logic` is the one worth reading the note for: it was **not** a semantic setting until
 functions arrived, because before a program could call anything, nothing inside an
@@ -715,14 +723,14 @@ So the methods are not trusted, they are tested against each other:
   out, because this machine has fast cores and slow ones and a fixed share leaves the
   fast ones waiting.
 
-Where it stands: **200,000 programs across two engines in 28 seconds**, 7,100 a second,
-on ten cores. One worker manages 1,200, so the cores are worth 6x.
+Where it stands: **200,000 programs across two engines in 47 seconds**, 4,300 a second,
+on ten cores.
 
-It was four times that rate a day ago, and the slowdown is the point: what a generated
-program *does* has grown. It was arithmetic and loops; it now allocates arrays, reads
-`e` and decimals, joins text, and prints — and every one of those is compared, so every
-one of them costs. A fast oracle that generates a narrow program proves less per second
-than a slow one that generates a wide one.
+It was 7,100 a second before a generated program read anything, and the slowdown is the
+point: what a generated program *does* has grown. It was arithmetic and loops; it now allocates arrays, reads `e` and decimals, joins
+text, prints, and reads a stream that is handed to every engine identically — and every
+one of those is compared, so every one of them costs. A fast oracle that generates a
+narrow program proves less per second than a slow one that generates a wide one.
 
 Any disagreement is a bug in at least one engine, and the seed that produced it is
 kept so it can be replayed.

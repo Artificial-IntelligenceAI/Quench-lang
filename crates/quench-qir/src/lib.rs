@@ -87,6 +87,13 @@ pub enum Trap {
     /// this is a stop a writer can avoid, and why a *file* — where the world may change
     /// between the check and the read — is still not built.
     NoMoreInput = 13,
+    /// `call input.line[]` under `[defaults] bad-bytes = "stops"`, on bytes that are not
+    /// UTF-8.
+    ///
+    /// The only stop in the language that no check can prevent: asking whether unread
+    /// bytes are text would have to read them. Which is why it is a setting and not the
+    /// default — see `BadBytes` in `quench-conf`.
+    NotText = 14,
     /// `call as.i64['hello']` — text read as a type it does not hold.
     ///
     /// The one trap a writer is expected to be able to avoid rather than to be careful
@@ -116,6 +123,7 @@ impl Trap {
         Trap::NotInTheText,
         Trap::NoSeparator,
         Trap::NoMoreInput,
+        Trap::NotText,
     ];
 
     /// What to call this when telling somebody.
@@ -134,6 +142,7 @@ impl Trap {
             Trap::NotInTheText => "text that does not hold what was looked for",
             Trap::NoSeparator => "text cut at nothing",
             Trap::NoMoreInput => "a line asked for after the input ended",
+            Trap::NotText => "input read as text when its bytes are not text",
         }
     }
 
@@ -153,6 +162,7 @@ impl Trap {
             11 => Trap::NotInTheText,
             12 => Trap::NoSeparator,
             13 => Trap::NoMoreInput,
+            14 => Trap::NotText,
             _ => return None,
         })
     }
@@ -562,15 +572,24 @@ pub enum Host {
     /// Can stop.
     TextAsBool,
 
-    /// `()` — the whole of standard input, as text.
+    /// `()` — the whole of standard input, as text, with bad bytes replaced.
     ///
-    /// Bytes that are not text become the replacement character rather than stopping the
-    /// program. Which is deliberate: the failure model here is that a writer can always
-    /// check first, and there is no way to ask whether bytes you have not read yet are
-    /// valid. A stop nobody can avoid is the thing files are still waiting on.
-    InputAll,
-    /// `()` — the next line, without its ending. Can stop, when there is none.
-    InputLine,
+    /// Two of each, chosen at lowering by `[defaults] bad-bytes`, the way `TextClusters`
+    /// and `TextLetters` are chosen by `[defaults] characters`. Nothing below the
+    /// lowering learns that a setting exists.
+    InputAllReplaces,
+    /// `()` — the whole of standard input. Stops when the bytes are not text.
+    InputAllStops,
+    /// `()` — the next line, ending included, with bad bytes replaced. Can stop when
+    /// there is no line left.
+    ///
+    /// The ending is *kept*. A line is the bytes that were there, and `text.trim` is
+    /// what removes an ending the writer did not want — stripping it here would delete
+    /// a character the input genuinely held and say nothing about having done so.
+    InputLineReplaces,
+    /// `()` — the next line, ending included. Stops when there is none, and stops when
+    /// the bytes are not text.
+    InputLineStops,
     /// `()` — whether there is another line. The question that avoids the stop.
     InputMore,
     /// `()` — what the program was invoked with, as an array of text that grows.
@@ -653,8 +672,10 @@ impl Host {
             Host::FloatPower => "float-power",
             Host::TextClusters => "text-clusters",
             Host::TextLetters => "text-letters",
-            Host::InputAll => "input-all",
-            Host::InputLine => "input-line",
+            Host::InputAllReplaces => "input-all-replaces",
+            Host::InputAllStops => "input-all-stops",
+            Host::InputLineReplaces => "input-line-replaces",
+            Host::InputLineStops => "input-line-stops",
             Host::InputMore => "input-more",
             Host::InputArguments => "input-arguments",
             Host::TextSliceClusters => "text-slice-clusters",
@@ -720,7 +741,12 @@ impl Host {
             Host::SayExact => &[Ty::Exact],
             Host::SayDecimal => &[Ty::Decimal],
             Host::SayArray => &[Ty::Handle, Ty::I64, Ty::I64],
-            Host::InputAll | Host::InputLine | Host::InputMore | Host::InputArguments => &[],
+            Host::InputAllReplaces
+            | Host::InputAllStops
+            | Host::InputLineReplaces
+            | Host::InputLineStops
+            | Host::InputMore
+            | Host::InputArguments => &[],
             Host::TextSliceClusters | Host::TextSliceLetters => {
                 &[Ty::Text, Ty::I64, Ty::I64]
             }
@@ -783,7 +809,9 @@ impl Host {
                 | Host::TextFindClusters
                 | Host::TextFindLetters
                 | Host::TextSplit
-                | Host::InputLine
+                | Host::InputAllStops
+                | Host::InputLineReplaces
+                | Host::InputLineStops
         )
     }
 
@@ -809,8 +837,10 @@ impl Host {
             | Host::TextSliceClusters
             | Host::TextSliceLetters
             | Host::TextTrim
-            | Host::InputAll
-            | Host::InputLine => Ty::Text,
+            | Host::InputAllReplaces
+            | Host::InputAllStops
+            | Host::InputLineReplaces
+            | Host::InputLineStops => Ty::Text,
             Host::ToB16 => Ty::F32,
             // Whatever width it was handed, which the call site says.
             Host::FloatAlone

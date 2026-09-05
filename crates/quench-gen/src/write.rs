@@ -20,7 +20,7 @@
 //! - **Recursion without a floor.** A runaway call is reported by the interpreter and
 //!   overflows the stack in compiled code, so the two cannot be compared on it.
 
-use quench_conf::{Characters, Division, Logic, MinMax, NoNumber, Overflow, Settings};
+use quench_conf::{BadBytes, Characters, Division, Logic, MinMax, NoNumber, Overflow, Settings};
 use quench_qir::{
     BinOp, Builder, CmpOp, FuncId, Function, Host, Module, Reading, Ty, Value,
 };
@@ -71,6 +71,7 @@ pub fn settings_for(seed: u64) -> Settings {
         characters: if rng.upto(2) == 0 { Characters::Clusters } else { Characters::Letters },
         min_max: if rng.upto(2) == 0 { MinMax::Skips } else { MinMax::Spreads },
         overflow: if rng.upto(2) == 0 { Overflow::Wrap } else { Overflow::Trap },
+        bad_bytes: if rng.upto(2) == 0 { BadBytes::Replaces } else { BadBytes::Stops },
         ..Settings::default()
     }
 }
@@ -930,10 +931,17 @@ pub fn program_under(
                 // An arm of its own rather than a slice of the text step, because it is
                 // not a text operation and taking it from there put `text-compare` under
                 // the floor `reaches.rs` holds it to.
+                let stops = settings.bad_bytes == BadBytes::Stops;
                 match rng.upto(4) {
-                    0 => texts.push(b.call_host(Host::InputAll, &[])),
+                    0 => texts.push(b.call_host(
+                        if stops { Host::InputAllStops } else { Host::InputAllReplaces },
+                        &[],
+                    )),
                     1 => flags.push(b.call_host(Host::InputMore, &[])),
-                    2 => texts.push(b.call_host(Host::InputLine, &[])),
+                    2 => texts.push(b.call_host(
+                        if stops { Host::InputLineStops } else { Host::InputLineReplaces },
+                        &[],
+                    )),
                     _ => {
                         let all = b.call_host(Host::InputArguments, &[]);
                         numbers.push(b.call_host(Host::ArrayLen, &[all]));

@@ -294,11 +294,42 @@ its arguments and let the interpreter guess with a `skip(1)`, so the same progra
 it. The oracle could not have caught that one, because the oracle runs both engines
 through the same door.
 
-Bytes that are not text do not stop the program — they become the replacement character.
-This is the one place the language is lenient, and deliberately: a program that reads is
-usually handed something it did not choose, and the alternative is a stop that the writer
-had no way to prevent by asking first. Everywhere else, a stop is preventable by a check,
-which is what makes stopping fair.
+### Three of these were mine to pick and were not mine to pick
+
+Written down because the pattern matters more than the three: the shape of `input` was
+settled by one ruling — bare is the language's, whoever wrote it — and everything else
+about it got decided by whoever was typing. Three of those went back and came out
+differently.
+
+**`line` keeps the ending.** It stripped `\n`, and `\r\n` as one ending, because that is
+what nearly every language does. But "everyone does it" is the argument this language
+keeps refusing — it is why `round` breaks ties to even. A line that arrived as `\r\n`
+really does hold a carriage return, and deleting a character the input held without
+saying so is not a thing Quench does elsewhere. `line` now hands back the bytes that
+were there and `text.trim` is what takes an ending off.
+
+**Bad bytes are a setting**, `[defaults] bad-bytes`, `replaces` or `stops`. Two answers
+usually means a `.toml` key here and this one qualifies on both counts the failure-model
+note names: both arms are buildable, and neither changes what a function signature is.
+
+The default is `replaces`, and the reason is the interesting half. `stops` is the **only
+trap in the language no check can prevent**. Everywhere else stopping is fair because a
+question came first — `is` before `as`, `has` before `find`, `more` before `line`. There
+is no question here: asking whether unread bytes are text would have to read them, which
+consumes the thing it was asked about. So the arm that breaks the rule is offered rather
+than imposed.
+
+**And the whole read surface was being compared on nothing.** Adding `Trap::NotText`
+made `every_kind_of_stop_is_generated_by_something` fail, which was correct and was not
+about the new trap: both engines were handed `io::empty()`, so every generated
+`input.all[]` answered with nothing and `NoMoreInput` was the only stop reachable. Input
+had been inside the oracle for a day without a single byte passing through it. The
+engines now get the same fixed stream, invalid UTF-8 included — which is what makes the
+new trap reachable and what puts both arms of the new setting under comparison.
+
+The reverse-direction guard found that, and it is the fifth time. A list that verifies
+its own members catches removals and never additions; this one catches a *reason* that
+nothing generates, which is a reason implemented twice and compared never.
 
 ## The two that fight the oracle
 

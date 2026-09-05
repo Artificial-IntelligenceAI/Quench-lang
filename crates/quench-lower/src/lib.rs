@@ -1011,15 +1011,23 @@ fn emit(
         // found by its bytes whatever a character is taken to be, and space is space in
         // either reading.
         // Nothing to hand them: what arrived from outside arrived before the program.
-        Value::Given { which } => b.call_host(
-            match which {
-                0 => qir::Host::InputAll,
-                1 => qir::Host::InputLine,
-                2 => qir::Host::InputMore,
-                _ => qir::Host::InputArguments,
-            },
-            &[],
-        ),
+        Value::Given { which } => {
+            // `[defaults] bad-bytes` picks between two hosts here, the way `characters`
+            // picks between `TextClusters` and `TextLetters`. Below this line the
+            // setting does not exist.
+            let stops = w.settings.bad_bytes == quench_conf::BadBytes::Stops;
+            b.call_host(
+                match (which, stops) {
+                    (0, false) => qir::Host::InputAllReplaces,
+                    (0, true) => qir::Host::InputAllStops,
+                    (1, false) => qir::Host::InputLineReplaces,
+                    (1, true) => qir::Host::InputLineStops,
+                    (2, _) => qir::Host::InputMore,
+                    _ => qir::Host::InputArguments,
+                },
+                &[],
+            )
+        }
         Value::Pieces { which, of } => {
             let args: Vec<qir::Value> =
                 of.iter().map(|value| emit(b, module, value, held, w)).collect();

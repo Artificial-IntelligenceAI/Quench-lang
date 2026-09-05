@@ -165,6 +165,33 @@ pub enum Characters {
     Letters,
 }
 
+/// What reading gives back when the bytes are not text.
+///
+/// **Semantic.** `call input.line[]` and `call input.all[]` are the only two operations
+/// that can be handed something that is not UTF-8, because they are the only two that
+/// take bytes the program did not write.
+///
+/// The default is [`BadBytes::Replaces`], and the reason is the rule the rest of the
+/// language keeps: every stop is one a writer could have prevented by asking first.
+/// There is no question to ask here. `call input.more[]` says whether there are bytes,
+/// not whether they are text, and a question that answered *that* would have to read
+/// them to find out -- which consumes the very thing it was asked about. So
+/// [`BadBytes::Stops`] is the one trap in the language that nothing can guard, and it
+/// is offered rather than imposed.
+///
+/// What `Replaces` costs is that a program can be handed rubbish and carry on as though
+/// it were text. That is the right bargain for a filter reading somebody else's output
+/// and the wrong one for a program that must not proceed on nonsense, which is why both
+/// arms exist.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BadBytes {
+    /// Each run of bytes that is not UTF-8 becomes U+FFFD, and the program carries on.
+    #[default]
+    Replaces,
+    /// Stop, in the same place in every engine. The one trap no check can prevent.
+    Stops,
+}
+
 /// What `min` and `max` do when one side is not a number.
 ///
 /// **Semantic**, and named for the two operations because those are the only two it
@@ -210,6 +237,8 @@ pub struct Settings {
     pub characters: Characters,
     /// `[defaults] min-max`
     pub min_max: MinMax,
+    /// `[defaults] bad-bytes`
+    pub bad_bytes: BadBytes,
     /// `[run] engine`
     pub engine: Engine,
     /// `[build] optimise`
@@ -232,6 +261,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("defaults", "no-number"),
     ("defaults", "characters"),
     ("defaults", "min-max"),
+    ("defaults", "bad-bytes"),
     ("build", "optimise"),
     ("run", "engine"),
 ];
@@ -390,6 +420,11 @@ pub fn read(text: &str) -> Config {
                 "skips" => settings.min_max = MinMax::Skips,
                 "spreads" => settings.min_max = MinMax::Spreads,
                 _ => errors.push(bad_value(span_of(value), key, value, &["skips", "spreads"])),
+            },
+            ("defaults", "bad-bytes") => match value {
+                "replaces" => settings.bad_bytes = BadBytes::Replaces,
+                "stops" => settings.bad_bytes = BadBytes::Stops,
+                _ => errors.push(bad_value(span_of(value), key, value, &["replaces", "stops"])),
             },
             ("defaults", "overflow") => match value {
                 "wrap" => settings.overflow = Overflow::Wrap,

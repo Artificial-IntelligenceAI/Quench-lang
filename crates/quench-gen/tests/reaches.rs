@@ -68,9 +68,12 @@ fn every_shape_the_generator_means_to_write_is_written() {
         "text-join", "text-compare", "text-clusters", "text-letters",
         // Taking it apart. Three of these can stop, so the oracle has to reach them.
         "text-has", "text-split", "text-trim",
-        // And what arrived from outside, which for a generated program is nothing --
-        // which is exactly what makes `input-line` a stop the oracle can compare.
-        "input-all", "input-line", "input-more", "input-arguments",
+        // And what arrived from outside. Two of each, because `[defaults] bad-bytes`
+        // picks between them per seed, and the arm that stops has to be reached or the
+        // setting is only half compared -- which is what `oracle::GIVEN` is for.
+        "input-all-replaces", "input-all-stops",
+        "input-line-replaces", "input-line-stops",
+        "input-more", "input-arguments",
         // Reading a number back out of text -- the asking, which never stops, and every
         // one of the answering ones, which do.
         "text-reads", "text-as-whole", "text-as-float", "text-as-exact",
@@ -118,7 +121,9 @@ fn no_shape_is_so_rare_that_generating_it_is_luck() {
         "array-get", "array-set", "array-push", "array-copy", "decimal-div",
         "exact-div", "exact-pow", "text-join", "text-compare", "text-reads",
         "text-has", "text-split", "text-trim",
-        "input-all", "input-line", "input-more", "input-arguments",
+        "input-all-replaces", "input-all-stops",
+        "input-line-replaces", "input-line-stops",
+        "input-more", "input-arguments",
     ] {
         let n = seen.get(shape).copied().unwrap_or(0);
         assert!(

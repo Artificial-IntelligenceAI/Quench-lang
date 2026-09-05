@@ -94,6 +94,20 @@ const WAYS: [(&str, Option<Optimise>); 3] = [
     ("dev-jit @ speed", Some(Optimise::Speed)),
 ];
 
+/// What every generated program is handed on its standard input.
+///
+/// A constant rather than something seeded, because the *point* is that both engines
+/// read the same bytes: a stream that differed between them would report a
+/// disagreement that was the harness's fault. Before this, both were handed
+/// `io::empty()`, so every `input.all[]` answered with nothing and the only reachable
+/// stop was `NoMoreInput` — the whole read surface was being compared on the empty
+/// case alone, which `every_kind_of_stop_is_generated_by_something` is what noticed.
+///
+/// It holds a line with an ending, a line without one, an empty line, and a run of
+/// bytes that is not UTF-8 — that last is what makes `Trap::NotText` reachable at all,
+/// and so what puts `[defaults] bad-bytes = "stops"` inside the oracle.
+pub const GIVEN: &[u8] = b"one\ntwo\n\n\xff\xfe not text\nlast";
+
 /// Check every seed in `seeds`, in batches, across `workers` threads.
 pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
     let batches: Vec<&[u64]> = seeds.chunks(per_batch.max(1)).collect();
@@ -175,7 +189,7 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                             &module,
                             &name,
                             &mut quench_interp::Outside {
-                read: &mut std::io::empty(),
+                                read: &mut std::io::Cursor::new(GIVEN),
                 out: &mut out,
                 err: &mut err,
                 arguments: &[],
@@ -193,6 +207,12 @@ pub fn check(seeds: &[u64], per_batch: usize, workers: usize) -> Report {
                             },
                         ));
                         for (way, built) in &compiled {
+                            // The same bytes the interpreter was handed, set up again
+                            // for each way of running, because reading consumes them.
+                            quench_dev::reading(
+                                Box::new(std::io::Cursor::new(GIVEN.to_vec())),
+                                Vec::new(),
+                            );
                             answers.push((
                                 (*way).to_string(),
                                 match built.call_capturing(&name) {

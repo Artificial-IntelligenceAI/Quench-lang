@@ -229,9 +229,22 @@ fn every_kind_of_stop_is_generated_by_something() {
     let module = batch(&seeds);
     let mut seen = BTreeSet::new();
     for seed in &seeds {
-        if let quench_qir::Outcome::Trapped(t) =
-            quench_interp::run_named(&module, &name_of(*seed)).expect("it runs")
-        {
+        // Handed the same bytes the oracle hands both engines -- `io::empty()` here
+        // would make `NotText` unreachable and this test would then say so.
+        let (mut out, mut err) = (std::io::sink(), std::io::sink());
+        let mut read = std::io::Cursor::new(quench_gen::oracle::GIVEN);
+        let ran = quench_interp::run_named_writing(
+            &module,
+            &name_of(*seed),
+            &mut quench_interp::Outside {
+                read: &mut read,
+                out: &mut out,
+                err: &mut err,
+                arguments: &[],
+            },
+        )
+        .expect("it runs");
+        if let quench_qir::Outcome::Trapped(t) = ran {
             seen.insert(t);
         }
     }

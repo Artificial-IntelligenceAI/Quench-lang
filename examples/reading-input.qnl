@@ -18,6 +18,11 @@ START {
     # after `is`/`as` and `text.has`/`text.find`. Reading past the end stops the program,
     # and asking first is what makes that impossible rather than unlikely. The check is
     # honest because nothing races it: one program reads its own input, in order.
+    #
+    # `line` hands back the bytes that were *there*, ending included. `text.trim` is what
+    # takes the ending off, and it is written here rather than done for you because a
+    # line that ends `\r\n` really does hold a carriage return, and removing a character
+    # the input held without saying so is not something the language does.
     if call input.more[] {
         var.immut.str ['who'] = [call text.trim[call input.line[]]];
         print.stdout[str:*hello, * 'who' str:*!* \n];
@@ -36,13 +41,22 @@ START {
         }
     }
 
-    # `all` takes everything left in one go, for a program that wants the whole of its
-    # input before it starts. Bytes that are not text become the replacement character
-    # rather than stopping the program, because a program that reads is often handed
-    # something it did not choose.
-    var.immut.str ['rest'] = [call input.all[]];
-    print.stdout[str:*and * call count['rest'] str:* characters after that* \n];
+    # The loop the question is for: read until there is nothing left. `more` is asked
+    # again before every pass, so nothing here can stop.
+    var.mut.i64 ['lines'] = [*0*];
+    loop.while call input.more[] {
+        var.immut.str ['each'] = [call input.line[]];
+        set ['lines'] = ['lines' + *1*];
+        print.stdout[str:*  line * 'lines' str:*: [* call text.trim['each'] str:*]* \n];
+    }
 
-    # And once there is nothing left, `more` says so and keeps saying so.
-    print.stdout[str:*more? * call input.more[] \n];
+    # `all` takes everything left in one go instead, for a program that wants the whole
+    # of its input before it starts -- and `\n` is an ordinary value, so `text.split`
+    # cuts it into lines. Bytes that are not text become the replacement character or
+    # stop the program, whichever `[defaults] bad-bytes` says.
+    #
+    # The loop above has already taken everything, so this is the empty case: splitting
+    # text that holds no separator gives one piece, and that piece is the whole text.
+    var.immut.arr.str (grow) ['rest'] = [call text.split[call input.all[], \n]];
+    print.stdout[str:*nothing left, which splits into * call count[share 'rest'] str:* piece* \n];
 }

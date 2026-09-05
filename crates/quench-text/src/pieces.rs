@@ -120,3 +120,16 @@ pub fn is_space(c: char) -> bool {
             | '\u{3000}'
     )
 }
+
+/// Bytes as text, or `None` when they are not text and `[defaults] bad-bytes` says stop.
+///
+/// Lives here rather than in either engine so that both call the *same* rule: where a
+/// replacement character lands is not something the interpreter and the Dev JIT may
+/// each decide, and a second copy is exactly the kind of thing the oracle finds.
+pub fn text_of(bytes: &[u8], stops: bool) -> Option<String> {
+    match core::str::from_utf8(bytes) {
+        Ok(said) => Some(said.to_owned()),
+        Err(_) if stops => None,
+        Err(_) => Some(String::from_utf8_lossy(bytes).into_owned()),
+    }
+}
