@@ -91,6 +91,7 @@ interface Counted {
   readonly reserved: number | null;
   readonly symbols: number | null;
   readonly words: number;
+  readonly inModules: number;
   readonly confirmed: number;
   readonly missing: readonly string[];
   readonly categories: readonly Category[];
@@ -211,7 +212,8 @@ if (document.getElementById("reserved") !== null) {
           ? "every one read out of the constants the compiler itself uses"
           : `${String(derived)} of them read out of the compiler rather than listed`;
         say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
-          + `${counted.readFrom.date}: ${String(counted.words)} words, ${how}.${drift}`);
+          + `${counted.readFrom.date}: ${String(counted.words)} words in front of a module `
+          + `and ${String(counted.inModules)} behind one, ${how}.${drift}`);
         const words = [allOf("everything", "Everything", counted.categories), ...counted.categories];
         wirePicker("category", "category-count", "category-words", words, "word");
         const tokens = [...counted.tokens, allOf("everyKind", "Every kind", counted.tokens)];

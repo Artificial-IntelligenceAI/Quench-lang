@@ -204,7 +204,20 @@ def main() -> int:
     # A word can mean something in more than one position — `module` names a block
     # at the top level and also names how far a name reaches. It is one word the
     # language answers to, so the total counts it once and the groups both keep it.
-    every_word = list(dict.fromkeys(w for c in categories for w in c["words"]))
+    # What somebody has to know to read a program, and what is behind a name and
+    # can be ignored until wanted. Adding them together is what `maths` and `text`
+    # were built to stop: the headline would put twenty-eight trigonometry names
+    # back in front of a reader who never asked for them.
+    inside = [c for c in categories if c["cliName"].startswith("provided ")
+              and c["cliName"] != "provided module"]
+    held = list(dict.fromkeys(w for c in inside for w in c["words"]))
+    front = list(dict.fromkeys(w for c in categories if c not in inside for w in c["words"]))
+    overlap = [w for w in held if w in front]
+    if overlap:
+        print(f"a word is both in front of a module and behind one: {overlap}", file=sys.stderr)
+        return 1
+
+    every_word = front
     slots = sum(c["count"] for c in categories)
     missing = [w for c in categories for w in c["missing"]]
 
@@ -236,6 +249,7 @@ def main() -> int:
         "symbols": symbols or None,
         "tokenKinds": len(described),
         "words": len(every_word),
+        "inModules": len(held),
         "placesAWordMeansSomething": slots,
         "confirmed": len(every_word) - len(missing),
         "missing": missing,
@@ -285,9 +299,8 @@ def main() -> int:
     print(f"read {sum(len(s) for s in sources.values()):,} bytes of Rust at {data['readFrom']['commit']}")
     derived = sum(c["count"] for c in categories if c["readFrom"])
     print(f"  reserved {data['reserved']}, symbols {symbols} of {len(described)} kinds")
-    dup = slots - len(every_word)
-    also = f", {dup} of them in two groups" if dup else ""
-    print(f"  words {len(every_word)} across {len(categories)} categories{also}")
+    print(f"  words {len(every_word)} in front of a module, {len(held)} behind one, "
+          f"{slots} places, {len(categories)} groups")
     if missing:
         print(f"  NOT FOUND IN THE SOURCE: {', '.join(missing)}", file=sys.stderr)
     print(f"wrote {OUT.relative_to(pathlib.Path.cwd())} ({OUT.stat().st_size} bytes)")

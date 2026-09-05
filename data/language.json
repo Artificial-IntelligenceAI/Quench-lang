@@ -1,6 +1,6 @@
 {
   "readFrom": {
-    "commit": "aab10b3",
+    "commit": "7a6345e",
     "date": "2026-09-05",
     "files": [
       "crates/quench-lex/src/token.rs",
@@ -13,9 +13,10 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 97,
+  "words": 64,
+  "inModules": 33,
   "placesAWordMeansSomething": 98,
-  "confirmed": 97,
+  "confirmed": 64,
   "missing": [],
   "categories": [
     {
