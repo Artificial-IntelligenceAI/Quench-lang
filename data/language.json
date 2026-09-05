@@ -1,7 +1,7 @@
 {
   "readFrom": {
-    "commit": "41b7ca4",
-    "date": "2026-09-04",
+    "commit": "aab10b3",
+    "date": "2026-09-05",
     "files": [
       "crates/quench-lex/src/token.rs",
       "crates/quench-parse/src/lib.rs",
@@ -13,9 +13,9 @@
   "reserved": 0,
   "symbols": 22,
   "tokenKinds": 28,
-  "words": 91,
-  "placesAWordMeansSomething": 92,
-  "confirmed": 91,
+  "words": 97,
+  "placesAWordMeansSomething": 98,
+  "confirmed": 97,
   "missing": [],
   "categories": [
     {
@@ -181,9 +181,10 @@
       "id": "providedModule",
       "label": "Provided modules",
       "cliName": "provided module",
-      "count": 1,
+      "count": 2,
       "words": [
-        "maths"
+        "maths",
+        "text"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
@@ -236,6 +237,21 @@
         "cbrt",
         "atan2",
         "hypot"
+      ],
+      "missing": [],
+      "readFrom": "crates/quench-check/src/lib.rs"
+    },
+    {
+      "id": "provided_text",
+      "label": "Provided \u00b7 text",
+      "cliName": "provided text",
+      "count": 5,
+      "words": [
+        "slice",
+        "has",
+        "find",
+        "split",
+        "trim"
       ],
       "missing": [],
       "readFrom": "crates/quench-check/src/lib.rs"
