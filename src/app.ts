@@ -80,6 +80,9 @@ interface Category {
   readonly count: number;
   readonly words: readonly string[];
   readonly missing: readonly string[];
+  /** What `quench words` calls this group. `provided maths` and `provided text`
+      are what a module holds; everything else stands in front of one. */
+  readonly cliName: string;
   /** The file this group was read out of, or null when it is a list kept by hand.
       A derived group cannot go stale; a listed one can only notice a word leaving,
       never one arriving. */
@@ -214,7 +217,12 @@ if (document.getElementById("reserved") !== null) {
         say(`Counted from the compiler's own source at ${counted.readFrom.commit}, `
           + `${counted.readFrom.date}: ${String(counted.words)} words in front of a module `
           + `and ${String(counted.inModules)} behind one, ${how}.${drift}`);
-        const words = [allOf("everything", "Everything", counted.categories), ...counted.categories];
+        /* What a module holds is reachable by asking for that module, and is not
+           swept into "Everything" — putting the trigonometry back in front of a
+           reader who never asked for it is the thing the namespaces undo. */
+        const inFront = counted.categories.filter((category) =>
+          !(category.cliName.startsWith("provided ") && category.cliName !== "provided module"));
+        const words = [allOf("everything", "Everything", inFront), ...counted.categories];
         wirePicker("category", "category-count", "category-words", words, "word");
         const tokens = [...counted.tokens, allOf("everyKind", "Every kind", counted.tokens)];
         wirePicker("token", "token-count", "token-words", tokens, "kind");
