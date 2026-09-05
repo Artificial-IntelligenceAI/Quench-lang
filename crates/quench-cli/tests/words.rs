@@ -53,6 +53,21 @@ fn compared_against() -> Vec<String> {
     found
 }
 
+/// Every line of `quench words`, as the group it is in and the word it is.
+fn grouped() -> Vec<(String, String)> {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_quench"))
+        .arg("words")
+        .output()
+        .expect("`quench words` runs");
+    String::from_utf8(out.stdout)
+        .expect("text")
+        .lines()
+        .filter_map(|line| {
+            line.split_once('\t').map(|(group, word)| (group.to_string(), word.to_string()))
+        })
+        .collect()
+}
+
 fn listed() -> Vec<String> {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_quench"))
         .arg("words")
@@ -104,11 +119,15 @@ fn the_list_is_grouped_and_says_where_each_word_stands() {
 }
 
 #[test]
-fn the_two_numbers_are_two_numbers_and_the_tool_says_which() {
+fn the_numbers_are_several_and_the_tool_says_which_is_which() {
     // `quench words` prints one line per word *per group*, so `wc -l` is the wrong
     // number the moment a word stands in two places -- which `module` does, naming both
     // the construct and the boundary the construct makes. Two sessions working on this
-    // repo read the line count and believed it, so the tool says both now.
+    // repo read the line count and believed it.
+    //
+    // And what is behind a namespace is not a word a reader meets: `maths` and `text`
+    // exist so that thirty-three names are not in front of everybody, and counting them
+    // in the headline would put them straight back.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_quench"))
         .args(["words", "--count"])
         .output()
@@ -120,16 +139,31 @@ fn the_two_numbers_are_two_numbers_and_the_tool_says_which() {
             .unwrap_or_else(|| panic!("no `{key}` in:\n{text}"))
     };
 
-    // Counted here rather than trusted, so the two can never drift apart.
-    let listed = listed();
-    let mut every = listed.clone();
-    every.sort();
-    every.dedup();
-    assert_eq!(said("words"), every.len(), "`words` is the distinct count");
-    assert_eq!(said("places"), listed.len(), "`places` is one per word per group");
+    // Counted here rather than trusted, so the tool and the list cannot drift apart.
+    let held: Vec<String> =
+        quench_check::MODULES.iter().map(|module| format!("provided {module}")).collect();
+    let (mut top, mut inside) = (Vec::new(), Vec::new());
+    for (group, word) in grouped() {
+        if held.contains(&group) {
+            inside.push(word);
+        } else {
+            top.push(word);
+        }
+    }
+    for all in [&mut top, &mut inside] {
+        all.sort();
+        all.dedup();
+    }
+
+    assert_eq!(said("words"), top.len(), "`words` is the top level, deduplicated");
+    assert_eq!(said("in modules"), inside.len(), "`in modules` is what the modules hold");
+    assert_eq!(said("places"), listed().len(), "`places` is one per word per group");
     assert!(said("groups") > 1, "there is more than one group");
-    assert!(
-        said("words") <= said("places"),
-        "a word may stand in two groups, and cannot stand in fewer than one"
-    );
+    assert!(!inside.is_empty(), "the modules hold something, or this test proves nothing");
+
+    // The two are apart, not overlapping: nothing in a module is also at the top level,
+    // which is what makes adding them a fair total.
+    for word in &inside {
+        assert!(!top.contains(word), "`{word}` is both behind a module and in front of one");
+    }
 }

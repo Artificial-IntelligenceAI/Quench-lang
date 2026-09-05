@@ -11,7 +11,7 @@ quench — a language that would rather say what it means
     quench check <file.qnl>     check it and stop
     quench build <file.qnl>     write the artefact, and stop
     quench words                every word the language provides, and where it stands
-    quench words --count        how many there are — a word may stand in two groups
+    quench words --count        how many there are, and how many are behind a module
     quench --help               this
 
 `run` and `walk` take source or an artefact. An artefact is compiled QIR, which
@@ -130,29 +130,47 @@ fn words() -> String {
     out
 }
 
-/// The two numbers, because there are two and one line each is not obvious.
+/// The numbers, because there are several and one line each is not obvious.
 ///
-/// `quench words` prints one line per word *per group*, which is the useful shape and
-/// is also a trap: `wc -l` is what anybody reaches for to count a language's words, and
-/// it is the wrong number the moment one word stands in two places. `module` is the
-/// first that does — it names the construct and the boundary the construct makes, the
-/// way `file` names a boundary — so the list is 90 lines and 89 words. Both sessions
-/// working on this repo read the line count and believed it.
+/// `quench words` prints one line per word *per group*, which is the useful shape and is
+/// also a trap: `wc -l` is what anybody reaches for to count a language's words, and it
+/// is the wrong number the moment one word stands in two places. `module` is the first
+/// that does — it names the construct and the boundary the construct makes — so the list
+/// is longer than the language is.
+///
+/// And **what is behind a namespace is not a word a reader meets**. `maths` and `text`
+/// exist so that twenty-eight trigonometry names and five text ones are not in front of
+/// everybody, and counting them in the headline would put them straight back. So `words`
+/// is the top level — what somebody has to know to read a program — and what the modules
+/// hold is said beside it rather than added to it.
 fn counted_words() -> String {
     let listed = words();
     let places = listed.lines().count();
-    let mut every: Vec<&str> =
-        listed.lines().filter_map(|line| line.split_once('\t').map(|(_, word)| word)).collect();
-    every.sort_unstable();
-    every.dedup();
-    let mut groups: Vec<&str> =
-        listed.lines().filter_map(|line| line.split_once('\t').map(|(group, _)| group)).collect();
-    groups.sort_unstable();
-    groups.dedup();
+    let held: Vec<String> =
+        quench_check::MODULES.iter().map(|module| format!("provided {module}")).collect();
+
+    let mut groups: Vec<&str> = Vec::new();
+    let (mut top, mut inside): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    for line in listed.lines() {
+        let Some((group, word)) = line.split_once('\t') else { continue };
+        groups.push(group);
+        if held.iter().any(|name| name == group) {
+            inside.push(word);
+        } else {
+            top.push(word);
+        }
+    }
+    let only = |all: &mut Vec<&str>| {
+        all.sort_unstable();
+        all.dedup();
+        all.len()
+    };
+
     format!(
-        "words\t{}\nplaces\t{places}\ngroups\t{}\n",
-        every.len(),
-        groups.len()
+        "words\t{}\nin modules\t{}\nplaces\t{places}\ngroups\t{}\n",
+        only(&mut top),
+        only(&mut inside),
+        only(&mut groups)
     )
 }
 

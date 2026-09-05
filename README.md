@@ -371,7 +371,7 @@ Both print the same thing, which is not a coincidence — it is
   substring is found by its bytes whatever a character is taken to be. Until this, the
   whole of UAX #29 was exercised by `count` alone.
 - **The maths lives behind `maths`.** `call maths.sqrt[*2.0*]`, bare because it is
-  Quench's — twenty-eight of the thirty-two provided functions are maths, and in front of
+  Quench's — the maths is twenty-eight functions, and in front of
   everything they made the language read like a calculator with a compiler attached.
   `count`, `stitch`, `is` and `as` are what is left at the top, which is the language
   rather than a library inside it. It is **not** an import and could not be: `sin` wants

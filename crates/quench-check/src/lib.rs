@@ -457,10 +457,11 @@ pub const LITERALS: &[&str] = &["true", "false"];
 
 /// Every module the language provides. Bare, because they are Quench's.
 ///
-/// Two so far. The first exists because twenty-eight of the thirty-two provided were
-/// trigonometry, so a reader of the top-level list would reasonably have concluded that
-/// Quench is a calculator with a compiler attached — and `sin` read like a keyword when
-/// it is a library.
+/// Two so far, and between them they hold all but four of the provided functions. The
+/// first exists because twenty-eight of what was then thirty-two were trigonometry, so a
+/// reader of the top-level list would reasonably have concluded that Quench is a
+/// calculator with a compiler attached — and `sin` read like a keyword when it is a
+/// library. `count`, `stitch`, `is` and `as` are what is left in front.
 ///
 /// None of these could be an `import`. `sin` wants a mantissa that grows, an exponent
 /// and Ziv's retry loop, and the language can express none of it, so every one of them

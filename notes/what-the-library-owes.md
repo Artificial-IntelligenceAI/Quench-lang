@@ -131,8 +131,9 @@ round.
 
 ## Where the maths lives — behind `maths`
 
-Twenty-eight of the thirty-two provided functions are maths. `count`, `stitch`, `is` and
-`as` are the only four that are the language rather than a library sitting inside it, and
+Twenty-eight of what were then thirty-two provided functions are maths. `count`,
+`stitch`, `is` and `as` are the only four that are the language rather than a library
+sitting inside it, and
 a reader of that list would reasonably conclude Quench is a calculator with a compiler
 attached. `sin` read like a keyword.
 
