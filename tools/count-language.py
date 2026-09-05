@@ -239,6 +239,14 @@ def main() -> int:
     for group in tokens:
         group["count"] = len(group["words"])
 
+    # What somebody has to know to use the language: its own words and its symbols,
+    # each counted once. `x` is in both lists — the word the parser recognises, and
+    # the spelling `Kind::Times` gives itself — so adding the two would count it
+    # twice, which is the `module` problem across a different boundary.
+    symbol_words = [w for g in tokens if g["id"] == "symbols" for w in g["words"]]
+    shared = [w for w in symbol_words if w in every_word]
+    to_use = list(dict.fromkeys(every_word + symbol_words))
+
     data = {
         "readFrom": {
             "commit": git("rev-parse", "--short", "HEAD"),
@@ -250,6 +258,8 @@ def main() -> int:
         "tokenKinds": len(described),
         "words": len(every_word),
         "inModules": len(held),
+        "toUse": len(to_use),
+        "bothWordAndSymbol": shared,
         "placesAWordMeansSomething": slots,
         "confirmed": len(every_word) - len(missing),
         "missing": missing,
@@ -301,6 +311,8 @@ def main() -> int:
     print(f"  reserved {data['reserved']}, symbols {symbols} of {len(described)} kinds")
     print(f"  words {len(every_word)} in front of a module, {len(held)} behind one, "
           f"{slots} places, {len(categories)} groups")
+    print(f"  to use the language: {len(to_use)} = {len(every_word)} words + {symbols} symbols"
+          + (f", less {', '.join(shared)} counted once" if shared else ""))
     if missing:
         print(f"  NOT FOUND IN THE SOURCE: {', '.join(missing)}", file=sys.stderr)
     print(f"wrote {OUT.relative_to(pathlib.Path.cwd())} ({OUT.stat().st_size} bytes)")

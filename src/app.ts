@@ -95,6 +95,9 @@ interface Counted {
   readonly symbols: number | null;
   readonly words: number;
   readonly inModules: number;
+  readonly toUse: number;
+  /** Spelled the same as a word and as a symbol, so counted once above. */
+  readonly bothWordAndSymbol: readonly string[];
   readonly confirmed: number;
   readonly missing: readonly string[];
   readonly categories: readonly Category[];
@@ -197,6 +200,17 @@ if (document.getElementById("reserved") !== null) {
     })
     .then(
       (counted) => {
+        show("to-use", counted.toUse);
+        const both = counted.bothWordAndSymbol;
+        const shared = both.length === 0
+          ? ""
+          : ` ${both.map((w) => `\u0060${w}\u0060`).join(" and ")} `
+            + `${both.length === 1 ? "is" : "are"} written both ways and counted once.`;
+        const note = document.getElementById("to-use-note");
+        if (note !== null) {
+          note.textContent = `${String(counted.words)} of the language's own words and `
+            + `${String(counted.symbols ?? 0)} symbols.${shared}`;
+        }
         show("reserved", counted.reserved);
         show("words", counted.words);
         show("symbols", counted.symbols);
