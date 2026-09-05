@@ -1492,17 +1492,17 @@ fn two_files_may_each_hold_a_name() {
 fn taking_text_apart_says_what_it_takes() {
     for (source, expected, fix) in [
         (
-            "START { print.stdout[call text.slice[*abc*]]; }",
+            "import [text];\nSTART { print.stdout[call text.slice[*abc*]]; }",
             "`text.slice` takes three things.",
             "`call text.slice['s', *2*, *4*]`",
         ),
         (
-            "START { print.stdout[call text.trim[*a*, *b*]]; }",
+            "import [text];\nSTART { print.stdout[call text.trim[*a*, *b*]]; }",
             "`text.trim` takes one thing.",
             "`call text.trim['s']`",
         ),
         (
-            "START { print.stdout[call text.has[*a*, *1*, *2*]]; }",
+            "import [text];\nSTART { print.stdout[call text.has[*a*, *1*, *2*]]; }",
             "`text.has` takes two things.",
             "`call text.has['s', 'in it']`",
         ),
@@ -1514,7 +1514,7 @@ fn taking_text_apart_says_what_it_takes() {
     }
 
     // What each takes is a real type, so the ordinary refusal does the work.
-    let wrong = errors("START { var.immut.i64 ['n'] = [*1*]; print.stdout[call text.trim['n']]; }");
+    let wrong = errors("import [text];\nSTART { var.immut.i64 ['n'] = [*1*]; print.stdout[call text.trim['n']]; }");
     assert!(wrong.contains("this is an `i64`, and it is being given to a `str`."), "{wrong}");
 }
 
@@ -1532,6 +1532,36 @@ fn a_name_that_moved_says_where_it_went_whichever_module_it_is_in() {
         assert!(rendered.contains("Error code: E0520"), "{rendered}");
     }
 
-    let missing = errors("START { print.stdout[call text.frog[*a*]]; }");
+    let missing = errors("import [text];\nSTART { print.stdout[call text.frog[*a*]]; }");
     assert!(missing.contains("`text` has nothing called `frog`."), "{missing}");
+}
+
+#[test]
+fn a_library_is_imported_whoever_wrote_it() {
+    // The same word and the same marks: a bare one is Quench's, a marked one is a file
+    // of this program. Both may sit in one file, which is what lets a program hold a
+    // file called `maths` and Quench's `maths` at once.
+    let without = errors("START { print.stdout[call maths.sqrt[*2.0*]]; }");
+    assert!(without.contains("`maths` is a module this file does not import."), "{without}");
+    assert!(without.contains("`import [maths];` at the top of this file"), "{without}");
+    assert!(without.contains("Error code: E0523"), "{without}");
+
+    assert!(check("import [maths];\nSTART { print.stdout[call maths.sqrt[*2.0*]]; }").ok());
+
+    // What is not a library is always there, and saying so is what makes the rule one
+    // rule rather than "some of the provided things need importing".
+    assert!(check("START { print.stdout[call count[str:*abc*]]; }").ok());
+
+    let unknown = errors("import [frog];\nSTART { print.stdout[str:*x*]; }");
+    assert!(unknown.contains("`frog` is not a module the language has."), "{unknown}");
+    assert!(unknown.contains("Error code: E0522"), "{unknown}");
+    // And it says the other reading, since a file of your own is a marked name.
+    assert!(unknown.contains("`import ['frog'];`"), "{unknown}");
+
+    let twice = errors("import [maths];\nimport [maths];\nSTART { print.stdout[str:*x*]; }");
+    assert!(twice.contains("`maths` is imported twice."), "{twice}");
+
+    // An import nothing uses is not refused: it costs nothing, and refusing it would
+    // stop somebody writing the import before the call.
+    assert!(check("import [maths];\nimport [text];\nSTART { print.stdout[str:*x*]; }").ok());
 }

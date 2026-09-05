@@ -1,3 +1,5 @@
+import [text];
+
 # Taking text apart. Five functions behind `text`, bare because they are Quench's --
 # the same namespace argument `maths` got, for the same reason.
 #

@@ -932,6 +932,7 @@ pub fn check_across(source: &str, parts: &[Part]) -> Checked {
         returns: None,
         at_file: String::new(),
         imports: HashMap::new(),
+        libraries: HashMap::new(),
         at_module: Vec::new(),
         modules: HashMap::new(),
         hole: None,
@@ -963,10 +964,10 @@ pub fn check_across(source: &str, parts: &[Part]) -> Checked {
         checker.imports.entry(part.name.clone()).or_default().push(part.name.clone());
     }
     for (file, at, item) in &flat {
-        if let ast::Item::Import { name, span, .. } = item {
+        if matches!(item, ast::Item::Import { .. }) {
             checker.at_file.clone_from(file);
             checker.at_module.clone_from(at);
-            checker.imported(*name, *span, parts);
+            checker.imported(item, parts);
         }
     }
 
@@ -1061,6 +1062,9 @@ struct Checker<'a> {
     at_file: String,
     /// Which file may name which, from `import`. A file always names itself.
     imports: HashMap<String, Vec<String>>,
+    /// Which of the language's own modules each file said it uses. The same `import`,
+    /// told apart by the same marks: a bare word there is Quench's.
+    libraries: HashMap<String, Vec<String>>,
     /// Which module is being read or checked, outermost first, empty at the top of a
     /// file. A declaration's key is this joined with its name, and a name written
     /// without a path is looked for here first and then outward.
@@ -1162,7 +1166,14 @@ impl<'a> Checker<'a> {
     /// What a program *is* comes from `[program] files`, so this cannot add a file. What
     /// it does is say which of them this file uses, which is a use-site record of where
     /// a name came from — the same argument that made `call` mandatory.
-    fn imported(&mut self, name: Span, span: Span, parts: &[Part]) {
+    fn imported(&mut self, item: &ast::Item, parts: &[Part]) {
+        let ast::Item::Import { name, marked, span, .. } = item else {
+            unreachable!("only an import is imported");
+        };
+        let (name, span) = (*name, *span);
+        if !marked {
+            return self.library(name, span);
+        }
         if !self.at_module.is_empty() {
             self.errors.push(
                 Diagnostic::new("E0514", "an `import` belongs to a file, not to a module inside one.")
@@ -1208,6 +1219,45 @@ impl<'a> Checker<'a> {
                 Diagnostic::new("E0517", format!("`'{wanted}'` is imported twice."))
                     .primary(span, "here")
                     .rule("one import makes a file nameable, and a second says the same thing again")
+                    .fix("remove one of them"),
+            );
+            return;
+        }
+        already.push(wanted);
+    }
+
+    /// `import [maths];` — one of the language's own modules.
+    ///
+    /// The same word and the same marks rule as a file's, because it is the same idea: a
+    /// **library** is imported, whoever wrote it. What the top level holds — `count`,
+    /// `stitch`, `is`, `as` — is the language rather than a library, and is always there
+    /// the way `if` and `i64` are.
+    ///
+    /// An import nothing uses is not refused. It costs nothing: a module is host calls
+    /// already compiled into every engine, so importing one adds no byte to the artefact
+    /// and no work to the build. Go refuses an unused import because its imports really
+    /// do drag a package into the build; Rust, whose `use` is aliasing like this one,
+    /// only warns — and Quench has no warning, every diagnostic being a refusal. So the
+    /// choice was refuse or nothing, and refusing would stop somebody writing the import
+    /// before the call, which is how a file gets written.
+    fn library(&mut self, name: Span, span: Span) {
+        let wanted = self.text(name).to_string();
+        if !MODULES.contains(&wanted.as_str()) {
+            self.errors.push(
+                Diagnostic::new("E0522", format!("`{wanted}` is not a module the language has."))
+                    .primary(name, "here")
+                    .rule("a bare word in an import is one of Quench's own modules")
+                    .tip(format!("they are {}. A file of your own is a marked name instead — `import ['{wanted}'];`.", listed(MODULES)))
+                    .fix("check the spelling, or put marks round it"),
+            );
+            return;
+        }
+        let already = self.libraries.entry(self.at_file.clone()).or_default();
+        if already.contains(&wanted) {
+            self.errors.push(
+                Diagnostic::new("E0517", format!("`{wanted}` is imported twice."))
+                    .primary(span, "here")
+                    .rule("one import makes a module nameable, and a second says the same thing again")
                     .fix("remove one of them"),
             );
             return;
@@ -3313,6 +3363,25 @@ impl<'a> Checker<'a> {
         let (name, provides) = match top {
             Some((_, said, provides)) => ((*said).to_string(), provides),
             None if MODULES.contains(&word.as_str()) => {
+                let used = self
+                    .libraries
+                    .get(&self.at_file)
+                    .is_some_and(|all| all.iter().any(|module| *module == word));
+                if !used {
+                    let always: Vec<&str> = PROVIDED
+                        .iter()
+                        .filter(|(module, _, _)| module.is_empty())
+                        .map(|(_, said, _)| *said)
+                        .collect();
+                    self.errors.push(
+                        Diagnostic::new("E0523", format!("`{word}` is a module this file does not import."))
+                            .primary(call.name, "here")
+                            .rule("a library is imported before it is named, whether Quench wrote it or you did")
+                            .tip(format!("what is not a library is always there: {} are the language itself.", listed(&always)))
+                            .fix(format!("`import [{word}];` at the top of this file")),
+                    );
+                    return None;
+                }
                 let Some(link) = call.chain.first() else {
                     self.errors.push(
                         Diagnostic::new("E0519", format!("`{word}` is a module, and this names nothing in it."))

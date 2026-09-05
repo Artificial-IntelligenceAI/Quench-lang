@@ -146,13 +146,24 @@ Bare, because it is Quench's, and the marks rule tells the two apart the way it 
 has. It cost five characters at every use site and it was the last cheap moment to spend
 them.
 
-**It is not an import, and could not be.** None of this can be written in Quench: `sin`
-wants a mantissa that grows, an exponent, and Ziv's retry loop, and the language can
-express none of it. So they are host calls whichever side of a namespace they sit on, and
-a host call is a runtime service every engine must implement. Putting them behind a name
-removes nothing from the interpreter, the Dev JIT or the LLVM half. That cost is fixed
-and paid; what a namespace changes is what a reader has to look at, which was the whole
-complaint.
+**It is an import, and this note twice said it could not be.**
+
+```quench
+import [maths];
+```
+
+The first version of this section said the maths would go behind imports *when there are
+imports*. The second said it is "not an import and could not be", on the grounds that an
+import names a *file* and the maths is not one. Both were reading `import` as being about
+files. It is about **libraries**, and the marks already tell a file of yours from a module
+of Quench's — so there is one rule and the maths is on the ordinary side of it.
+
+What remains true is why it is not a file: none of this can be written in Quench. `sin`
+wants a mantissa that grows, an exponent and Ziv's retry loop, so every one of them is a
+host call whichever side of an import it sits on, and putting them behind a name removes
+nothing from the interpreter, the Dev JIT or the LLVM half. That cost is fixed and paid.
+What the namespace changes is what a reader has to look at, and what the import adds is
+that a file says at its top what it touches.
 
 ### This note said the opposite, and was wrong about which cost mattered
 

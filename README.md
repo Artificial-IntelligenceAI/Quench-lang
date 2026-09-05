@@ -370,6 +370,12 @@ Both print the same thing, which is not a coincidence — it is
   of those are about a *position*, which is exactly what that setting decides, while a
   substring is found by its bytes whatever a character is taken to be. Until this, the
   whole of UAX #29 was exercised by `count` alone.
+- **A library is imported, whoever wrote it.** `import ['maths'];` is a file of your
+  program and `import [maths];` is one of Quench's own modules — the same marks doing the
+  same job, so both may sit in one file. What is *not* a library is the top level:
+  `count`, `stitch`, `is` and `as` are the language and are always there, the way `if`
+  and `i64` are. An import nothing uses is not refused, because it costs nothing and
+  refusing it would stop you writing the import before the call.
 - **The maths lives behind `maths`.** `call maths.sqrt[*2.0*]`, bare because it is
   Quench's — the maths is twenty-eight functions, and in front of
   everything they made the language read like a calculator with a compiler attached.

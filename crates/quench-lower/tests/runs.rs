@@ -2005,6 +2005,7 @@ fn count_takes_an_array_or_a_piece_of_text_and_nothing_else() {
 fn the_maths_ieee_requires_is_the_maths_there_is() {
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b64 ['two'] = [*2.0*];
     var.immut.b64 ['half'] = [*0.5*];
@@ -2032,7 +2033,7 @@ fn remainder_takes_the_nearest_quotient_and_mod_takes_the_near_one() {
     // the *nearest* integer, so what is left is never more than half the divisor and can
     // come out with the opposite sign to what went in.
     assert_eq!(
-        said("START {
+        said("import [maths];\nSTART {
     var.immut.b64 ['five'] = [*5.0*];
     var.immut.b64 ['seven'] = [*7.0*];
     var.immut.b64 ['two'] = [*2.0*];
@@ -2055,6 +2056,7 @@ fn round_breaks_a_tie_to_the_even_one() {
     // engines at once — which is the one kind of wrong the oracle cannot see.
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b64 ['a'] = [*2.5*];
     var.immut.b64 ['b'] = [*3.5*];
@@ -2071,6 +2073,7 @@ START {
 fn the_maths_works_on_every_width_and_keeps_it() {
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b32 ['a'] = [*2.0*];
     var.immut.b16 ['b'] = [*2.0*];
@@ -2086,15 +2089,15 @@ START {
 fn the_maths_takes_floats_of_one_width_and_says_so() {
     for (source, expected) in [
         (
-            "START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['x'] = [call maths.sqrt['n']]; print.stdout['x']; }",
+            "import [maths];\nSTART { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['x'] = [call maths.sqrt['n']]; print.stdout['x']; }",
             "works on binary floats",
         ),
         (
-            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b32 ['b'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.min['a', 'b']]; print.stdout['x']; }",
+            "import [maths];\nSTART { var.immut.b64 ['a'] = [*1.0*]; var.immut.b32 ['b'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.min['a', 'b']]; print.stdout['x']; }",
             "takes one width, and was given two",
         ),
         (
-            "START { var.immut.b64 ['a'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.sqrt['a', 'a']]; print.stdout['x']; }",
+            "import [maths];\nSTART { var.immut.b64 ['a'] = [*1.0*]; var.immut.b64 ['x'] = [call maths.sqrt['a', 'a']]; print.stdout['x']; }",
             "`sqrt` takes one number",
         ),
     ] {
@@ -2125,6 +2128,7 @@ fn the_maths_ieee_only_recommends_is_worked_out_rather_than_asked_for() {
     // whatever width the particular answer needs, and rounds once.
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b64 ['one'] = [*1.0*];
     var.immut.b64 ['ten'] = [*10.0*];
@@ -2143,13 +2147,13 @@ START {
 
 #[test]
 fn the_recommended_maths_is_a_b64_and_says_why() {
-    let rendered = report("START { var.immut.b32 ['x'] = [*2.0*]; var.immut.b32 ['y'] = [call maths.exp['x']]; print.stdout['y']; }");
+    let rendered = report("import [maths];\nSTART { var.immut.b32 ['x'] = [*2.0*]; var.immut.b32 ['y'] = [call maths.exp['x']]; print.stdout['y']; }");
     assert!(rendered.contains("`exp` works on a `b64`"), "{rendered}");
     assert!(rendered.contains("would round twice"), "{rendered}");
     assert!(rendered.contains("Error code: E0495"), "{rendered}");
 
     // And on something that is not a float at all, the reason is the other one.
-    let whole = report("START { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call maths.ln['n']]; print.stdout['y']; }");
+    let whole = report("import [maths];\nSTART { var.immut.i64 ['n'] = [*2*]; var.immut.b64 ['y'] = [call maths.ln['n']]; print.stdout['y']; }");
     assert!(whole.contains("`ln` works on a `b64`"), "{whole}");
     assert!(whole.contains("because the standard settles those"), "{whole}");
 }
@@ -2161,6 +2165,7 @@ fn the_trig_reduces_an_argument_no_library_would_dare_to() {
     // is asked for as many bits as the argument has exponent.
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b64 ['one'] = [*1.0*];
     var.immut.b64 ['huge'] = [*1e300*];
@@ -2183,6 +2188,7 @@ START {
 fn the_inverse_and_hyperbolic_functions_are_here_too() {
     assert_eq!(
         said("\
+import [maths];
 START {
     var.immut.b64 ['half'] = [*0.5*];
     var.immut.b64 ['one'] = [*1.0*];
@@ -2205,6 +2211,7 @@ fn what_min_and_max_do_with_a_not_a_number_is_a_setting() {
     // Both are somebody's idea of right — C's `fmin` skips, Java's `Math.min` spreads —
     // so it is a key rather than a decision.
     let source = "\
+import [maths];
 START {
     var.immut.b64 ['zero'] = [*0.0*];
     var.immut.b64 ['nan'] = ['zero' / 'zero'];
@@ -2220,6 +2227,7 @@ START {
 
     // And with no not-a-number in sight the two agree, which is most programs.
     let ordinary = "\
+import [maths];
 START {
     var.immut.b64 ['a'] = [*2.0*];
     var.immut.b64 ['b'] = [*5.0*];
@@ -2588,6 +2596,7 @@ START {
 #[test]
 fn text_can_be_taken_apart() {
     let source = "\
+import [text];
 START {
     var.immut.str ['s'] = [*hello, world*];
     print.stdout[call text.slice['s', *1*, *5*] \\n];
@@ -2606,6 +2615,7 @@ fn a_backwards_slice_is_empty_the_way_a_backwards_range_runs_no_times() {
     // Not a special case: `loop.temp.range.i64 ['i'] = [*5*, *1*]` runs zero times, and
     // a piece from a later position to an earlier one is the same rule.
     let source = "\
+import [text];
 START {
     var.mut.i64 ['times'] = [*0*];
     loop.temp.range.i64 ['i'] = [*5*, *1*] { set ['times'] = ['times' + *1*]; }
@@ -2622,20 +2632,20 @@ fn taking_text_apart_stops_where_it_cannot_answer() {
     // Each is the refusal its neighbour already had: a position outside the text is an
     // index off the end, and a needle that is not there is what `has` exists to ask.
     assert_eq!(
-        ended("START { print.stdout[call text.slice[*abc*, *1*, *9*]]; }"),
+        ended("import [text];\nSTART { print.stdout[call text.slice[*abc*, *1*, *9*]]; }"),
         Outcome::Trapped(Trap::OutsideTheText)
     );
     assert_eq!(
-        ended("START { print.stdout[call text.slice[*abc*, *0*, *1*]]; }"),
+        ended("import [text];\nSTART { print.stdout[call text.slice[*abc*, *0*, *1*]]; }"),
         Outcome::Trapped(Trap::OutsideTheText),
         "counted from one, so nought is no character"
     );
     assert_eq!(
-        ended("START { print.stdout[call text.find[*abc*, *z*]]; }"),
+        ended("import [text];\nSTART { print.stdout[call text.find[*abc*, *z*]]; }"),
         Outcome::Trapped(Trap::NotInTheText)
     );
     assert_eq!(
-        ended("START { var.immut.arr.str (grow) ['b'] = [call text.split[*abc*, **]]; print.stdout['b']; }"),
+        ended("import [text];\nSTART { var.immut.arr.str (grow) ['b'] = [call text.split[*abc*, **]]; print.stdout['b']; }"),
         Outcome::Trapped(Trap::NoSeparator)
     );
 }
@@ -2648,7 +2658,7 @@ fn a_position_is_whatever_a_character_is() {
     let with = |characters| {
         let settings = quench_conf::Settings { characters, ..quench_conf::Settings::default() };
         let source = format!(
-            "START {{\n    var.immut.str ['s'] = [*a{}b*];\n    print.stdout[call count['s'] str:* * call text.find['s', *b*]];\n}}\n",
+            "import [text];\nSTART {{\n    var.immut.str ['s'] = [*a{}b*];\n    print.stdout[call count['s'] str:* * call text.find['s', *b*]];\n}}\n",
             "e\u{301}"
         );
         let out = quench_lower::lower_under(&source, settings);

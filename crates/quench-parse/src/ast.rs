@@ -34,12 +34,16 @@ pub enum Item {
     Func(Func),
     /// `module ['maths'] { … }` — a named box of declarations, which may hold others.
     Module(Module),
-    /// `import ['maths'];` — another file of this program, made nameable here.
+    /// `import ['maths'];` or `import [maths];` — a library this file uses.
     ///
-    /// The span is the name. Which files a program *is* comes from `[program] files` in
-    /// `QNL-Config.toml`; this says which of them this file uses, so a reader sees where
-    /// a name came from without leaving the file.
-    Import { word: Span, name: Span, span: Span },
+    /// The same marks rule as everywhere: a **marked** name is another file of this
+    /// program, and a **bare** word is a module the language provides. One rule rather
+    /// than two, because a library is imported whoever wrote it — and it is what lets a
+    /// program hold a file called `maths` and Quench's `maths` at once.
+    ///
+    /// Which files a program *is* comes from `[program.files]`; this says which of them
+    /// this file uses, so a reader sees at the top what the file touches.
+    Import { word: Span, name: Span, marked: bool, span: Span },
 }
 
 /// `module ['maths'] { … }`

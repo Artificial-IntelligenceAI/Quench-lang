@@ -182,15 +182,32 @@ maths = "arithmetic.qnl"
 text = "text.qnl"
 ```
 
-**What a file uses** comes from the file:
+**What a file uses** comes from the file — and the same marks rule tells a file of your
+program from a module the language provides:
 
 ```quench
-import ['maths'];
+import ['maths'];      # marked: a file of this program
+import [maths];        # bare: Quench's own module
 
 START {
     print.stdout[call 'maths'.'sin'[*8.0*] \n];
+    print.stdout[call maths.sqrt[*16.0*] \n];
 }
 ```
+
+**A library is imported, whoever wrote it.** That is one rule rather than two, and it is
+the correction to a weaker reading this note used to carry: that `import` names a *file*,
+and Quench's own modules therefore could not be imported at all. They can, because what
+is being named is a **library** — and the top level is what is left over, which is the
+language itself: `count`, `stitch`, `is` and `as`, always there the way `if` and `i64`
+are. Nobody imports `print`.
+
+An import nothing uses is **not** refused. It costs nothing — a module is host calls
+already compiled into every engine, and a file is in the program because the manifest
+said so — and refusing it would stop somebody writing the import before the call, which
+is how a file gets written. Go refuses one because its imports really do drag a package
+into the build; Rust, whose `use` is aliasing like this, only warns; and Quench has no
+warning, every diagnostic being a refusal.
 
 Two mechanisms deliberately, and the split is the whole of the decision: the manifest is
 the authority on *membership*, and `import` is a use-site record of *where a name came

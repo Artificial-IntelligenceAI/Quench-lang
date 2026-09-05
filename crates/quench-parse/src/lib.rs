@@ -248,10 +248,22 @@ impl<'a> Parser<'a> {
     fn import(&mut self) -> Option<ast::Item> {
         let word = self.bump().span;
         self.expect(Kind::OpenList, "an import")?;
-        let name = self.expect(Kind::Name, "an import")?;
+        let named = self.peek();
+        if !matches!(named.kind, Kind::Name | Kind::Word) {
+            self.errors.push(
+                Diagnostic::new("E0111", "an import says what it imports.")
+                    .primary(named.span, format!("found {}", named.kind.describe()))
+                    .rule("a marked name is another file of this program, and a bare word is a module the language provides")
+                    .tip("which files there are to import is `[program.files]` in `QNL-Config.toml`.")
+                    .fix("`import ['maths'];` for a file, `import [maths];` for one of Quench's"),
+            );
+            return None;
+        }
+        let marked = named.kind == Kind::Name;
+        let name = self.bump().span;
         self.expect(Kind::CloseList, "an import")?;
         let end = self.expect(Kind::Semicolon, "an import")?;
-        Some(ast::Item::Import { word, name, span: word.to(end) })
+        Some(ast::Item::Import { word, name, marked, span: word.to(end) })
     }
 
     /// `module ['maths'] { … }`
